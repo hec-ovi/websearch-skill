@@ -36,6 +36,8 @@ from .layer3_agentio import (
     AgentSearchRequest,
     build_agent_io,
 )
+from .tool_arxiv import ARXIV_CONTRACT_VERSION, ArxivSearchRequest, build_arxiv_tool
+from .tool_github import GITHUB_CONTRACT_VERSION, GithubSearchRequest, build_github_tool
 
 
 def _add_search_command(sub: Any) -> None:
@@ -65,6 +67,13 @@ def _add_search_command(sub: Any) -> None:
         help="SearXNG base URL (or set WEBSEARCH_SEARXNG_URL).",
     )
     sp.add_argument("--no-ddgs", action="store_true", help="Disable the ddgs fallback engine.")
+    sp.add_argument(
+        "--ddgs-backends",
+        help="Which keyless engines ddgs queries, comma-separated (default auto = all). "
+        "Engines include google, brave, duckduckgo, yandex, yahoo, startpage, mojeek, "
+        "wikipedia (default); bing and others are selectable by name. "
+        "Example: --ddgs-backends google,brave,mojeek",
+    )
     sp.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
 
 
@@ -98,7 +107,11 @@ def _cmd_search(args: argparse.Namespace) -> int:
             print(f"error: {errors.INVALID_REQUEST}: invalid search request", file=sys.stderr)
         return 1
 
-    router = build_router(searxng_url=args.searxng_url, enable_ddgs=not args.no_ddgs)
+    router = build_router(
+        searxng_url=args.searxng_url,
+        enable_ddgs=not args.no_ddgs,
+        ddgs_backend=args.ddgs_backends or "auto",
+    )
     envelope = router.search(request)
     payload = envelope.model_dump(mode="json")
 
@@ -535,6 +548,13 @@ def _add_websearch_command(sub: Any) -> None:
     wp.add_argument("--offset", type=int, default=0)
     wp.add_argument("--searxng-url", default=os.environ.get("WEBSEARCH_SEARXNG_URL"))
     wp.add_argument("--no-ddgs", action="store_true", help="Disable the ddgs fallback engine.")
+    wp.add_argument(
+        "--ddgs-backends",
+        help="Which keyless engines ddgs queries, comma-separated (default auto = all). "
+        "Engines include google, brave, duckduckgo, yandex, yahoo, startpage, mojeek, "
+        "wikipedia (default); bing and others are selectable by name. "
+        "Example: --ddgs-backends google,brave,mojeek",
+    )
     wp.add_argument("--json", action="store_true", help="Emit the raw agentio Envelope.")
 
 
@@ -561,7 +581,11 @@ def _cmd_websearch(args: argparse.Namespace) -> int:
             layer="agentio",
             as_json=args.json,
         )
-    aio = build_agent_io(searxng_url=args.searxng_url, enable_ddgs=not args.no_ddgs)
+    aio = build_agent_io(
+        searxng_url=args.searxng_url,
+        enable_ddgs=not args.no_ddgs,
+        ddgs_backend=args.ddgs_backends or "auto",
+    )
     env = aio.web_search(req)
     payload = env.model_dump(mode="json")
     if args.json:
@@ -722,6 +746,161 @@ def _print_agent_pages_human(env: dict, quiet: bool = False) -> None:
         print(f"\n[warning] {w}", file=sys.stderr)
 
 
+# --- Extra keyless tools: arxiv (and github), standalone over the same Envelope ------
+
+
+def _add_arxiv_command(sub: Any) -> None:
+    ap = sub.add_parser(
+        "arxiv",
+        help="Search arXiv papers (keyless, no API key). Structured paper metadata + "
+        "abstract/PDF links, which general web search does not give you.",
+    )
+    ap.add_argument("query")
+    ap.add_argument(
+        "--field",
+        choices=["all", "title", "author", "abstract"],
+        default="all",
+        help="Which arXiv field to match.",
+    )
+    ap.add_argument("--max-results", type=int, default=10, help="1..50.")
+    ap.add_argument("--start", type=int, default=0, help="0-based offset for paging.")
+    ap.add_argument(
+        "--sort-by",
+        choices=["relevance", "lastUpdatedDate", "submittedDate"],
+        default="relevance",
+    )
+    ap.add_argument("--sort-order", choices=["ascending", "descending"], default="descending")
+    ap.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
+
+
+def _cmd_arxiv(args: argparse.Namespace) -> int:
+    try:
+        req = ArxivSearchRequest(
+            query=args.query,
+            field=args.field,
+            max_results=args.max_results,
+            start=args.start,
+            sort_by=args.sort_by,
+            sort_order=args.sort_order,
+        )
+    except ValidationError:
+        return _emit_error(
+            ARXIV_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message="invalid arxiv request (check --max-results is 1..50).",
+            layer="arxiv",
+            as_json=args.json,
+        )
+    env = build_arxiv_tool().search(req)
+    payload = env.model_dump(mode="json")
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        _print_arxiv_human(payload)
+    return 0 if env.ok else 1
+
+
+def _print_arxiv_human(env: dict) -> None:
+    if not env.get("ok"):
+        err = env.get("error") or {}
+        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+        return
+    data = env.get("data") or {}
+    papers = data.get("papers", [])
+    total = data.get("total_results")
+    head = f"{len(papers)} paper(s)" + (f" of ~{total}" if total is not None else "")
+    print(f"{head} for: {data.get('query')}")
+    for i, p in enumerate(papers, 1):
+        authors = list(p.get("authors", []))
+        shown = ", ".join(authors[:4]) + (", et al." if len(authors) > 4 else "")
+        print(f"\n{i}. {p.get('title')}")
+        print(f"   {p.get('abs_url')}")
+        meta = [x for x in (p.get("primary_category"), (p.get("published") or "")[:10]) if x]
+        if meta:
+            print("   " + "  ".join(meta))
+        if shown:
+            print(f"   {shown}")
+        summary = " ".join((p.get("summary") or "").split())
+        if summary:
+            print(f"   {summary[:240]}")
+    for w in data.get("warnings", []):
+        print(f"\n[warning] {w}", file=sys.stderr)
+
+
+def _add_github_command(sub: Any) -> None:
+    gp = sub.add_parser(
+        "github",
+        help="Search GitHub repositories (keyless, no token). Typed fields (stars, "
+        "language, topics) you can sort on, which general web search cannot. "
+        "Unauthenticated search is about 10 requests/min.",
+    )
+    gp.add_argument("query")
+    gp.add_argument("--language", help="Filter to a language (appended as language:X).")
+    gp.add_argument(
+        "--sort",
+        choices=["best-match", "stars", "forks", "updated"],
+        default="stars",
+        help="best-match uses GitHub's relevance ranking.",
+    )
+    gp.add_argument("--order", choices=["asc", "desc"], default="desc")
+    gp.add_argument("--per-page", type=int, default=10, help="1..100.")
+    gp.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
+
+
+def _cmd_github(args: argparse.Namespace) -> int:
+    try:
+        req = GithubSearchRequest(
+            query=args.query,
+            language=args.language,
+            sort=args.sort,
+            order=args.order,
+            per_page=args.per_page,
+        )
+    except ValidationError:
+        return _emit_error(
+            GITHUB_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message="invalid github request (check --per-page is 1..100).",
+            layer="github",
+            as_json=args.json,
+        )
+    env = build_github_tool().search(req)
+    payload = env.model_dump(mode="json")
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        _print_github_human(payload)
+    return 0 if env.ok else 1
+
+
+def _print_github_human(env: dict) -> None:
+    if not env.get("ok"):
+        err = env.get("error") or {}
+        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+        return
+    data = env.get("data") or {}
+    repos = data.get("repos", [])
+    total = data.get("total_count")
+    head = f"{len(repos)} repo(s)" + (f" of {total}" if total is not None else "")
+    print(f"{head} for: {data.get('query')}")
+    for i, r in enumerate(repos, 1):
+        print(f"\n{i}. {r.get('full_name')}")
+        print(f"   {r.get('html_url')}")
+        facts = [f"stars={r.get('stars')}"]
+        if r.get("language"):
+            facts.append(str(r["language"]))
+        if r.get("updated_at"):
+            facts.append("updated " + str(r["updated_at"])[:10])
+        print("   " + "  ".join(facts))
+        desc = (r.get("description") or "").strip()
+        if desc:
+            print(f"   {desc[:200]}")
+    if data.get("incomplete_results"):
+        print("\n[warning] GitHub reported incomplete_results (partial)", file=sys.stderr)
+    for w in data.get("warnings", []):
+        print(f"\n[warning] {w}", file=sys.stderr)
+
+
 def _add_mcp_command(sub: Any) -> None:
     sub.add_parser(
         "mcp",
@@ -764,6 +943,8 @@ def main(argv: list[str] | None = None) -> int:
     _add_websearch_command(sub)
     _add_webfetch_command(sub)
     _add_webopen_command(sub)
+    _add_arxiv_command(sub)
+    _add_github_command(sub)
     _add_mcp_command(sub)
     args = parser.parse_args(argv)
     dispatch = {
@@ -773,6 +954,8 @@ def main(argv: list[str] | None = None) -> int:
         "web-search": _cmd_websearch,
         "web-fetch": _cmd_webfetch,
         "web-open": _cmd_webopen,
+        "arxiv": _cmd_arxiv,
+        "github": _cmd_github,
         "mcp": _cmd_mcp,
     }
     handler = dispatch.get(args.command)

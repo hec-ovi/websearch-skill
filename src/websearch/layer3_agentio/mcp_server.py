@@ -25,6 +25,13 @@ from fastmcp import FastMCP
 from .. import errors
 from ..envelope import error_envelope
 from ..layer2_format import StoreConfig
+from ..tool_arxiv import ARXIV_CONTRACT_VERSION, ArxivSearchRequest, ArxivTool, build_arxiv_tool
+from ..tool_github import (
+    GITHUB_CONTRACT_VERSION,
+    GithubSearchRequest,
+    GithubTool,
+    build_github_tool,
+)
 from .facade import AgentIO, build_agent_io
 from .models import (
     AGENTIO_CONTRACT_VERSION,
@@ -36,12 +43,40 @@ from .models import (
 mcp = FastMCP("websearch")
 
 _AGENT: AgentIO | None = None
+_ARXIV: ArxivTool | None = None
+_GITHUB: GithubTool | None = None
 
 
 def set_agent(agent: AgentIO) -> None:
     """Inject the AgentIO singleton (used by tests to stand in for the network)."""
     global _AGENT
     _AGENT = agent
+
+
+def set_arxiv_tool(tool: ArxivTool) -> None:
+    """Inject the arXiv tool (tests stand in for the network)."""
+    global _ARXIV
+    _ARXIV = tool
+
+
+def set_github_tool(tool: GithubTool) -> None:
+    """Inject the GitHub tool (tests stand in for the network)."""
+    global _GITHUB
+    _GITHUB = tool
+
+
+def _arxiv() -> ArxivTool:
+    global _ARXIV
+    if _ARXIV is None:
+        _ARXIV = build_arxiv_tool()
+    return _ARXIV
+
+
+def _github() -> GithubTool:
+    global _GITHUB
+    if _GITHUB is None:
+        _GITHUB = build_github_tool()
+    return _GITHUB
 
 
 def _agent() -> AgentIO:
@@ -51,6 +86,7 @@ def _agent() -> AgentIO:
     if _AGENT is None:
         _AGENT = build_agent_io(
             searxng_url=os.environ.get("WEBSEARCH_SEARXNG_URL"),
+            ddgs_backend=os.environ.get("WEBSEARCH_DDGS_BACKENDS") or "auto",
             store_config=StoreConfig(persist_path=os.environ.get("WEBSEARCH_PERSIST_PATH")),
         )
     return _AGENT
@@ -216,6 +252,112 @@ def web_open(
     except Exception as exc:
         return _invalid(f"invalid web_open arguments: {exc}", backend="store")
     return _agent().web_open(req).model_dump(mode="json")
+
+
+@mcp.tool
+def arxiv_search(
+    query: str,
+    field: str = "all",
+    max_results: int = 10,
+    start: int = 0,
+    sort_by: str = "relevance",
+    sort_order: str = "descending",
+) -> dict:
+    """Search arXiv for scientific papers (keyless) and return structured metadata.
+
+    Use this when the user wants academic papers, preprints, or research on a topic, or
+    asks for arXiv specifically. Unlike a general web search, this returns typed fields
+    you can reason over: title, authors, the abstract, categories, dates, and direct
+    abstract/PDF links. It is the right tool for "find recent papers on X".
+
+    Args:
+        query: The search terms, e.g. "diffusion models for protein design".
+        field: Which field to match: "all" (default), "title", "author", or "abstract".
+        max_results: How many papers to return, 1..50 (default 10).
+        start: 0-based offset for paging through more results (default 0).
+        sort_by: "relevance" (default), "lastUpdatedDate", or "submittedDate" (newest).
+        sort_order: "descending" (default) or "ascending".
+
+    Returns:
+        An Envelope whose data has ``query`` (the arXiv search_query), ``total_results``,
+        and ``papers`` (each: arxiv_id, title, authors, summary, published, updated,
+        abs_url, pdf_url, primary_category, categories).
+
+    Examples:
+        arxiv_search(query="mixture of experts scaling laws", max_results=5)
+        arxiv_search(query="Vaswani", field="author", sort_by="submittedDate")
+    """
+    try:
+        req = ArxivSearchRequest(
+            query=query,
+            field=field,  # type: ignore[arg-type]
+            max_results=max_results,
+            start=start,
+            sort_by=sort_by,  # type: ignore[arg-type]
+            sort_order=sort_order,  # type: ignore[arg-type]
+        )
+    except Exception as exc:
+        return error_envelope(
+            ARXIV_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=f"invalid arxiv_search arguments: {exc}",
+            retriable=False,
+            layer="arxiv",
+            backend="arxiv-api",
+        ).model_dump(mode="json")
+    return _arxiv().search(req).model_dump(mode="json")
+
+
+@mcp.tool
+def github_search(
+    query: str,
+    language: str | None = None,
+    sort: str = "stars",
+    order: str = "desc",
+    per_page: int = 10,
+) -> dict:
+    """Search GitHub repositories (keyless) and return structured repo metadata.
+
+    Use this when the user wants to find code projects, libraries, or tools on GitHub, or
+    asks "what repos do X". Unlike a general web search, this returns typed fields you can
+    sort and filter on: full_name, stars, language, topics, and update time. Repository
+    search only (code search needs a token). Unauthenticated search is about 10
+    requests/min; on a rate limit it returns a clean ``rate_limited`` error.
+
+    Args:
+        query: The search terms, e.g. "vector database" or "terminal markdown renderer".
+        language: Restrict to a language, e.g. "Rust" (appended as language:Rust).
+        sort: "stars" (default), "forks", "updated", or "best-match" (GitHub relevance).
+        order: "desc" (default) or "asc".
+        per_page: How many repos to return, 1..100 (default 10).
+
+    Returns:
+        An Envelope whose data has ``query``, ``total_count``, ``incomplete_results``, and
+        ``repos`` (each: full_name, html_url, description, stars, forks, language, topics,
+        owner, updated_at, license).
+
+    Examples:
+        github_search(query="llm agent framework", language="Python")
+        github_search(query="static site generator", sort="stars", per_page=5)
+    """
+    try:
+        req = GithubSearchRequest(
+            query=query,
+            language=language,
+            sort=sort,  # type: ignore[arg-type]
+            order=order,  # type: ignore[arg-type]
+            per_page=per_page,
+        )
+    except Exception as exc:
+        return error_envelope(
+            GITHUB_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=f"invalid github_search arguments: {exc}",
+            retriable=False,
+            layer="github",
+            backend="github-api",
+        ).model_dump(mode="json")
+    return _github().search(req).model_dump(mode="json")
 
 
 def run() -> None:

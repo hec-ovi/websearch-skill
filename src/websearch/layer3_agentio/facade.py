@@ -79,9 +79,16 @@ class AgentIO:
     # --- web_search ----------------------------------------------------------------
 
     def web_search(self, req: AgentSearchRequest) -> Envelope:
+        # When a site is requested, push a `site:` operator into the query so the engine
+        # itself restricts (a post-filter alone only keeps whatever the engine happened to
+        # return, which is unreliable). Keep include_sites as a belt-and-suspenders filter.
+        query = req.query
+        site = req.site.strip().lstrip(".") if req.site else None
+        if site and f"site:{site}".lower() not in query.lower():
+            query = f"{query} site:{site}"
         try:
             search_req = SearchRequest(
-                query=req.query,
+                query=query,
                 count=max(req.max_results, 10),
                 offset=req.offset,
                 country=req.country,
@@ -89,7 +96,7 @@ class AgentIO:
                 safesearch=req.safesearch,
                 freshness=req.freshness,
                 max_total_results=req.max_results,
-                include_sites=[req.site] if req.site else [],
+                include_sites=[site] if site else [],
                 engines=req.engines,
             )
         except ValidationError:
@@ -421,6 +428,7 @@ def build_agent_io(
     searxng_url: str | None = None,
     enable_ddgs: bool = True,
     ddgs_factory=None,
+    ddgs_backend: str = "auto",
     enable_curl_cffi: bool = True,
     curl_cffi_getter=None,
     store_config: StoreConfig | None = None,
@@ -432,9 +440,13 @@ def build_agent_io(
 
     Tests inject ``router``/``pipeline`` (or the ``*_factory``/``*_getter`` boundary
     fakes) to stand in for the network; production passes deployment config (searxng_url).
+    ``ddgs_backend`` selects which keyless engines ddgs queries (e.g. "google,brave").
     """
     router = router or build_router(
-        searxng_url=searxng_url, enable_ddgs=enable_ddgs, ddgs_factory=ddgs_factory
+        searxng_url=searxng_url,
+        enable_ddgs=enable_ddgs,
+        ddgs_factory=ddgs_factory,
+        ddgs_backend=ddgs_backend,
     )
     pipeline = pipeline or build_pipeline(
         enable_curl_cffi=enable_curl_cffi, curl_cffi_getter=curl_cffi_getter

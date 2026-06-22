@@ -61,6 +61,18 @@ AGENTIO_FETCH_PAYLOAD_REF = f"{AGENTIO_ID}#/$defs/AgentFetchPayload"
 AGENTIO_FETCH_RESPONSE_REF = f"{AGENTIO_ID}#/$defs/AgentFetchResponse"
 AGENTIO_PAGE_REF = f"{AGENTIO_ID}#/$defs/AgentPage"
 
+ARXIV_ID = "https://github.com/hec-ovi/websearch-skill/contracts/arxiv.schema.json"
+ARXIV_SEARCH_REQUEST_REF = f"{ARXIV_ID}#/$defs/ArxivSearchRequest"
+ARXIV_PAPER_REF = f"{ARXIV_ID}#/$defs/ArxivPaper"
+ARXIV_SEARCH_PAYLOAD_REF = f"{ARXIV_ID}#/$defs/ArxivSearchPayload"
+ARXIV_SEARCH_RESPONSE_REF = f"{ARXIV_ID}#/$defs/ArxivSearchResponse"
+
+GITHUB_ID = "https://github.com/hec-ovi/websearch-skill/contracts/github.schema.json"
+GITHUB_SEARCH_REQUEST_REF = f"{GITHUB_ID}#/$defs/GithubSearchRequest"
+GITHUB_REPO_REF = f"{GITHUB_ID}#/$defs/GithubRepo"
+GITHUB_SEARCH_PAYLOAD_REF = f"{GITHUB_ID}#/$defs/GithubSearchPayload"
+GITHUB_SEARCH_RESPONSE_REF = f"{GITHUB_ID}#/$defs/GithubSearchResponse"
+
 
 def _build_registry() -> Registry:
     pairs = []
