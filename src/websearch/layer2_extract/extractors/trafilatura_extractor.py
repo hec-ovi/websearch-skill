@@ -15,6 +15,7 @@ absent, which the pipeline maps to a clean error Envelope.
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any
 
@@ -77,12 +78,15 @@ class TrafilaturaExtractor(ExtractAdapter):
             markdown, doc = None, None
 
         meta: dict[str, Any] = {}
-        content_text: str | None = None
+        doc_text: str | None = None
         if doc is not None:
             meta = doc.as_dict()
-            content_text = (meta.get("text") or "").strip() or None
+            doc_text = (meta.get("text") or "").strip() or None
 
-        content_markdown = (markdown or content_text or "").strip()
+        content_markdown = (markdown or doc_text or "").strip()
+        # content_text is genuine plain text: trafilatura's serialized text keeps
+        # markdown link syntax when include_links is on, so derive it from the body.
+        content_text = _markdown_to_text(content_markdown) or None
         if not content_markdown:
             warnings.append("no extractable content (boilerplate-only or empty page).")
 
@@ -162,6 +166,23 @@ def _parse_html_signals(
     h1s = tree.xpath("//h1//text()")
     h1 = "".join(h1s).strip() if h1s else None
     return jsonld, og_type, html_title, h1
+
+
+_MD_IMG = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+_MD_LINK_TEXT = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_HEADING = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+_MD_BLOCKQUOTE = re.compile(r"^>\s?", re.MULTILINE)
+_MD_EMPHASIS = re.compile(r"(\*\*|\*|__|_|~~|`)")
+
+
+def _markdown_to_text(markdown: str) -> str:
+    """A genuine plain-text rendering: drop link/image URLs, headings, emphasis."""
+    text = _MD_IMG.sub(r"\1", markdown)
+    text = _MD_LINK_TEXT.sub(r"\1", text)
+    text = _MD_HEADING.sub("", text)
+    text = _MD_BLOCKQUOTE.sub("", text)
+    text = _MD_EMPHASIS.sub("", text)
+    return text.strip()
 
 
 def _links_from_markdown(markdown: str) -> list[str]:

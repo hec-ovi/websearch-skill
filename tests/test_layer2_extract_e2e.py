@@ -96,6 +96,27 @@ def test_cli_fetch_blocked_is_surfaced(httpx_mock, monkeypatch, capsys):
     assert any("blocked" in w for w in data["warnings"])
 
 
+def test_cli_fetch_output_format_text_emits_plain_text(httpx_mock, capsys):
+    httpx_mock.add_response(html=ARTICLE_HTML)
+    # --quiet isolates the body so we assert on the plain-text rendering, not the header.
+    rc = cli.main(["fetch", URL, "--output-format", "text", "--quiet"])
+    assert rc == 0
+    body = capsys.readouterr().out
+    assert "Understanding Rust Ownership" in body
+    assert "the Rust book" in body  # link anchor text kept...
+    assert "](http" not in body  # ...but the markdown link URL syntax is gone
+    assert not body.lstrip().startswith("#")  # no ATX heading marker
+
+
+def test_cli_fetch_quiet_prints_only_body(httpx_mock, capsys):
+    httpx_mock.add_response(html=ARTICLE_HTML)
+    rc = cli.main(["fetch", URL, "--quiet"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "fetched:    status=" not in out  # no header
+    assert out.startswith("# Understanding Rust Ownership")  # body only
+
+
 def test_cli_fetch_404_returns_content_with_warning(httpx_mock, capsys):
     httpx_mock.add_response(status_code=404, html="<html><body><h1>Not found</h1></body></html>")
     rc = cli.main(["fetch", URL, "--json"])

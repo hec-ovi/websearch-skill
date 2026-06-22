@@ -115,7 +115,14 @@ def _print_human(env: dict) -> None:
 
 def _add_fetch_command(sub: Any) -> None:
     fp = sub.add_parser(
-        "fetch", help="Fetch a URL and extract clean Markdown + metadata (Layer 2A)."
+        "fetch",
+        help="Fetch a URL and extract clean Markdown + metadata (Layer 2A).",
+        epilog=(
+            "exit codes: 0 when a response was fetched and processed (inspect "
+            "source.blocked and source.status in the output for content-level problems "
+            "such as an anti-bot block or an HTTP 404); 1 on a request-level error "
+            "(invalid URL, no response from any tier, or a missing dependency)."
+        ),
     )
     fp.add_argument("url", help="The http(s) URL to fetch.")
     fp.add_argument(
@@ -158,6 +165,11 @@ def _add_fetch_command(sub: Any) -> None:
         dest="neural_fallback",
         action="store_false",
         help="Do not route low-quality pages to a neural/structured fallback.",
+    )
+    fp.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Print only the extracted body (no header/warnings), for piping.",
     )
     fp.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
 
@@ -215,11 +227,20 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        _print_fetch_human(payload)
+        _print_fetch_human(payload, output_format=args.output_format, quiet=args.quiet)
     return 0 if envelope.ok else 1
 
 
-def _print_fetch_human(env: dict) -> None:
+def _select_body(res: dict, output_format: str) -> str:
+    """The body the human view prints, honoring --output-format."""
+    if output_format == "text":
+        return res.get("content_text") or res.get("content_markdown") or ""
+    if output_format == "json":
+        return json.dumps(res, indent=2, ensure_ascii=False)
+    return res.get("content_markdown") or ""
+
+
+def _print_fetch_human(env: dict, output_format: str = "markdown", quiet: bool = False) -> None:
     if not env.get("ok"):
         err = env.get("error") or {}
         print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
@@ -227,21 +248,23 @@ def _print_fetch_human(env: dict) -> None:
     data = env.get("data") or {}
     src = data.get("source") or {}
     res = data.get("result") or {}
-    print(f"# {res.get('title') or '(untitled)'}")
-    print(f"url:        {src.get('final_url') or src.get('url')}")
-    print(
-        f"fetched:    status={src.get('status')} via={src.get('fetched_via')} "
-        f"type={res.get('page_type')} quality={res.get('quality_score'):.2f} "
-        f"words={res.get('word_count')}"
-    )
-    if res.get("date") or res.get("byline"):
-        print(f"meta:       {res.get('byline') or ''} {res.get('date') or ''}".rstrip())
-    if src.get("blocked"):
-        print(f"[blocked]   {src.get('block_reason')}", file=sys.stderr)
-    for w in (data.get("warnings") or []) + (res.get("warnings") or []):
-        print(f"[warning]   {w}", file=sys.stderr)
-    print()
-    print(res.get("content_markdown") or "(no content extracted)")
+    body = _select_body(res, output_format)
+    if not quiet:
+        print(f"# {res.get('title') or '(untitled)'}")
+        print(f"url:        {src.get('final_url') or src.get('url')}")
+        print(
+            f"fetched:    status={src.get('status')} via={src.get('fetched_via')} "
+            f"type={res.get('page_type')} quality={res.get('quality_score'):.2f} "
+            f"words={res.get('word_count')}"
+        )
+        if res.get("date") or res.get("byline"):
+            print(f"meta:       {res.get('byline') or ''} {res.get('date') or ''}".rstrip())
+        if src.get("blocked"):
+            print(f"[blocked]   {src.get('block_reason')}", file=sys.stderr)
+        for w in (data.get("warnings") or []) + (res.get("warnings") or []):
+            print(f"[warning]   {w}", file=sys.stderr)
+        print()
+    print(body or "(no content extracted)")
 
 
 def _emit_error(
