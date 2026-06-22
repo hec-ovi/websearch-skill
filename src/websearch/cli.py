@@ -20,6 +20,16 @@ from . import errors
 from .envelope import error_envelope
 from .layer1_search import SEARCH_CONTRACT_VERSION, SearchRequest, build_router
 from .layer2_extract import EXTRACT_CONTRACT_VERSION, FetchRequest, build_pipeline
+from .layer2_format import (
+    FORMAT_CONTRACT_VERSION,
+    FormatRequest,
+    PageInput,
+    ResultInput,
+    SearchPageRequest,
+    StoreConfig,
+    build_format_pipeline,
+    build_page_index,
+)
 
 
 def _add_search_command(sub: Any) -> None:
@@ -292,6 +302,205 @@ def _emit_error(
     return 1
 
 
+def _add_open_command(sub: Any) -> None:
+    op = sub.add_parser(
+        "open",
+        help="Fetch+extract one or more URLs and format them into one paginated, "
+        "deduped, LLM-ready Markdown document (Layer 2A + 2B).",
+        epilog=(
+            "exit codes: 0 when at least one URL was fetched and formatted (per-URL "
+            "fetch failures are surfaced as warnings); 1 when every URL failed or the "
+            "request was invalid."
+        ),
+    )
+    op.add_argument("urls", nargs="+", help="One or more http(s) URLs to open.")
+    op.add_argument("--query", help="Optional label for the document header.")
+    op.add_argument("--page", type=int, default=0, help="Zero-based page index.")
+    op.add_argument("--page-size", type=int, default=5)
+    op.add_argument(
+        "--mode",
+        choices=["auto", "index", "full"],
+        default="auto",
+        help="auto inlines full bodies when the page fits the token budget, else an "
+        "index (preview + resolve id). index/full force the choice.",
+    )
+    op.add_argument("--body", choices=["highlights", "summary", "text"], default="highlights")
+    op.add_argument(
+        "--body-char-budget",
+        type=int,
+        default=4000,
+        help="Soft budget for a rendered body in full mode (offload trigger, not a "
+        "content cap; the full body stays in the sidecar and store).",
+    )
+    op.add_argument(
+        "--no-truncate",
+        action="store_true",
+        help="Inline every full body with no resolver offload (body_char_budget off).",
+    )
+    op.add_argument(
+        "--inline-token-budget",
+        type=int,
+        default=6000,
+        help="auto mode renders full when the page's estimated tokens are at or below this.",
+    )
+    op.add_argument("--no-dedup", action="store_true", help="Disable near-duplicate folding.")
+    op.add_argument(
+        "--jaccard", type=float, default=0.9, help="MinHash near-dup threshold (0..1)."
+    )
+    op.add_argument(
+        "--anthropic-blocks",
+        action="store_true",
+        help="Include the derived anthropic_search_result_blocks view in the sidecar.",
+    )
+    op.add_argument(
+        "--search",
+        metavar="QUERY",
+        help="After formatting, BM25-search passages across the opened pages and show hits.",
+    )
+    op.add_argument("--top-k", type=int, default=10, help="Max passages for --search.")
+    op.add_argument(
+        "--persist-path", help="Persist the page index to this file (default: in-memory)."
+    )
+    op.add_argument(
+        "--tier",
+        choices=["auto", "http", "browser", "stealth"],
+        default="auto",
+        help="Fetch tier for each URL.",
+    )
+    op.add_argument("--timeout-ms", type=int, default=20000)
+    op.add_argument(
+        "--allow-private-hosts",
+        action="store_true",
+        help="Permit private/loopback/metadata addresses (SSRF guard off).",
+    )
+    op.add_argument("--quiet", action="store_true", help="Print only the Markdown document.")
+    op.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
+
+
+def _extract_to_result_input(payload: dict) -> ResultInput:
+    """Map a Layer 2A ExtractPayload onto a vendor-neutral Layer 2B ResultInput."""
+    src = payload.get("source") or {}
+    res = payload.get("result") or {}
+    return ResultInput(
+        url=src.get("final_url") or src.get("url"),
+        title=res.get("title"),
+        published_date=res.get("date"),
+        author=res.get("byline"),
+        lang=res.get("language"),
+        page_type=res.get("page_type"),
+        quality_score=res.get("quality_score"),
+        body_markdown=res.get("content_markdown") or "",
+        # No relevance score for a direct open: preserve the user's URL order.
+        score=None,
+    )
+
+
+def _cmd_open(args: argparse.Namespace) -> int:
+    for u in args.urls:
+        if not u.startswith(("http://", "https://")):
+            return _emit_error(
+                FORMAT_CONTRACT_VERSION,
+                code=errors.INVALID_REQUEST,
+                message=f"url must be an absolute http(s) URL: {u}",
+                layer="format",
+                as_json=args.json,
+            )
+
+    pipeline = build_pipeline()
+    results: list[ResultInput] = []
+    pages: list[PageInput] = []
+    warnings: list[str] = []
+    for u in args.urls:
+        try:
+            request = FetchRequest(
+                url=u,
+                tier_hint=args.tier,
+                timeout_ms=args.timeout_ms,
+                allow_private_hosts=args.allow_private_hosts,
+            )
+        except ValidationError:
+            warnings.append(f"{u}: invalid fetch request; skipped.")
+            continue
+        env = pipeline.run(request)
+        if not env.ok:
+            err = env.error
+            warnings.append(f"{u}: {err.code}: {err.message}" if err else f"{u}: fetch failed.")
+            continue
+        payload = env.data
+        ri = _extract_to_result_input(payload)
+        results.append(ri)
+        pages.append(
+            PageInput(url=ri.url, markdown=ri.body_markdown or "", title=ri.title)
+        )
+
+    if not results:
+        return _emit_error(
+            FORMAT_CONTRACT_VERSION,
+            code=errors.FETCH_FAILED,
+            message=f"all {len(args.urls)} url(s) failed to fetch; nothing to format.",
+            layer="format",
+            as_json=args.json,
+        )
+
+    format_request = FormatRequest(
+        query=args.query,
+        results=results,
+        page=args.page,
+        page_size=args.page_size,
+        mode=args.mode,
+        body=args.body,
+        body_char_budget=None if args.no_truncate else args.body_char_budget,
+        inline_token_budget=args.inline_token_budget,
+        include_anthropic_blocks=args.anthropic_blocks,
+        dedup={
+            "enabled": not args.no_dedup,
+            "method": "both",
+            "jaccard_threshold": args.jaccard,
+            "num_perm": 128,
+            "shingle_size": 4,
+        },
+    )
+    envelope = build_format_pipeline().run(format_request)
+    payload = envelope.model_dump(mode="json")
+    payload["data"]["warnings"] = (payload["data"].get("warnings") or []) + warnings
+
+    # Index the opened pages so resolve-by-id and --search work over this corpus.
+    store = build_page_index(StoreConfig(persist_path=args.persist_path))
+    store.add(pages)
+    search_result = None
+    if args.search:
+        search_result = store.search(
+            SearchPageRequest(query=args.search, top_k=args.top_k)
+        ).model_dump(mode="json")
+        payload["meta"]["page_search"] = search_result
+
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        _print_open_human(payload, search_result, quiet=args.quiet)
+    return 0 if envelope.ok else 1
+
+
+def _print_open_human(env: dict, search: dict | None, quiet: bool = False) -> None:
+    data = env.get("data") or {}
+    print(data.get("markdown") or "(no document)")
+    if quiet:
+        return
+    for w in data.get("warnings") or []:
+        print(f"\n[warning]   {w}", file=sys.stderr)
+    if search is not None:
+        passages = search.get("passages") or []
+        print(
+            f"\n# Passage matches ({len(passages)} of {search.get('total')}, "
+            f"backend {search.get('backend')})",
+            file=sys.stderr,
+        )
+        for p in passages:
+            head = (p.get("text") or "").strip().replace("\n", " ")[:160]
+            print(f"- [{p.get('score'):.4f}] {p.get('url')} #{p.get('ordinal')}: {head}",
+                  file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="websearch",
@@ -300,10 +509,13 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     _add_search_command(sub)
     _add_fetch_command(sub)
+    _add_open_command(sub)
     args = parser.parse_args(argv)
     if args.command == "search":
         return _cmd_search(args)
     if args.command == "fetch":
         return _cmd_fetch(args)
+    if args.command == "open":
+        return _cmd_open(args)
     parser.error(f"unknown command: {args.command}")
     return 2  # unreachable; argparse.error exits
