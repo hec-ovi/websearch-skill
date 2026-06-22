@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/arxiv.schema.json",
+  "title": "Extra tool - arXiv search contract",
+  "description": "Keyless arXiv paper search over the official export.arxiv.org Atom API. A standalone tool (not part of the search-fetch-format pipeline); it emits the same Envelope so a CLI or MCP face handles it uniformly.",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "ArxivSearchRequest": {
+      "type": "object",
+      "required": ["query"],
+      "additionalProperties": false,
+      "properties": {
+        "query": { "type": "string", "minLength": 1 },
+        "field": {
+          "enum": ["all", "title", "author", "abstract"],
+          "default": "all",
+          "description": "Which arXiv field to match (maps to all:/ti:/au:/abs:)."
+        },
+        "max_results": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 },
+        "start": { "type": "integer", "minimum": 0, "default": 0, "description": "0-based offset for pagination." },
+        "sort_by": {
+          "enum": ["relevance", "lastUpdatedDate", "submittedDate"],
+          "default": "relevance"
+        },
+        "sort_order": { "enum": ["ascending", "descending"], "default": "descending" }
+      }
+    },
+
+    "ArxivPaper": {
+      "type": "object",
+      "required": ["arxiv_id", "title", "abs_url"],
+      "additionalProperties": false,
+      "properties": {
+        "arxiv_id": { "type": "string", "description": "e.g. 2401.01234v2" },
+        "title": { "type": "string" },
+        "authors": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "summary": { "type": "string", "default": "", "description": "The abstract." },
+        "published": { "type": ["string", "null"], "default": null, "description": "ISO 8601." },
+        "updated": { "type": ["string", "null"], "default": null, "description": "ISO 8601." },
+        "abs_url": { "type": "string", "description": "Abstract page URL." },
+        "pdf_url": { "type": ["string", "null"], "default": null },
+        "primary_category": { "type": ["string", "null"], "default": null },
+        "categories": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "comment": { "type": ["string", "null"], "default": null },
+        "doi": { "type": ["string", "null"], "default": null }
+      }
+    },
+
+    "ArxivSearchPayload": {
+      "type": "object",
+      "description": "Envelope.data for an arXiv search response.",
+      "required": ["query", "papers"],
+      "additionalProperties": false,
+      "properties": {
+        "query": { "type": "string", "description": "The constructed arXiv search_query." },
+        "total_results": { "type": ["integer", "null"], "default": null, "description": "opensearch:totalResults if reported." },
+        "start": { "type": "integer", "minimum": 0, "default": 0 },
+        "papers": { "type": "array", "items": { "$ref": "#/$defs/ArxivPaper" } },
+        "warnings": { "type": "array", "items": { "type": "string" }, "default": [] }
+      }
+    },
+
+    "ArxivSearchResponse": {
+      "description": "An Envelope whose meta.layer is \"arxiv\" and whose data is an ArxivSearchPayload (or null on error).",
+      "allOf": [
+        { "$ref": "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json" },
+        {
+          "properties": {
+            "data": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ArxivSearchPayload" }] },
+            "meta": {
+              "properties": { "layer": { "const": "arxiv" } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

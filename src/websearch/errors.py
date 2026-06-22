@@ -16,3 +16,7 @@ EXTRACT_FAILED = "extract_failed"
 
 # Layer 3 (agent I/O)
 NOT_OPENED = "not_opened"
+
+# Extra keyless tools (arxiv, github)
+UPSTREAM_ERROR = "upstream_error"
+RATE_LIMITED = "rate_limited"

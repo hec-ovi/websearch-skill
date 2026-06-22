@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/github.schema.json",
+  "title": "Extra tool - GitHub repository search contract",
+  "description": "Keyless GitHub repository search over the official unauthenticated REST search API (api.github.com/search/repositories). Repo search only; code search requires auth and is out of scope. Emits the same Envelope as every other layer.",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "GithubSearchRequest": {
+      "type": "object",
+      "required": ["query"],
+      "additionalProperties": false,
+      "properties": {
+        "query": { "type": "string", "minLength": 1 },
+        "language": { "type": ["string", "null"], "default": null, "description": "Filter to a language; appended to the query as language:X." },
+        "sort": {
+          "enum": ["best-match", "stars", "forks", "updated"],
+          "default": "stars",
+          "description": "best-match omits the sort param (GitHub relevance)."
+        },
+        "order": { "enum": ["asc", "desc"], "default": "desc" },
+        "per_page": { "type": "integer", "minimum": 1, "maximum": 100, "default": 10 }
+      }
+    },
+
+    "GithubRepo": {
+      "type": "object",
+      "required": ["full_name", "html_url", "stars"],
+      "additionalProperties": false,
+      "properties": {
+        "full_name": { "type": "string", "description": "owner/repo" },
+        "html_url": { "type": "string" },
+        "description": { "type": ["string", "null"], "default": null },
+        "stars": { "type": "integer", "minimum": 0 },
+        "forks": { "type": "integer", "minimum": 0, "default": 0 },
+        "open_issues": { "type": "integer", "minimum": 0, "default": 0 },
+        "language": { "type": ["string", "null"], "default": null },
+        "topics": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "owner": { "type": ["string", "null"], "default": null, "description": "owner login." },
+        "updated_at": { "type": ["string", "null"], "default": null, "description": "ISO 8601." },
+        "pushed_at": { "type": ["string", "null"], "default": null, "description": "ISO 8601." },
+        "license": { "type": ["string", "null"], "default": null, "description": "SPDX id." }
+      }
+    },
+
+    "GithubSearchPayload": {
+      "type": "object",
+      "description": "Envelope.data for a GitHub repository search response.",
+      "required": ["query", "repos"],
+      "additionalProperties": false,
+      "properties": {
+        "query": { "type": "string", "description": "The constructed q sent to GitHub." },
+        "total_count": { "type": ["integer", "null"], "default": null },
+        "incomplete_results": { "type": "boolean", "default": false },
+        "repos": { "type": "array", "items": { "$ref": "#/$defs/GithubRepo" } },
+        "warnings": { "type": "array", "items": { "type": "string" }, "default": [] }
+      }
+    },
+
+    "GithubSearchResponse": {
+      "description": "An Envelope whose meta.layer is \"github\" and whose data is a GithubSearchPayload (or null on error).",
+      "allOf": [
+        { "$ref": "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json" },
+        {
+          "properties": {
+            "data": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/GithubSearchPayload" }] },
+            "meta": {
+              "properties": { "layer": { "const": "github" } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

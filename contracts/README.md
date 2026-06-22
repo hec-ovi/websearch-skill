@@ -16,6 +16,8 @@ of language or process boundary.
 | `format.schema.json` | Layer 2B format sub-port (`ResultInput`, `FormatRequest`, `FormatPayload`, `FormatSidecar`, `AnthropicSearchResultBlock`) | 1.0.0 | frozen |
 | `store.schema.json` | Layer 2B store/page-index sub-port (`PageInput`, `Passage`, `SearchPageRequest`, `SearchPageResult`, `PageDocument`, `ResolveIndex`, `StoreConfig`) | 1.0.0 | frozen |
 | `agent-io.schema.json` | Layer 3 agent I/O (`AgentSearchRequest`/`Payload`, `AgentFetchRequest`/`AgentOpenRequest`/`AgentPage`/`AgentFetchPayload`, `FenceInfo`) | 1.0.0 | frozen |
+| `arxiv.schema.json` | Extra tool: keyless arXiv search (`ArxivSearchRequest`, `ArxivPaper`, `ArxivSearchPayload`) | 1.0.0 | frozen |
+| `github.schema.json` | Extra tool: keyless GitHub repo search (`GithubSearchRequest`, `GithubRepo`, `GithubSearchPayload`) | 1.0.0 | frozen |
 
 Layer 2A is two decoupled sub-ports: `fetch` (URL in, raw HTML out) and `extract`
 (HTML in, clean Markdown + metadata out). Layer 2B is likewise two decoupled
@@ -34,6 +36,11 @@ each page's `content` is wrapped in a random-nonce fence with a data-only direct
 (indirect-prompt-injection defense). Pagination is progressive disclosure, **not** a
 content cap: the full body is preserved verbatim in the Layer 2B store and reachable
 page by page via `web_open`.
+
+`arxiv.schema.json` and `github.schema.json` are standalone extra tools, not part of
+the search-fetch-format pipeline, but they emit the same `Envelope` (meta.layer
+`arxiv` / `github`) so the CLI and MCP faces handle them uniformly. Both are keyless:
+arXiv over the official Atom API, GitHub over the unauthenticated REST search API.
 
 Two cross-cutting guarantees the 2B contracts make explicit: there is **no
 output-length cap** (full bodies are stored and echoed in the sidecar verbatim;
