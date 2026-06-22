@@ -50,7 +50,7 @@
         },
         "render_js": { "type": ["boolean", "null"], "default": null, "description": "Force JS rendering (browser tier). null = decide by tier_hint." },
         "wait_for": { "type": ["string", "null"], "default": null, "description": "CSS selector or text to await before capture (browser tiers only)." },
-        "timeout_ms": { "type": "integer", "minimum": 1, "default": 20000 },
+        "timeout_ms": { "type": "integer", "minimum": 1, "default": 20000, "description": "Per-operation (connect/read) timeout, not a total wall-clock budget." },
         "headers": { "type": "object", "additionalProperties": { "type": "string" }, "default": {} },
         "cookies": { "type": "array", "items": { "$ref": "#/$defs/Cookie" }, "default": [] },
         "proxy": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Proxy" }], "default": null },

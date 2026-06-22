@@ -27,8 +27,8 @@ emitting and accepting its contract, regardless of language or process.
   - NOT anti-bot for page fetches         page index; opt-in persistence
 ```
 
-Status: Layer 1 (search) is implemented. Layer 2 (fetch/extract, format/store) and the
-Layer 3 MCP adapter are designed but not built yet.
+Status: Layer 1 (search) and Layer 2A (fetch + extract) are implemented. Layer 2B
+(format/store) and the Layer 3 MCP adapter and `SKILL.md` are designed but not built yet.
 
 ## Ports and adapters
 
@@ -73,6 +73,36 @@ router emits a warning recording the de-correlation.
 
 Default backbone is keyless: SearXNG (point `WEBSEARCH_SEARXNG_URL` at any instance) plus
 ddgs as a zero-config fallback. Keyed, decorrelated engines plug in behind the same port.
+
+## Layer 2A: fetch + extract
+
+Two decoupled sub-ports behind their own contracts (`fetch`, `extract`), each
+independently swappable. A fetcher knows nothing about extraction and vice versa.
+
+**Fetch** escalates by tier and only when it detects an anti-bot block: Tier 0 is plain
+httpx, and on a detected challenge it escalates to curl_cffi (browser TLS/JA3
+impersonation). It does not escalate on a 404 or a terminal block (rate limit, auth,
+legal/geo), since a stealthier client from the same egress will not help. Block detection
+reads response headers first, then body markers gated behind a short-body / candidate
+-status check (Cloudflare, DataDome, PerimeterX, Akamai, and Imperva, which can block with
+HTTP 200). Browser and stealth tiers (Crawl4AI, nodriver) are named in the contract enum
+but stay opt-in. Fetch enforces an SSRF egress guard (an http(s) scheme allowlist plus a
+resolved private/loopback/link-local/reserved address refusal, including the
+`169.254.169.254` metadata endpoint) before each request and on every redirect hop;
+`allow_private_hosts` opts out per request.
+
+**Extract** defaults to Trafilatura, which beats neural extractors on quality and cost.
+It emits clean Markdown plus plain text and metadata, recovers the raw schema.org JSON-LD
+and `og:type` with lxml (Trafilatura folds JSON-LD into metadata and never exposes the raw
+blocks), and computes a heuristic `quality_score` (0..1, below ~0.80 is a fallback
+candidate) and a cheap `page_type`. There is no output-length cap: `content_markdown` is
+never truncated; `max_bytes` is a transport guard only. Neural engines plug in behind the
+same port.
+
+**Untrusted content.** Fetched page text is untrusted input. Layer 2A returns the clean
+body unmodified by design (so the contract stays clean and piping works); fencing it in
+explicit untrusted-content markers for indirect-prompt-injection defense is a Layer 3
+(agent I/O) responsibility, added with that layer.
 
 ## Honest scope: a Pareto win
 
