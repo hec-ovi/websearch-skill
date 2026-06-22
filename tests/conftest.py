@@ -124,3 +124,77 @@ DDGS_ROWS = [
     {"title": "The Rust Book", "href": "https://doc.rust-lang.org/book", "body": "Learn Rust."},
     {"title": "Python.org", "href": "https://python.org", "body": "Python home page."},
 ]
+
+
+# --- Layer 2A fixtures: canned HTML and a curl_cffi library-boundary fake ----------
+
+# A substantial article: clears the 0.80 quality gate, carries JSON-LD + og:type.
+ARTICLE_HTML = """<!doctype html><html lang="en"><head>
+<title>Understanding Rust Ownership</title>
+<meta property="og:type" content="article">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Article","headline":"Understanding Rust Ownership",
+ "author":{"@type":"Person","name":"Jane Dev"},"datePublished":"2026-05-01"}
+</script></head><body>
+<header><nav><a href="/">Home</a></nav></header>
+<article><h1>Understanding Rust Ownership</h1>
+<p>Ownership is the mechanism Rust uses to manage memory. Every value in Rust has a single
+variable that owns it, and there can be only one owner at a time. When the owner goes out of
+scope, the value is dropped and its memory is freed automatically.</p>
+<p>This discipline eliminates whole classes of bugs. Use-after-free, double-free, and data
+races are rejected by the compiler instead of crashing the program at runtime. The borrow
+checker enforces the rules statically, so the costs are paid at compile time.</p>
+<p>Borrowing lets a function reference a value without taking ownership of it. Shared borrows
+are immutable and may overlap; a mutable borrow is exclusive. See
+<a href="https://doc.rust-lang.org/book">the Rust book</a> for the full treatment.</p>
+<p>Lifetimes annotate how long a reference stays valid so the compiler can reject dangling
+pointers. Most lifetimes are inferred, and you rarely write them out by hand in practice.</p>
+</article><footer>Copyright 2026</footer></body></html>"""
+
+# A Cloudflare interstitial: returned with status 200 or 403, not real content.
+CLOUDFLARE_HTML = """<!doctype html><html><head><title>Just a moment...</title></head>
+<body><div id="cf-challenge-running"></div>
+<p>Checking your browser before you access the site.</p>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>
+</body></html>"""
+
+
+class FakeCurlResponse:
+    """A curl_cffi.Response stand-in (status_code/text/content/headers/url/encoding)."""
+
+    def __init__(
+        self,
+        text: str,
+        status_code: int = 200,
+        headers: dict | None = None,
+        url: str | None = None,
+        encoding: str = "utf-8",
+    ):
+        self.text = text
+        self.status_code = status_code
+        self.headers = headers or {"content-type": "text/html"}
+        self.url = url or "https://example.test/"
+        self.encoding = encoding
+        self.content = text.encode("utf-8")
+
+
+def fake_curl_getter(text: str, status_code: int = 200, headers: dict | None = None):
+    """A drop-in for curl_cffi.get(url, **kwargs) that returns a canned response."""
+
+    def _get(url: str, **kwargs: Any) -> FakeCurlResponse:
+        return FakeCurlResponse(text, status_code=status_code, headers=headers, url=url)
+
+    return _get
+
+
+class RecordingCurlGetter:
+    """Captures the kwargs the curl_cffi fetcher passes to the library."""
+
+    def __init__(self, text: str = "<html><body><p>ok</p></body></html>", status_code: int = 200):
+        self.calls: list[tuple[str, dict]] = []
+        self._text = text
+        self._status = status_code
+
+    def __call__(self, url: str, **kwargs: Any) -> FakeCurlResponse:
+        self.calls.append((url, kwargs))
+        return FakeCurlResponse(self._text, status_code=self._status, url=url)
