@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/extract.schema.json",
+  "title": "Layer 2A - Extract sub-port contract",
+  "description": "Raw-content-in / clean-content-out, plus the agent-facing fetch+extract response. EXTRACT turns HTML into clean Markdown and structured metadata; it emits json_ld, page_type, and a quality_score (not just markdown) so the format layer can route low-quality pages to a fallback. The default extractor is Trafilatura (Apache-2.0); resiliparse / rs_trafilatura / crawl4ai / jina_readerlm are opt-in adapters named in the engine enum but not part of the base install. There is NO output-length cap: content_markdown is never truncated (pagination lives in the format layer, 2B).",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "ExtractRequest": {
+      "type": "object",
+      "required": ["html"],
+      "additionalProperties": false,
+      "properties": {
+        "html": { "type": "string", "description": "Raw HTML to extract from." },
+        "base_url": { "type": ["string", "null"], "default": null, "description": "Used to absolutize relative links and as a metadata hint." },
+        "engine": {
+          "enum": ["trafilatura", "resiliparse", "rs_trafilatura", "crawl4ai", "jina_readerlm", "auto"],
+          "default": "trafilatura",
+          "description": "auto resolves to the default closure (trafilatura). The others are opt-in adapters."
+        },
+        "favor": { "enum": ["precision", "recall", "balanced"], "default": "balanced" },
+        "output_format": { "enum": ["markdown", "text", "json"], "default": "markdown" },
+        "include_tables": { "type": "boolean", "default": true },
+        "include_links": { "type": "boolean", "default": true },
+        "include_images": { "type": "boolean", "default": false },
+        "include_comments": { "type": "boolean", "default": false },
+        "query": { "type": ["string", "null"], "default": null, "description": "Optional relevance hint for query-focused extraction (BM25 filter); best-effort and engine-dependent." },
+        "neural_fallback": { "type": "boolean", "default": true, "description": "Allow routing a low-quality page to a neural/JSON-LD-first fallback when an opt-in neural adapter is installed. No-op in the default closure." }
+      }
+    },
+
+    "ExtractResult": {
+      "type": "object",
+      "description": "The pure EXTRACT sub-port output (no fetch provenance).",
+      "required": ["content_markdown", "page_type", "quality_score", "extracted_via"],
+      "additionalProperties": false,
+      "properties": {
+        "content_markdown": { "type": "string", "description": "Clean Markdown body. NEVER truncated; no length cap." },
+        "content_text": { "type": ["string", "null"], "default": null, "description": "Plain-text rendering of the body." },
+        "title": { "type": ["string", "null"], "default": null },
+        "byline": { "type": ["string", "null"], "default": null, "description": "Author(s) if known." },
+        "date": { "type": ["string", "null"], "default": null, "description": "Publication date, ISO 8601 if known." },
+        "language": { "type": ["string", "null"], "default": null, "description": "ISO 639-1 if detected." },
+        "page_type": {
+          "enum": ["article", "forum", "product", "listing", "collection", "documentation", "service", "unknown"],
+          "default": "unknown"
+        },
+        "json_ld": { "type": "array", "items": { "type": "object" }, "default": [], "description": "Parsed schema.org JSON-LD blocks, verbatim." },
+        "metadata": { "type": "object", "additionalProperties": true, "default": {}, "description": "Extra extractor metadata (sitename, description, tags, og: fields)." },
+        "links": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Absolute URLs found in the extracted body." },
+        "word_count": { "type": "integer", "minimum": 0, "default": 0 },
+        "quality_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Heuristic extraction confidence 0..1. Below ~0.80 is a fallback candidate (the format/store layer may re-route)."
+        },
+        "extracted_via": { "type": "string", "description": "Engine that produced this result, e.g. \"trafilatura\"." },
+        "extract_ms": { "type": "integer", "minimum": 0, "default": 0 },
+        "warnings": { "type": "array", "items": { "type": "string" }, "default": [] }
+      }
+    },
+
+    "ExtractSource": {
+      "type": "object",
+      "description": "Compact fetch provenance carried alongside the extract result.",
+      "required": ["url", "status", "ok", "fetched_via"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string", "description": "Requested URL." },
+        "final_url": { "type": ["string", "null"], "default": null },
+        "status": { "type": "integer" },
+        "ok": { "type": "boolean" },
+        "fetched_via": { "type": "string" },
+        "content_type": { "type": ["string", "null"], "default": null },
+        "blocked": { "type": "boolean", "default": false },
+        "block_reason": { "type": ["string", "null"], "default": null },
+        "tier_attempts": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "fetch_ms": { "type": "integer", "minimum": 0, "default": 0 }
+      }
+    },
+
+    "ExtractPayload": {
+      "type": "object",
+      "description": "Envelope.data for the agent-facing fetch+extract response (`websearch fetch`).",
+      "required": ["request_id", "source", "result"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": { "type": "string", "description": "UUID for this request." },
+        "source": { "$ref": "#/$defs/ExtractSource" },
+        "result": { "$ref": "#/$defs/ExtractResult" },
+        "timing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "total_ms": { "type": "integer", "minimum": 0 },
+            "fetch_ms": { "type": "integer", "minimum": 0 },
+            "extract_ms": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "warnings": { "type": "array", "items": { "type": "string" }, "default": [] }
+      }
+    },
+
+    "ExtractResponse": {
+      "description": "An Envelope whose meta.layer is \"extract\" and whose data is an ExtractPayload (or null on error).",
+      "allOf": [
+        { "$ref": "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json" },
+        {
+          "properties": {
+            "data": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/ExtractPayload" }] },
+            "meta": {
+              "properties": { "layer": { "const": "extract" } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

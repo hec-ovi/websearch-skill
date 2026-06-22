@@ -21,10 +21,19 @@ CONTRACTS = ROOT / "contracts"
 
 ENVELOPE_ID = "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json"
 SEARCH_ID = "https://github.com/hec-ovi/websearch-skill/contracts/search.schema.json"
+FETCH_ID = "https://github.com/hec-ovi/websearch-skill/contracts/fetch.schema.json"
+EXTRACT_ID = "https://github.com/hec-ovi/websearch-skill/contracts/extract.schema.json"
 
 SEARCH_RESPONSE_REF = f"{SEARCH_ID}#/$defs/SearchResponse"
 SEARCH_REQUEST_REF = f"{SEARCH_ID}#/$defs/SearchRequest"
 SEARCH_PAYLOAD_REF = f"{SEARCH_ID}#/$defs/SearchPayload"
+
+FETCH_REQUEST_REF = f"{FETCH_ID}#/$defs/FetchRequest"
+FETCH_RESULT_REF = f"{FETCH_ID}#/$defs/FetchResult"
+EXTRACT_REQUEST_REF = f"{EXTRACT_ID}#/$defs/ExtractRequest"
+EXTRACT_RESULT_REF = f"{EXTRACT_ID}#/$defs/ExtractResult"
+EXTRACT_PAYLOAD_REF = f"{EXTRACT_ID}#/$defs/ExtractPayload"
+EXTRACT_RESPONSE_REF = f"{EXTRACT_ID}#/$defs/ExtractResponse"
 
 
 def _build_registry() -> Registry:

@@ -11,9 +11,14 @@ of language or process boundary.
 |---|---|---|---|
 | `envelope.schema.json` | Cross-cutting wrapper (`contract_version`, `ok`, `data`, `error`, `meta`) | 1.0.0 | frozen |
 | `search.schema.json` | Layer 1 search (`SearchRequest`, `SearchPayload`, `ResultItem`, `SourceProvenance`) | 1.0.0 | frozen |
+| `fetch.schema.json` | Layer 2A fetch sub-port (`FetchRequest`, `FetchResult`) | 1.0.0 | frozen |
+| `extract.schema.json` | Layer 2A extract sub-port + agent-facing response (`ExtractRequest`, `ExtractResult`, `ExtractSource`, `ExtractPayload`) | 1.0.0 | frozen |
 
-Extract, format, and agent-io contracts are added when those layers are built
-(progressive disclosure), each as its own file with its own `x-contract-version`.
+Layer 2A is two decoupled sub-ports: `fetch` (URL in, raw HTML out) and `extract`
+(HTML in, clean Markdown + metadata out). They are independently swappable, so each
+gets its own contract file and version. The format/store (2B) and agent-io (Layer 3)
+contracts are added when those layers are built (progressive disclosure), each as its
+own file with its own `x-contract-version`.
 
 ## Versioning rule
 
