@@ -23,6 +23,8 @@ ENVELOPE_ID = "https://github.com/hec-ovi/websearch-skill/contracts/envelope.sch
 SEARCH_ID = "https://github.com/hec-ovi/websearch-skill/contracts/search.schema.json"
 FETCH_ID = "https://github.com/hec-ovi/websearch-skill/contracts/fetch.schema.json"
 EXTRACT_ID = "https://github.com/hec-ovi/websearch-skill/contracts/extract.schema.json"
+FORMAT_ID = "https://github.com/hec-ovi/websearch-skill/contracts/format.schema.json"
+STORE_ID = "https://github.com/hec-ovi/websearch-skill/contracts/store.schema.json"
 
 SEARCH_RESPONSE_REF = f"{SEARCH_ID}#/$defs/SearchResponse"
 SEARCH_REQUEST_REF = f"{SEARCH_ID}#/$defs/SearchRequest"
@@ -34,6 +36,20 @@ EXTRACT_REQUEST_REF = f"{EXTRACT_ID}#/$defs/ExtractRequest"
 EXTRACT_RESULT_REF = f"{EXTRACT_ID}#/$defs/ExtractResult"
 EXTRACT_PAYLOAD_REF = f"{EXTRACT_ID}#/$defs/ExtractPayload"
 EXTRACT_RESPONSE_REF = f"{EXTRACT_ID}#/$defs/ExtractResponse"
+
+FORMAT_REQUEST_REF = f"{FORMAT_ID}#/$defs/FormatRequest"
+FORMAT_RESULT_INPUT_REF = f"{FORMAT_ID}#/$defs/ResultInput"
+FORMAT_PAYLOAD_REF = f"{FORMAT_ID}#/$defs/FormatPayload"
+FORMAT_RESPONSE_REF = f"{FORMAT_ID}#/$defs/FormatResponse"
+FORMAT_SIDECAR_REF = f"{FORMAT_ID}#/$defs/FormatSidecar"
+ANTHROPIC_BLOCK_REF = f"{FORMAT_ID}#/$defs/AnthropicSearchResultBlock"
+
+STORE_ADD_RESULT_REF = f"{STORE_ID}#/$defs/AddResult"
+STORE_SEARCH_REQUEST_REF = f"{STORE_ID}#/$defs/SearchPageRequest"
+STORE_SEARCH_RESULT_REF = f"{STORE_ID}#/$defs/SearchPageResult"
+STORE_PAGE_DOC_REF = f"{STORE_ID}#/$defs/PageDocument"
+STORE_RESOLVE_INDEX_REF = f"{STORE_ID}#/$defs/ResolveIndex"
+STORE_PAGE_INPUT_REF = f"{STORE_ID}#/$defs/PageInput"
 
 
 def _build_registry() -> Registry:
