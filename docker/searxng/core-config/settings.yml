@@ -1,0 +1,23 @@
+# Minimal overrides layered on top of SearXNG's shipped defaults.
+# Full reference: https://docs.searxng.org/admin/settings/index.html
+#
+# `use_default_settings: true` pulls in the complete default engine list, so you
+# only declare what you want to change below.
+use_default_settings: true
+
+server:
+  # Change this before any non-local use:  openssl rand -hex 32
+  secret_key: "change-me-local-only-placeholder-secret-key"
+
+  # This instance is private and only your tool queries it, so the bot limiter
+  # (which would 429 your automated client) stays off. Turn it on, add the
+  # valkey service back, and set public_instance: true only for a public box.
+  limiter: false
+  public_instance: false
+
+search:
+  # SearXNG ships HTML only; the tool reads the JSON API, so enable it here.
+  # Without this, /search?format=json returns HTTP 403.
+  formats:
+    - html
+    - json

@@ -1,0 +1,29 @@
+# Lean local SearXNG for websearch-skill.
+#
+# One container, JSON API on, rate limiter off. This is a PRIVATE instance that
+# only your own tool talks to, so the bot limiter (which exists to throttle
+# automated clients) is turned off and no Valkey/Redis is needed. For a public
+# instance you would add Valkey and enable the limiter; see the upstream docs:
+# https://docs.searxng.org/admin/installation-docker.html
+#
+# Start it:   docker compose -f docker/searxng/docker-compose.yml up -d
+# Then point the tool at it:  export WEBSEARCH_SEARXNG_URL=http://localhost:8080
+
+name: websearch-searxng
+
+services:
+  searxng:
+    container_name: websearch-searxng
+    image: docker.io/searxng/searxng:${SEARXNG_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      # Binds to 127.0.0.1 by default (local only). Set SEARXNG_HOST=0.0.0.0 in
+      # .env to expose it on your LAN.
+      - "${SEARXNG_HOST:-127.0.0.1}:${SEARXNG_PORT:-8080}:8080"
+    volumes:
+      # Your overrides live in core-config/settings.yml. The Granian-based image reads
+      # /etc/searxng/settings.yml; because this repo ships that file, the entrypoint uses
+      # it as-is (it only generates a settings.yml when none is present).
+      - ./core-config/:/etc/searxng/:Z
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8080}/
