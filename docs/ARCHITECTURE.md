@@ -27,8 +27,8 @@ emitting and accepting its contract, regardless of language or process.
   - NOT anti-bot for page fetches         page index; opt-in persistence
 ```
 
-Status: Layer 1 (search) and Layer 2A (fetch + extract) are implemented. Layer 2B
-(format/store) and the Layer 3 MCP adapter and `SKILL.md` are designed but not built yet.
+Status: Layer 1 (search), Layer 2A (fetch + extract), and Layer 2B (format + store) are
+implemented. The Layer 3 MCP adapter and `SKILL.md` are designed but not built yet.
 
 ## Ports and adapters
 
@@ -103,6 +103,44 @@ same port.
 body unmodified by design (so the contract stays clean and piping works); fencing it in
 explicit untrusted-content markers for indirect-prompt-injection defense is a Layer 3
 (agent I/O) responsibility, added with that layer.
+
+## Layer 2B: format + store
+
+Two decoupled sub-ports behind their own contracts (`format`, `store`), mirroring the
+fetch/extract split.
+
+**Format** takes vendor-neutral results (the union of what Layer 1 and Layer 2A supply,
+mapped onto one `ResultInput`) and renders a single layout-stable Markdown document plus
+a parallel JSON sidecar that carries the same data. The Markdown body is the model's
+native register (fewer tokens than JSON for prose); the sidecar is the program-side
+record for citing, dedup, and pagination. Results are ordered by descending relevance and
+paginated to fight lost-in-the-middle. Near-duplicate dedup runs before rendering:
+byte-exact (normalized SHA-256) first, then a pure-Python MinHash over word 4-gram
+shingles (128 permutations, Jaccard 0.9) clustered with union-find, keeping the
+best-scored canonical and recording the rest as `dropped_duplicates`. Progressive
+disclosure picks the render mode: `auto` inlines full bodies when the page fits a token
+budget, otherwise an index (a preview plus a stable id the resolver expands on demand).
+The optional `anthropic_search_result_blocks` view down-renders 1:1 into Anthropic
+search_result content blocks; it is a derived, vendor-specific projection off the
+vendor-neutral results, off by default, and Layer 3 owns the citations-versus-structured
+-output toggle (the two are mutually exclusive in the Anthropic API).
+
+There is no output-length cap. The sidecar carries the full body verbatim in both index
+and full modes, and the store keeps the full Markdown; `body_char_budget` only offloads
+the rendered Markdown view to the resolver (with a resolve hint), and `--no-truncate`
+disables even that. Nothing is ever summarized or discarded.
+
+**Store** is an ephemeral fetched-page index behind a `PageIndex` port
+(`add`/`search`/`get`/`resolve_index`). No database is used for the per-query result set
+(it is tens of rows, handled with plain Python); the store earns its keep only as the
+progressive-disclosure index over fetched pages. The default adapter is SQLite FTS5 over
+an in-memory connection: it ships in the Python stdlib with BM25 and needs zero
+third-party packages. FTS5 is not guaranteed on every build, so availability is probed at
+runtime and the adapter falls back to a pure-Python BM25 index that returns the identical
+shapes. Adds are idempotent on url plus content hash, an arbitrary query is escaped so
+FTS5 operators never raise a syntax error (tokens are quoted and OR-joined for recall),
+and persistence is just the presence of a file path (WAL enabled). A vector or Rust
+(`sqlite-vec`, `tantivy`) backend plugs in behind the same port, opt-in, never required.
 
 ## Honest scope: a Pareto win
 

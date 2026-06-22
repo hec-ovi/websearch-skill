@@ -49,6 +49,36 @@ semantic versioning once it reaches a tagged release.
   multicast targets, applied before the first request and on every redirect hop.
 - Test suite is now 188 tests (Layer 1 plus Layer 2A: block detection, quality scoring,
   fetch tiers and escalation, the egress guard, extraction, and CLI end-to-end).
+- Layer 2B contracts: `format@1.0.0` (`ResultInput`, `FormatRequest`, `FormatPayload`,
+  `FormatSidecar`, and the derived `AnthropicSearchResultBlock`) and `store@1.0.0`
+  (`PageInput`, `Passage`, `SearchPageRequest`, `SearchPageResult`, `PageDocument`,
+  `ResolveIndex`, `StoreConfig`), the two decoupled sub-ports of format and store.
+- Layer 2B format: turns vendor-neutral results into one layout-stable Markdown
+  document plus a parallel JSON sidecar carrying identical data, ordered by descending
+  relevance and paginated. Near-duplicate dedup (byte-exact SHA-256 first, then a
+  pure-Python MinHash over word 4-gram shingles) folds duplicates into the best-scored
+  canonical and records `dropped_duplicates`. Progressive disclosure picks the render
+  mode: `auto` inlines full bodies when the page fits a token budget, otherwise an
+  index (a preview plus a stable id to resolve). The optional
+  `anthropic_search_result_blocks` view maps 1:1 onto Anthropic search_result content
+  blocks (source as a bare string, at least one non-empty text block, citations
+  all-or-nothing); it is off by default and Layer 3 owns the citations toggle.
+- Layer 2B store: an ephemeral page index behind a `PageIndex` port with
+  `add`/`search`/`get`/`resolve_index`. The default adapter is SQLite FTS5 over an
+  in-memory connection (Python stdlib, BM25 ranking), with a runtime FTS5 probe that
+  falls back to a pure-Python BM25 index when FTS5 is not compiled into the local
+  SQLite. Adds are idempotent on url plus content hash; an arbitrary query is escaped so
+  FTS5 operators never raise a syntax error; persistence is the presence of a file path.
+- CLI `websearch open <url> ...`: composes Layer 2A and 2B (fetch, extract, format,
+  index) into one paginated, deduped document, with `--mode`, `--body`,
+  `--body-char-budget`/`--no-truncate`, `--anthropic-blocks`, `--search` (BM25 passage
+  search over the opened pages), and `--persist-path`. Per-URL fetch failures surface as
+  warnings rather than failing the whole request.
+- No output-length cap in Layer 2B either: full bodies are stored and echoed in the JSON
+  sidecar verbatim in both index and full modes; `body_char_budget` only offloads the
+  rendered Markdown view to the resolver, and `--no-truncate` disables even that.
+- Test suite is now 261 tests (adds dedup, chunk-offset, renderer layout-stability,
+  both store adapters, format/store contract conformance, and the `open` end-to-end).
 
 ### Fixed
 
@@ -89,4 +119,4 @@ dogfooding pass of Layer 2A:
 - Layer 2A returns clean page content unmodified; fencing fetched (untrusted) content in
   explicit markers for prompt-injection defense is a Layer 3 (agent I/O) responsibility,
   added with that layer.
-- Layer 2B (format/store) and the Layer 3 MCP adapter and `SKILL.md` are not built yet.
+- The Layer 3 MCP adapter and `SKILL.md` are not built yet.
