@@ -4,7 +4,7 @@ Open-source multi-engine web search and content extraction for AI agents, built 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-261%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-272%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
 ## What it is
@@ -194,7 +194,7 @@ Planned, not built yet:
 
 ```bash
 uv sync          # install deps (including the dev group)
-uv run pytest    # 188 tests
+uv run pytest    # 272 tests
 uv run ruff check .
 ```
 

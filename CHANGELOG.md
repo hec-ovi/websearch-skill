@@ -77,8 +77,27 @@ semantic versioning once it reaches a tagged release.
 - No output-length cap in Layer 2B either: full bodies are stored and echoed in the JSON
   sidecar verbatim in both index and full modes; `body_char_budget` only offloads the
   rendered Markdown view to the resolver, and `--no-truncate` disables even that.
-- Test suite is now 261 tests (adds dedup, chunk-offset, renderer layout-stability,
+- Test suite is now 272 tests (adds dedup, chunk-offset, renderer layout-stability,
   both store adapters, format/store contract conformance, and the `open` end-to-end).
+
+### Fixed
+
+After an adversarial multi-agent review (nine confirmed findings) and a fresh-agent
+dogfooding pass of Layer 2B:
+
+- Distinct pages with an empty or whitespace-only body are no longer folded as exact
+  duplicates (they all hashed to the empty-string digest); each body-less result, such
+  as a snippet-only or failed-extraction page, now survives as its own entry.
+- The page-index query escaper strips control characters, so a NUL byte in a query no
+  longer raises a SQLite "unterminated string" error, and an arbitrary query stays safe.
+- The pure-Python BM25 fallback now folds diacritics and tokenizes Unicode letters
+  (NFKD plus a Unicode word pattern), so accented and non-Latin queries match the same
+  pages as the SQLite FTS5 adapter instead of silently returning nothing; its IDF and
+  `resolve_index` ordering after a content change were also aligned with FTS5.
+- The rendered Markdown status line never shows an impossible position (for example
+  "page 6 of 3") on a page past the last one, including when dedup shrinks the set.
+- `websearch open --search` degrades a page-index failure to a warning instead of
+  leaking a traceback, so a successful fetch and format is never lost to a search error.
 
 ### Fixed
 
