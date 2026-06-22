@@ -43,6 +43,31 @@ def test_imperva_blocks_with_http_200_via_body():
     assert (blocked, reason) == (True, "imperva")
 
 
+def test_imperva_xiinfo_header_alone_is_not_a_block():
+    # x-iinfo / x-cdn:incapsula are on EVERY Imperva-proxied response, not just blocks,
+    # so a header-only rule would false-positive on all Imperva-fronted sites.
+    blocked, reason = detect_block(
+        200, "<html><body><p>real content</p></body></html>", {"x-iinfo": "9-12345"}
+    )
+    assert blocked is False
+    blocked, _ = detect_block(200, "<html><body><p>real</p></body></html>", {"x-cdn": "Incapsula"})
+    assert blocked is False
+
+
+def test_datadome_interstitial_on_large_200_is_caught():
+    # A >30KB DataDome page on HTTP 200 without a vendor header is still detected
+    # because the vendor domain is an always-scanned marker.
+    body = "<html><body>" + ("filler " * 5000) + "geo.captcha-delivery.com</body></html>"
+    assert len(body) > 30_000
+    blocked, reason = detect_block(200, body, {})
+    assert (blocked, reason) == (True, "datadome")
+
+
+def test_akamai_body_marker_is_classified_as_akamai():
+    blocked, reason = detect_block(403, "<html>powered by AkamaiGHost edge</html>", {})
+    assert (blocked, reason) == (True, "akamai")
+
+
 def test_large_clean_page_mentioning_cloudflare_is_not_blocked():
     # False-positive guard: a big 200 article that merely links to cloudflare must
     # not be flagged (body markers are gated behind is_short / status shortlist).

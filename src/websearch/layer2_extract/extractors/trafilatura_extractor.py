@@ -168,8 +168,9 @@ def _parse_html_signals(
     return jsonld, og_type, html_title, h1
 
 
-_MD_IMG = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
-_MD_LINK_TEXT = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+# Bracket text disallows '[' to keep these linear on adversarial '[' runs (no ReDoS).
+_MD_IMG = re.compile(r"!\[([^\[\]]*)\]\([^)]*\)")
+_MD_LINK_TEXT = re.compile(r"\[([^\[\]]*)\]\([^)]*\)")
 _MD_HEADING = re.compile(r"^#{1,6}\s+", re.MULTILINE)
 _MD_BLOCKQUOTE = re.compile(r"^>\s?", re.MULTILINE)
 _MD_EMPHASIS = re.compile(r"(\*\*|\*|__|_|~~|`)")

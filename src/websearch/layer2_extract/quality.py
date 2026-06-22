@@ -17,7 +17,8 @@ from urllib.parse import urlsplit
 from .blocks import title_looks_like_error
 from .models import PageType
 
-_MD_LINK = re.compile(r"\[([^\]]*)\]\((https?://[^)\s]+)\)")
+# Bracket text disallows '[' so a long run of '[' cannot cause O(n^2) backtracking.
+_MD_LINK = re.compile(r"\[([^\[\]]*)\]\((https?://[^)\s]+)\)")
 
 _WEIGHTS = {
     "text_density": 0.25,
@@ -28,18 +29,36 @@ _WEIGHTS = {
     "title": 0.15,
 }
 
-_CONTENT_JSONLD_TYPES = {
+# Article-class structured data is the strongest positive (full credit). Entity-class
+# (product/forum/listing/event) gets partial credit so a thin product or forum page is
+# not lifted over the 0.80 gate the way a real article is (research: articles saturate
+# ~0.93; products ~0.67, listings ~0.70, forums ~0.79).
+_ARTICLE_JSONLD_TYPES = {
     "article",
     "newsarticle",
     "blogposting",
     "techarticle",
     "report",
-    "product",
     "recipe",
-    "qapage",
-    "event",
     "howto",
+    "liveblogposting",
 }
+_ENTITY_JSONLD_TYPES = {
+    "product",
+    "productgroup",
+    "offer",
+    "aggregateoffer",
+    "qapage",
+    "discussionforumposting",
+    "event",
+    "jobposting",
+    "itemlist",
+    "collectionpage",
+}
+
+# Page types where link density is legitimate, so the inverse-link-ratio signal is held
+# neutral rather than rewarded (a freebie 1.0 would lift link-farm pages over the gate).
+_LINK_RELAXED_TYPES = ("listing", "collection", "forum", "documentation")
 
 
 def _clamp(x: float) -> float:
@@ -72,17 +91,18 @@ def _paragraph_score(paragraphs: int) -> float:
 
 
 def _link_ratio_score(anchor_chars: int, text_chars: int, page_type: PageType) -> float:
-    # High link density is legitimate for these page types; do not penalize it.
-    if page_type in ("listing", "collection", "forum"):
-        return 1.0
+    if page_type in _LINK_RELAXED_TYPES:
+        return 0.6  # neutral: link density is legitimate here, but not a free 1.0
     if text_chars <= 0:
         return 0.0
+    # Widened tolerance band so a low-confidence misclassification of a legitimately
+    # link-heavy page degrades gracefully instead of dropping straight to 0.
     ratio = anchor_chars / text_chars
-    if ratio < 0.2:
+    if ratio < 0.4:
         return 1.0
-    if ratio > 0.6:
+    if ratio > 0.8:
         return 0.0
-    return 1.0 - (ratio - 0.2) / 0.4
+    return 1.0 - (ratio - 0.4) / 0.4
 
 
 def jsonld_types(json_ld: list[dict[str, Any]]) -> set[str]:
@@ -111,7 +131,25 @@ def jsonld_types(json_ld: list[dict[str, Any]]) -> set[str]:
 def _jsonld_score(types: set[str]) -> float:
     if not types:
         return 0.4
-    return 1.0 if types & _CONTENT_JSONLD_TYPES else 0.6
+    if types & _ARTICLE_JSONLD_TYPES:
+        return 1.0
+    if types & _ENTITY_JSONLD_TYPES:
+        return 0.7
+    return 0.6
+
+
+def _count_paragraphs(text: str) -> int:
+    """Robust paragraph count: blank-line blocks, falling back to sentence groups when
+    a page uses single-newline markdown (so a real article does not lose the signal)."""
+    blocks = [p for p in re.split(r"\n\s*\n", text.strip()) if p.strip()]
+    if len(blocks) >= 2:
+        return len(blocks)
+    sentences = len(re.findall(r"[.!?](?:\s|$)", text))
+    if sentences >= 6:
+        return 3
+    if sentences >= 2:
+        return 2
+    return 1 if text.strip() else 0
 
 
 def _title_score(title: str | None) -> float:
@@ -134,7 +172,7 @@ def score_extraction(
 ) -> tuple[float, dict[str, float]]:
     """Return ``(quality_score, signal_subscores)``."""
     text_len = len(content_text)
-    paragraphs = len([p for p in re.split(r"\n\s*\n", content_text.strip()) if p.strip()])
+    paragraphs = _count_paragraphs(content_text)
     anchor_chars = sum(len(m.group(1)) for m in _MD_LINK.finditer(content_markdown))
 
     subs = {

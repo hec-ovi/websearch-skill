@@ -62,6 +62,16 @@ _IMPERVA_MARKERS = (
     "powered by incapsula",
 )
 
+# Vendor-exclusive body markers scanned on ANY status and ANY body size: Imperva
+# blocks with 200, and these DataDome/PerimeterX strings are effectively zero false
+# positive (vendor domains/identifiers), so a large 200 interstitial without a vendor
+# response header is still caught.
+_ALWAYS_SCAN_MARKERS: dict[str, tuple[str, ...]] = {
+    "imperva": _IMPERVA_MARKERS,
+    "datadome": ("captcha-delivery.com", "geo.captcha-delivery.com"),
+    "perimeterx": ("client.perimeterx.net", "captcha.px-cdn.net", "_pxappid", "px-captcha"),
+}
+
 _ERROR_TITLE_MARKERS = (
     "404",
     "not found",
@@ -84,30 +94,31 @@ def detect_block(status: int, body: str, headers: dict[str, str]) -> tuple[bool,
     """Return ``(blocked, reason)``. ``reason`` is None when not blocked."""
     h = {k.lower(): str(v).lower() for k, v in headers.items()}
 
-    # 1. Definitive header markers (vendor-exclusive; safe to fire on any status).
+    # 1. Header markers that correlate with a challenge/block (NOT mere CDN presence).
     if "challenge" in h.get("cf-mitigated", ""):
         return True, "cloudflare_challenge"
     if "x-datadome" in h or "x-dd-b" in h:
         return True, "datadome"
     if "x-px-authorization" in h:
         return True, "perimeterx"
-    if "x-iinfo" in h or "incapsula" in h.get("x-cdn", ""):
-        return True, "imperva"
     if "akamaighost" in h.get("server", "") and status in (403, 429):
         return True, "akamai"
+    # NOTE: x-iinfo / x-cdn:incapsula are deliberately NOT treated as a block. Imperva
+    # adds them to every proxied response (a diagnostics/CDN identifier), not just
+    # challenges, so a header-only rule false-positives on all Imperva-fronted sites.
+    # Real Imperva blocks are caught by the body markers below (they arrive with 200).
 
     body_lc = body.lower()
 
-    # 2a. Imperva body markers fire regardless of status (it blocks with 200).
-    if any(m in body_lc for m in _IMPERVA_MARKERS):
-        return True, "imperva"
+    # 2a. Vendor-exclusive body markers fire on any status and any body size.
+    for reason, markers in _ALWAYS_SCAN_MARKERS.items():
+        if any(m in body_lc for m in markers):
+            return True, reason
 
     # 2b. Other body markers only when short OR on the candidate-status shortlist.
     is_short = len(body) < _SHORT_BODY_BYTES
     if is_short or status in _CANDIDATE_STATUS:
         for reason, markers in _BODY_MARKERS.items():
-            if reason == "akamai":
-                continue
             if any(m in body_lc for m in markers):
                 return True, reason
         if _akamai_deny(body_lc):

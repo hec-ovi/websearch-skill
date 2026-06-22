@@ -42,20 +42,56 @@ def test_soft_404_is_vetoed_low():
     assert score <= 0.3
 
 
-def test_listing_relaxes_link_density():
-    # A link-heavy listing page should not be penalized for its link ratio.
-    markdown = " ".join(f"[item {i}](https://shop.test/p/{i})" for i in range(40))
-    text = "shop catalogue " * 60
-    score, subs = score_extraction(
-        raw_html_len=len(markdown) * 2,
-        content_text=text,
-        content_markdown=markdown,
-        word_count=len(text.split()),
-        json_ld=[{"@type": "ItemList"}],
-        title="All Products",
-        page_type="listing",
+def _score(**kw):
+    base = dict(
+        raw_html_len=3000,
+        content_text="word " * 120,
+        content_markdown="word " * 120,
+        word_count=120,
+        json_ld=[],
+        title="A Title",
+        page_type="unknown",
     )
-    assert subs["link_ratio"] == 1.0  # relaxed for listings
+    base.update(kw)
+    return score_extraction(**base)
+
+
+def test_link_density_relaxed_for_listing_forum_docs():
+    # Link-heavy pages are held neutral (0.6), not penalized and not given a free 1.0.
+    for pt in ("listing", "collection", "forum", "documentation"):
+        _, subs = _score(page_type=pt)
+        assert subs["link_ratio"] == 0.6
+
+
+def test_jsonld_tiers_article_full_entity_partial():
+    assert _score(json_ld=[{"@type": "Article"}])[1]["json_ld"] == 1.0
+    assert _score(json_ld=[{"@type": "Product"}])[1]["json_ld"] == 0.7
+    assert _score(json_ld=[{"@type": "QAPage"}])[1]["json_ld"] == 0.7
+    assert _score(json_ld=[{"@type": "WebPage"}])[1]["json_ld"] == 0.6
+    assert _score(json_ld=[])[1]["json_ld"] == 0.4
+
+
+def test_thin_entity_page_stays_below_gate():
+    # A nav-heavy product page (little prose, many links) must not clear the 0.80 gate,
+    # matching the research expectation that products/listings fall below articles.
+    markdown = " ".join(f"[item {i}](https://shop.test/p/{i})" for i in range(60))
+    score, _ = score_extraction(
+        raw_html_len=40000,
+        content_text="buy now in stock add to cart",
+        content_markdown=markdown,
+        word_count=7,
+        json_ld=[{"@type": "Product"}],
+        title="Some Product",
+        page_type="product",
+    )
+    assert score < 0.80
+
+
+def test_paragraph_count_robust_to_single_newline():
+    # Single-newline markdown with several sentences still earns the paragraph signal.
+    text = "First sentence here. Second one follows. Third. Fourth. Fifth! Sixth?"
+    _, subs = _score(content_text=text)
+    assert subs["paragraph"] == 1.0
 
 
 def test_classify_by_jsonld_type():
