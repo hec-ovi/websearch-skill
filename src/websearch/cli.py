@@ -14,18 +14,31 @@ import os
 import sys
 from typing import Any
 
-from .layer1_search import SearchRequest, build_router
+from pydantic import ValidationError
+
+from . import errors
+from .envelope import error_envelope
+from .layer1_search import SEARCH_CONTRACT_VERSION, SearchRequest, build_router
 
 
 def _add_search_command(sub: Any) -> None:
     sp = sub.add_parser("search", help="Search the web across engines (Layer 1).")
     sp.add_argument("query", help="The search query.")
     sp.add_argument("--count", type=int, default=10, help="Results requested per engine.")
-    sp.add_argument("--engines", help="Comma-separated engine names (default: all enabled).")
+    sp.add_argument(
+        "--engines",
+        help="Comma-separated engine names to query (default: all configured). "
+        "Built-in engines: ddgs, searxng.",
+    )
     sp.add_argument("--language", help="ISO 639-1 language, e.g. en.")
     sp.add_argument("--country", help="ISO 3166-1 alpha-2 country, e.g. us.")
     sp.add_argument("--safesearch", choices=["off", "moderate", "strict"], default="moderate")
-    sp.add_argument("--freshness", choices=["any", "day", "week", "month", "year"], default="any")
+    sp.add_argument(
+        "--freshness",
+        choices=["any", "day", "week", "month", "year"],
+        default="any",
+        help="Recency filter (best-effort; each engine honors it differently).",
+    )
     sp.add_argument("--max-results", type=int, default=20, help="Result cap after fusion.")
     sp.add_argument("--include-site", action="append", default=[], metavar="DOMAIN")
     sp.add_argument("--exclude-site", action="append", default=[], metavar="DOMAIN")
@@ -40,18 +53,34 @@ def _add_search_command(sub: Any) -> None:
 
 def _cmd_search(args: argparse.Namespace) -> int:
     engines = [e.strip() for e in args.engines.split(",") if e.strip()] if args.engines else None
-    request = SearchRequest(
-        query=args.query,
-        count=args.count,
-        language=args.language,
-        country=args.country,
-        safesearch=args.safesearch,
-        freshness=args.freshness,
-        max_total_results=args.max_results,
-        include_sites=args.include_site,
-        exclude_sites=args.exclude_site,
-        engines=engines,
-    )
+    try:
+        request = SearchRequest(
+            query=args.query,
+            count=args.count,
+            language=args.language,
+            country=args.country,
+            safesearch=args.safesearch,
+            freshness=args.freshness,
+            max_total_results=args.max_results,
+            include_sites=args.include_site,
+            exclude_sites=args.exclude_site,
+            engines=engines,
+        )
+    except ValidationError as exc:
+        env = error_envelope(
+            SEARCH_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=f"Invalid search request ({exc.error_count()} validation error(s)).",
+            retriable=False,
+            layer="search",
+            backend=None,
+        )
+        if args.json:
+            print(json.dumps(env.model_dump(mode="json"), indent=2, ensure_ascii=False))
+        else:
+            print(f"error: {errors.INVALID_REQUEST}: invalid search request", file=sys.stderr)
+        return 1
+
     router = build_router(searxng_url=args.searxng_url, enable_ddgs=not args.no_ddgs)
     envelope = router.search(request)
     payload = envelope.model_dump(mode="json")
