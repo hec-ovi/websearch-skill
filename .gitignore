@@ -1,0 +1,35 @@
+# Research store (design of record; kept local, distilled into docs/ARCHITECTURE.md)
+.research/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+*.so
+
+# Virtualenv / uv
+.venv/
+venv/
+.python-version
+
+# Test / coverage / cache
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local secrets (search-engine API keys, SearXNG URL overrides)
+.env
+.env.*
+!.env.example
