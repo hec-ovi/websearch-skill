@@ -2,10 +2,11 @@
 
 Used when the local SQLite has no FTS5 (a distro or self-built interpreter may omit it).
 It holds the same passages the SQLite adapter would and ranks them with the standard
-Okapi BM25 (k1=1.2, b=0.75) over a simple alphanumeric tokenizer, returning the identical
-Passage / SearchPageResult / PageDocument / ResolveIndex shapes so it is a drop-in behind
-the PageIndex port. At the corpus size a single search cycle produces (tens to hundreds of
-passages) recomputing the term statistics on each change is negligible.
+Okapi BM25 (k1=1.2, b=0.75), matching FTS5's IDF, over a Unicode-folding tokenizer that
+approximates FTS5's unicode61, returning the identical Passage / SearchPageResult /
+PageDocument / ResolveIndex shapes so it is a drop-in behind the PageIndex port. At the
+corpus size a single search cycle produces (tens to hundreds of passages) recomputing the
+term statistics on each change is negligible.
 """
 
 from __future__ import annotations
@@ -200,9 +201,7 @@ class MemoryBm25Index:
                 has_more=False,
                 backend=self.name,
             )
-        scored = [
-            (self._score(p, query_terms, n), idx, p) for idx, p in enumerate(self._passages)
-        ]
+        scored = [(self._score(p, query_terms, n), idx, p) for idx, p in enumerate(self._passages)]
         scored = [s for s in scored if s[0] > 0]
         # Descending score; ties broken by insertion order for determinism.
         scored.sort(key=lambda s: (-s[0], s[1]))

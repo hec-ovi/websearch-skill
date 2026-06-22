@@ -37,9 +37,7 @@ def _content_texts(r: FormattedResult) -> list[str]:
     return [r.title or r.url]
 
 
-def to_anthropic_blocks(
-    results: list[FormattedResult], *, citations: bool = True
-) -> list[dict]:
+def to_anthropic_blocks(results: list[FormattedResult], *, citations: bool = True) -> list[dict]:
     """Build the ``anthropic_search_result_blocks`` array (serialized, optionals dropped)."""
     blocks: list[dict] = []
     for r in results:

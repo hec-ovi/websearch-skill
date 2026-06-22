@@ -344,9 +344,7 @@ def _add_open_command(sub: Any) -> None:
         help="auto mode renders full when the page's estimated tokens are at or below this.",
     )
     op.add_argument("--no-dedup", action="store_true", help="Disable near-duplicate folding.")
-    op.add_argument(
-        "--jaccard", type=float, default=0.9, help="MinHash near-dup threshold (0..1)."
-    )
+    op.add_argument("--jaccard", type=float, default=0.9, help="MinHash near-dup threshold (0..1).")
     op.add_argument(
         "--anthropic-blocks",
         action="store_true",
@@ -429,9 +427,7 @@ def _cmd_open(args: argparse.Namespace) -> int:
         payload = env.data
         ri = _extract_to_result_input(payload)
         results.append(ri)
-        pages.append(
-            PageInput(url=ri.url, markdown=ri.body_markdown or "", title=ri.title)
-        )
+        pages.append(PageInput(url=ri.url, markdown=ri.body_markdown or "", title=ri.title))
 
     if not results:
         return _emit_error(
@@ -477,9 +473,7 @@ def _cmd_open(args: argparse.Namespace) -> int:
             ).model_dump(mode="json")
             payload["meta"]["page_search"] = search_result
     except Exception as exc:  # never lose the formatted document to an index error
-        payload["data"]["warnings"].append(
-            f"page index/search failed: {type(exc).__name__}: {exc}"
-        )
+        payload["data"]["warnings"].append(f"page index/search failed: {type(exc).__name__}: {exc}")
 
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -504,8 +498,10 @@ def _print_open_human(env: dict, search: dict | None, quiet: bool = False) -> No
         )
         for p in passages:
             head = (p.get("text") or "").strip().replace("\n", " ")[:160]
-            print(f"- [{p.get('score'):.4f}] {p.get('url')} #{p.get('ordinal')}: {head}",
-                  file=sys.stderr)
+            print(
+                f"- [{p.get('score'):.4f}] {p.get('url')} #{p.get('ordinal')}: {head}",
+                file=sys.stderr,
+            )
 
 
 def main(argv: list[str] | None = None) -> int:
