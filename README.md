@@ -9,6 +9,8 @@ Open-source multi-engine web search and content extraction for AI agents, built 
 [![tests](https://img.shields.io/badge/tests-423%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
+> **Status: early.** This is `v0.1.0`, the first public release (2026-06-22). The keyless search, the clean-Markdown reader, and the five agent tools work today and are covered by the test suite and a live in-harness check. The hard anti-bot tiers, the opt-in proxy egress, and local rerank are not built yet (see Roadmap). It is new, so pin a version and try it in a sandbox before wiring it into anything sensitive.
+
 ## What it is
 
 A self-hosted web search and page reader for AI agents, with no API keys and no paywall. Point it at a query and it fans out across many search engines, fuses and dedups the results, then fetches and extracts pages into clean Markdown. Everything runs locally; queries do not go to a vendor.
@@ -32,7 +34,7 @@ For broader and more reliable search you can run your own SearXNG (hundreds of e
 
 It is MIT-licensed and open source, and the keyless default is just the floor. You can stack a self-hosted SearXNG, keyed engines (Brave, Exa, Tavily), or a paid egress adapter on top, all behind the same contracts, none of them required.
 
-The scope is an honest Pareto win rather than a clean sweep. Among 2026 agentic-search APIs the top tier is statistically tied on result quality, so cost and latency are the real differentiators (see the scorecard below). This project wins on cost (about zero at the software layer), privacy and self-hosting, multi-engine recall plus dedup, clean extraction, and the unprotected majority of the web. Hard anti-bot at scale stays a swappable paid egress adapter, because residential proxies and captcha solving have no reliable free equivalent.
+The scope is a Pareto trade rather than a clean sweep. Among 2026 agentic-search APIs the top tier is statistically tied on result quality, so cost and latency are the real differentiators; the scorecard below is how I measure that, axis by axis. Where this helps is cost (about zero at the software layer), privacy and self-hosting, multi-engine recall plus dedup, clean extraction, and the unprotected majority of the web. Hard anti-bot at scale is out of scope: it stays a swappable paid egress adapter, because residential proxies and captcha solving have no reliable free equivalent.
 
 ## Layer status
 
@@ -280,7 +282,7 @@ Each layer is a folder with a port (a capability-named interface) and one or mor
 
 ## The 7-axis scorecard
 
-The scorecard below breaks "outperform" into measurable axes:
+Rather than a single claim that it is better, here is how I measure it, axis by axis, including where it is only at parity or behind:
 
 | Axis | This tool | Notes |
 |---|---|---|
