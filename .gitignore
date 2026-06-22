@@ -1,6 +1,10 @@
 # Research store (design of record; kept local, distilled into docs/ARCHITECTURE.md)
 .research/
 
+# Internal agent instruction files (kept local for the build agent, not public)
+CLAUDE.md
+AGENTS.md
+
 # Python
 __pycache__/
 *.py[cod]
