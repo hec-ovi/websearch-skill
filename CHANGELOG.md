@@ -24,11 +24,27 @@ semantic versioning once it reaches a tagged release.
   when every selected engine fails).
 - CLI entry point `websearch search` (`--json` emits the raw Envelope; exit code 1 on an
   error Envelope).
-- Test suite (37 tests): an end-to-end test through the real CLI entry point with both
+- Test suite (75 tests): an end-to-end test through the real CLI entry point with both
   external boundaries stubbed (SearXNG via pytest-httpx, ddgs via a fake), plus focused
-  canonicalization, fusion, router fault-tolerance, and contract-conformance tests that
-  validate real output against the frozen schemas. CI runs ruff and pytest on Python
-  3.11 to 3.13 via uv.
+  canonicalization, dedup, fusion, adapter, router fault-tolerance, and
+  contract-conformance tests that validate real output against the frozen schemas. CI
+  runs ruff and pytest on Python 3.11 to 3.13 via uv.
+
+### Fixed
+
+After an adversarial multi-agent review and a fresh-agent dogfooding pass of Layer 1:
+
+- URL canonicalization no longer crashes on a malformed port (e.g. a non-numeric or
+  out-of-range port) or an IPv6 literal. Previously that ValueError propagated through
+  dedup and aborted the entire search, defeating per-engine fault tolerance; now the
+  whole canonicalization body is guarded and IPv6 hosts keep their brackets.
+- SearXNG and ddgs adapters tolerate malformed responses (non-object JSON, non-dict
+  entries), coerce upstream fields (score to float, publishedDate to str), and use a
+  valid ddgs region for BCP-47 language tags.
+- The router bounds hung engines (a slow engine can no longer block the request past
+  its timeout) and reports unknown engine names instead of silently dropping them.
+- The CLI returns a clean error Envelope on invalid input instead of an uncaught
+  traceback, and `--help` names the built-in engines.
 
 ### Notes
 
