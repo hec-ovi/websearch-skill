@@ -15,6 +15,7 @@ of language or process boundary.
 | `extract.schema.json` | Layer 2A extract sub-port + agent-facing response (`ExtractRequest`, `ExtractResult`, `ExtractSource`, `ExtractPayload`) | 1.0.0 | frozen |
 | `format.schema.json` | Layer 2B format sub-port (`ResultInput`, `FormatRequest`, `FormatPayload`, `FormatSidecar`, `AnthropicSearchResultBlock`) | 1.0.0 | frozen |
 | `store.schema.json` | Layer 2B store/page-index sub-port (`PageInput`, `Passage`, `SearchPageRequest`, `SearchPageResult`, `PageDocument`, `ResolveIndex`, `StoreConfig`) | 1.0.0 | frozen |
+| `agent-io.schema.json` | Layer 3 agent I/O (`AgentSearchRequest`/`Payload`, `AgentFetchRequest`/`AgentOpenRequest`/`AgentPage`/`AgentFetchPayload`, `FenceInfo`) | 1.0.0 | frozen |
 
 Layer 2A is two decoupled sub-ports: `fetch` (URL in, raw HTML out) and `extract`
 (HTML in, clean Markdown + metadata out). Layer 2B is likewise two decoupled
@@ -22,9 +23,17 @@ sub-ports: `format` (vendor-neutral results in, one layout-stable Markdown docum
 plus a parallel JSON sidecar out, relevance-ordered and paginated with near-duplicate
 dedup and progressive disclosure) and `store` (full pages in, ranked passages and a
 resolver out, default adapter SQLite FTS5 in-memory). All sub-ports are independently
-swappable, so each gets its own contract file and version. The agent-io (Layer 3)
-contract is added when that layer is built (progressive disclosure), as its own file
-with its own `x-contract-version`.
+swappable, so each gets its own contract file and version.
+
+Layer 3 (`agent-io.schema.json`) is the consolidated agent-facing surface over Layers
+1/2A/2B: `web_search` (-> Layer 1), `web_fetch` (-> Layer 2A, with the untrusted-content
+fence and token-budget pagination), and `web_open` (paginate an already-fetched page
+from the Layer 2B store, no re-fetch). `handle` is the only cross-layer key and is
+human-readable (`site~shorthash`), never an opaque UUID. Fetched page text is UNTRUSTED:
+each page's `content` is wrapped in a random-nonce fence with a data-only directive
+(indirect-prompt-injection defense). Pagination is progressive disclosure, **not** a
+content cap: the full body is preserved verbatim in the Layer 2B store and reachable
+page by page via `web_open`.
 
 Two cross-cutting guarantees the 2B contracts make explicit: there is **no
 output-length cap** (full bodies are stored and echoed in the sidecar verbatim;
