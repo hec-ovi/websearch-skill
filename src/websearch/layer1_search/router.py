@@ -56,6 +56,9 @@ def _site_match(host: str, sites: list[str]) -> bool:
 
 
 class SearchRouter:
+    # Grace beyond the per-engine timeout before the router gives up on a slow engine.
+    _timeout_grace_s = 2.0
+
     def __init__(self, adapters: list[EngineAdapter]):
         self._adapters = list(adapters)
 
@@ -118,12 +121,27 @@ class SearchRouter:
         request_id = str(uuid.uuid4())
         selected = self._select(request)
         backend_id = "+".join(a.name for a in selected) or None
+        known_names = sorted(a.name for a in self._adapters)
+        unknown_requested = (
+            [e for e in request.engines if e not in known_names]
+            if request.engines is not None
+            else []
+        )
 
         if not selected:
+            if request.engines is not None:
+                message = (
+                    f"No engines matched the requested set {list(request.engines)}. "
+                    f"Available engines: {known_names}."
+                )
+            elif not known_names:
+                message = "No search engines are configured (set a SearXNG URL or enable ddgs)."
+            else:
+                message = f"No search engines are enabled. Available engines: {known_names}."
             return error_envelope(
                 SEARCH_CONTRACT_VERSION,
                 code=errors.NO_ENGINES_ENABLED,
-                message="No search engines enabled or matched the requested set.",
+                message=message,
                 retriable=False,
                 layer="search",
                 backend=backend_id,
@@ -133,17 +151,24 @@ class SearchRouter:
             )
 
         outputs: dict[str, EngineOutput] = {}
-        timeout_s = request.timeout_ms / 1000.0
-        with ThreadPoolExecutor(max_workers=len(selected)) as ex:
+        # Drive the executor manually with a single shared deadline and a non-blocking
+        # shutdown. The `with` form would call shutdown(wait=True) on exit and block on a
+        # hung engine well past its timeout; this bounds the whole request instead.
+        deadline = time.perf_counter() + request.timeout_ms / 1000.0 + self._timeout_grace_s
+        ex = ThreadPoolExecutor(max_workers=len(selected))
+        try:
             futures = {ex.submit(self._run_one, a, request): a for a in selected}
             for fut in list(futures):
                 adapter = futures[fut]
+                remaining = max(0.0, deadline - time.perf_counter())
                 try:
-                    outputs[adapter.name] = fut.result(timeout=timeout_s + 2.0)
+                    outputs[adapter.name] = fut.result(timeout=remaining)
                 except Exception as exc:
                     outputs[adapter.name] = EngineOutput(
                         engine=adapter.name, error=f"timeout_or_error: {exc}"
                     )
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
 
         group_of = {a.name: a.correlation_group for a in selected}
         tagged: list[tuple[str, str, object]] = []
@@ -210,6 +235,10 @@ class SearchRouter:
         ]
 
         warnings = self._fusion_warnings(selected)
+        if unknown_requested:
+            warnings.append(
+                f"Unknown engine(s) ignored: {sorted(unknown_requested)}; available: {known_names}."
+            )
         if request.fusion.method == "score_convex":
             warnings.append(
                 "fusion.method 'score_convex' is not implemented yet; used weighted_rrf instead."

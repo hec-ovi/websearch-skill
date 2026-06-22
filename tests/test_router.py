@@ -7,9 +7,11 @@ the emitted Envelope against the frozen contract.
 
 from __future__ import annotations
 
+import time
+
 from tests.conftest import SEARCH_RESPONSE_REF
 from websearch.layer1_search.capability import GENERAL_AGGREGATOR, NEURAL_INDEX
-from websearch.layer1_search.models import SearchRequest
+from websearch.layer1_search.models import Fusion, SearchRequest
 from websearch.layer1_search.port import EngineAdapter, EngineOutput, RawResult
 from websearch.layer1_search.router import SearchRouter
 
@@ -131,3 +133,55 @@ def test_correlated_engines_emit_a_decorrelation_warning():
     router = SearchRouter([a, b])
     env = router.search(SearchRequest(query="q"))
     assert any("correlation group" in w for w in env.data["warnings"])
+
+
+def test_unknown_engine_in_partial_set_warns_with_available():
+    router = SearchRouter([FakeAdapter("ddgs", [raw("https://x/1", 1)])])
+    env = router.search(SearchRequest(query="q", engines=["ddgs", "nope"]))
+    assert env.ok is True
+    assert any("nope" in w and "ddgs" in w for w in env.data["warnings"])
+
+
+def test_all_unknown_engines_error_names_the_available_set():
+    router = SearchRouter([FakeAdapter("ddgs", [raw("https://x/1", 1)])])
+    env = router.search(SearchRequest(query="q", engines=["nope"]))
+    assert env.ok is False
+    assert env.error.code == "no_engines_enabled"
+    assert "ddgs" in env.error.message and "nope" in env.error.message
+
+
+def test_score_convex_emits_fallback_warning():
+    router = SearchRouter([FakeAdapter("a", [raw("https://x/1", 1)])])
+    env = router.search(SearchRequest(query="q", fusion=Fusion(method="score_convex")))
+    assert any("score_convex" in w for w in env.data["warnings"])
+
+
+def test_max_total_results_caps_output():
+    results = [raw(f"https://x/{i}", i) for i in range(1, 11)]
+    router = SearchRouter([FakeAdapter("a", results)])
+    env = router.search(SearchRequest(query="q", max_total_results=3))
+    assert len(env.data["results"]) == 3
+
+
+def test_responded_with_no_results_is_ok_and_empty():
+    router = SearchRouter([FakeAdapter("a", [])])
+    env = router.search(SearchRequest(query="q"))
+    assert env.ok is True
+    assert env.data["results"] == []
+
+
+def test_slow_engine_times_out_without_blocking_the_request():
+    class SlowAdapter(FakeAdapter):
+        def search(self, request):
+            time.sleep(0.4)
+            return EngineOutput(engine=self.name, results=[raw("https://slow/1", 1)])
+
+    router = SearchRouter([FakeAdapter("fast", [raw("https://fast/1", 1)]), SlowAdapter("slow")])
+    router._timeout_grace_s = 0.05
+    start = time.perf_counter()
+    env = router.search(SearchRequest(query="q", timeout_ms=1))
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.35  # returned before the slow engine finished
+    assert env.ok is True
+    assert [r["url"] for r in env.data["results"]] == ["https://fast/1"]
+    assert any(u["engine"] == "slow" for u in env.data["unresponsive_engines"])
