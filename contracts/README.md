@@ -11,7 +11,7 @@ of language or process boundary.
 |---|---|---|---|
 | `envelope.schema.json` | Cross-cutting wrapper (`contract_version`, `ok`, `data`, `error`, `meta`) | 1.0.0 | frozen |
 | `search.schema.json` | Layer 1 search (`SearchRequest`, `SearchPayload`, `ResultItem`, `SourceProvenance`) | 1.0.0 | frozen |
-| `fetch.schema.json` | Layer 2A fetch sub-port (`FetchRequest`, `FetchResult`) | 1.0.0 | frozen |
+| `fetch.schema.json` | Layer 2A fetch sub-port (`FetchRequest`, `FetchResult`) | 1.1.0 | frozen |
 | `extract.schema.json` | Layer 2A extract sub-port + agent-facing response (`ExtractRequest`, `ExtractResult`, `ExtractSource`, `ExtractPayload`) | 1.0.0 | frozen |
 
 Layer 2A is two decoupled sub-ports: `fetch` (URL in, raw HTML out) and `extract`

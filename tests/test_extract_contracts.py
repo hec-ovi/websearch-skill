@@ -42,6 +42,27 @@ def test_fetch_request_requires_url():
     assert schema_errors({"tier_hint": "auto"}, FETCH_REQUEST_REF)
 
 
+def test_fetch_request_has_default_transport_guard_and_allow_private():
+    r = FetchRequest(url="https://x.test/")
+    assert r.max_bytes == 10_000_000  # default 10 MB transport guard
+    assert r.allow_private_hosts is False
+
+
+def test_fetch_request_rejects_non_http_scheme():
+    import pytest
+    from pydantic import ValidationError
+
+    for bad in ("file:///etc/passwd", "ftp://x/y", "gopher://x/"):
+        with pytest.raises(ValidationError):
+            FetchRequest(url=bad)
+
+
+def test_fetch_request_allow_private_validates_against_schema(assert_valid):
+    assert_valid(
+        _json(FetchRequest(url="https://x.test/", allow_private_hosts=True)), FETCH_REQUEST_REF
+    )
+
+
 def test_fetch_result_valid(assert_valid):
     r = FetchResult(url="https://x.test/", status=200, ok=True, fetched_via="curl_cffi")
     assert_valid(_json(r), FETCH_RESULT_REF)

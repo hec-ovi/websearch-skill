@@ -8,11 +8,16 @@ fields (fail fast on a typo); results allow the schema's documented fields only.
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-FETCH_CONTRACT_VERSION = "1.0.0"
+FETCH_CONTRACT_VERSION = "1.1.0"
 EXTRACT_CONTRACT_VERSION = "1.0.0"
+
+# Default transport guard: bound how much of a response we buffer/hand downstream.
+# This is a DoS defense, not an output/LLM cap; extracted content is never truncated.
+DEFAULT_MAX_BYTES = 10_000_000
 
 # Recommended block_reason vocabulary (kept as plain strings in the contract so a
 # new anti-bot vendor never forces a contract bump). Grouped by escalation policy.
@@ -72,8 +77,16 @@ class FetchRequest(BaseModel):
     proxy: Proxy | None = None
     user_agent: str | None = None
     screenshot: bool = False
-    max_bytes: int | None = Field(default=None, ge=1)
+    max_bytes: int | None = Field(default=DEFAULT_MAX_BYTES, ge=1)
+    allow_private_hosts: bool = False
     politeness: Politeness = Field(default_factory=Politeness)
+
+    @field_validator("url")
+    @classmethod
+    def _http_scheme_only(cls, v: str) -> str:
+        if urlsplit(v).scheme.lower() not in ("http", "https"):
+            raise ValueError("url must be an absolute http(s) URL")
+        return v
 
 
 class FetchResult(BaseModel):

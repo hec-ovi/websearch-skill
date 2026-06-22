@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/hec-ovi/websearch-skill/contracts/fetch.schema.json",
   "title": "Layer 2A - Fetch sub-port contract",
-  "description": "URL-in / raw-content-out. The first of Layer 2A's two decoupled sub-ports (the other is extract.schema.json). FETCH escalates by tier and never extracts or truncates; it hands raw HTML to EXTRACT. The default closure is Apache-2.0 only (httpx, curl_cffi); browser and stealth tiers (Crawl4AI, nodriver, Camoufox) and the jina_reader fallback are opt-in adapters named in the enums but not part of the base install. Proxy egress is owned by Layer 1; FETCH only consumes an endpoint, never holds credentials.",
-  "x-contract-version": "1.0.0",
+  "description": "URL-in / raw-content-out. The first of Layer 2A's two decoupled sub-ports (the other is extract.schema.json). FETCH escalates by tier and never extracts or truncates; it hands raw HTML to EXTRACT. It enforces an http(s) scheme allowlist and refuses private/reserved egress targets unless allow_private_hosts is set, and follows redirects with the same guard on each hop. The default closure is permissive (httpx, curl_cffi); browser and stealth tiers (Crawl4AI, nodriver, Camoufox) and the jina_reader fallback are opt-in adapters named in the enums but not part of the base install. Proxy egress is owned by Layer 1; FETCH only consumes an endpoint, never holds credentials.",
+  "x-contract-version": "1.1.0",
   "$defs": {
     "Proxy": {
       "type": "object",
@@ -59,10 +59,15 @@
         "max_bytes": {
           "type": ["integer", "null"],
           "minimum": 1,
-          "default": null,
-          "description": "Transport guard ONLY: stop downloading a response body past this many bytes (defends against multi-GB transfers). This is NOT an output/LLM length cap; extracted content is never truncated."
+          "default": 10000000,
+          "description": "Transport guard ONLY: stop downloading a response body past this many bytes (defends against multi-GB transfers); defaults to 10 MB. This is NOT an output/LLM length cap; extracted content is never truncated. null removes the guard."
         },
-        "politeness": { "$ref": "#/$defs/Politeness", "default": { "per_host_delay_ms": 0, "respect_robots": true } }
+        "allow_private_hosts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Permit fetching private/loopback/link-local/reserved addresses (e.g. an internal service). Default false: the SSRF guard refuses them, including the 169.254.169.254 cloud-metadata endpoint."
+        },
+        "politeness": { "$ref": "#/$defs/Politeness", "default": { "per_host_delay_ms": 0, "respect_robots": false } }
       }
     },
 

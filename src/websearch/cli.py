@@ -135,7 +135,16 @@ def _add_fetch_command(sub: Any) -> None:
     fp.add_argument("--timeout-ms", type=int, default=20000)
     fp.add_argument("--user-agent", help="Override the request User-Agent.")
     fp.add_argument("--proxy", help="Egress proxy URL (e.g. socks5h://127.0.0.1:1080).")
-    fp.add_argument("--max-bytes", type=int, help="Transport guard only (not a content cap).")
+    fp.add_argument(
+        "--max-bytes",
+        type=int,
+        help="Transport guard only, not a content cap (default 10 MB).",
+    )
+    fp.add_argument(
+        "--allow-private-hosts",
+        action="store_true",
+        help="Permit fetching private/loopback/metadata addresses (SSRF guard off).",
+    )
     fp.add_argument(
         "--respect-robots", action="store_true", help="Honor robots.txt (off by default)."
     )
@@ -189,19 +198,22 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
         ptype = "socks5" if args.proxy.lower().startswith("socks") else "http"
         proxy = {"url": args.proxy, "type": ptype}
 
+    fetch_kwargs: dict[str, Any] = dict(
+        url=args.url,
+        tier_hint=args.tier,
+        timeout_ms=args.timeout_ms,
+        user_agent=args.user_agent,
+        proxy=proxy,
+        allow_private_hosts=args.allow_private_hosts,
+        politeness={
+            "per_host_delay_ms": args.per_host_delay_ms,
+            "respect_robots": args.respect_robots,
+        },
+    )
+    if args.max_bytes is not None:  # absent flag keeps the model's default transport guard
+        fetch_kwargs["max_bytes"] = args.max_bytes
     try:
-        request = FetchRequest(
-            url=args.url,
-            tier_hint=args.tier,
-            timeout_ms=args.timeout_ms,
-            user_agent=args.user_agent,
-            proxy=proxy,
-            max_bytes=args.max_bytes,
-            politeness={
-                "per_host_delay_ms": args.per_host_delay_ms,
-                "respect_robots": args.respect_robots,
-            },
-        )
+        request = FetchRequest(**fetch_kwargs)
     except ValidationError:
         return _emit_error(
             EXTRACT_CONTRACT_VERSION,

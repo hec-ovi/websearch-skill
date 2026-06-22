@@ -1,10 +1,14 @@
 """Escalation fetcher: curl_cffi with browser TLS/JA3 impersonation.
 
 curl_cffi binds the curl-impersonate fork of libcurl (C), so it presents a real
-browser TLS + HTTP/2 fingerprint and passes many Cloudflare/managed-challenge cases
-that plain httpx fails. Because the I/O happens inside libcurl, this tier is NOT
-interceptable by pytest-httpx; tests inject ``getter`` (a fake ``curl_cffi.get``)
-exactly the way the ddgs adapter is faked at its library boundary.
+browser fingerprint and passes many Cloudflare/managed-challenge cases plain httpx
+fails. The I/O happens inside libcurl, so this tier is NOT interceptable by
+pytest-httpx; tests inject ``getter`` (a fake ``curl_cffi.get``) at the library
+boundary, the way the ddgs adapter is faked.
+
+It applies the same SSRF egress guard as the httpx tier (an http(s) scheme allowlist
+plus a private/reserved address check before each request) and follows redirects
+manually so libcurl never auto-follows into the internal network or a non-http scheme.
 """
 
 from __future__ import annotations
@@ -12,11 +16,24 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urljoin
 
 from ..blocks import detect_block
+from ..egress import BlockedEgress, guard_url
 from ..models import FetchRequest, FetchResult
 from ..ports import FetchAdapter
-from .util import DEFAULT_USER_AGENT, cap_body
+from .util import DEFAULT_USER_AGENT, read_body
+
+_MAX_REDIRECTS = 10
+_REDIRECT_STATUS = (301, 302, 303, 307, 308)
+
+
+def _header(headers: dict[str, str], name: str) -> str | None:
+    name = name.lower()
+    for k, v in headers.items():
+        if k.lower() == name:
+            return v
+    return None
 
 
 class CurlCffiFetcher(FetchAdapter):
@@ -52,28 +69,29 @@ class CurlCffiFetcher(FetchAdapter):
         def elapsed() -> int:
             return int((time.perf_counter() - t0) * 1000)
 
-        try:
-            getter = self._resolve_getter()
-        except ImportError as exc:
+        def fail(reason: str, final_url: str | None, redirects: list[str]) -> FetchResult:
             return FetchResult(
                 url=request.url,
+                final_url=final_url,
                 status=0,
                 ok=False,
                 fetched_via=self.fetched_via,
-                error=f"curl_cffi not installed: {exc}",
+                redirects=redirects,
+                error=reason,
                 fetch_ms=elapsed(),
             )
 
-        headers = dict(request.headers)
-        if request.user_agent:
-            headers.setdefault("User-Agent", request.user_agent)
-        else:
-            headers.setdefault("User-Agent", DEFAULT_USER_AGENT)
+        try:
+            getter = self._resolve_getter()
+        except ImportError as exc:
+            return fail(f"curl_cffi not installed: {exc}", None, [])
 
+        headers = dict(request.headers)
+        headers.setdefault("User-Agent", request.user_agent or DEFAULT_USER_AGENT)
         kwargs: dict[str, Any] = {
             "impersonate": self._impersonate,
             "timeout": request.timeout_ms / 1000.0,
-            "allow_redirects": True,
+            "allow_redirects": False,
             "headers": headers,
         }
         if request.cookies:
@@ -81,34 +99,42 @@ class CurlCffiFetcher(FetchAdapter):
         if request.proxy and request.proxy.type != "none":
             kwargs["proxies"] = {"http": request.proxy.url, "https": request.proxy.url}
 
-        try:
-            resp = getter(request.url, **kwargs)
-        except Exception as exc:
+        redirects: list[str] = []
+        current = request.url
+        for _hop in range(_MAX_REDIRECTS + 1):
+            try:
+                guard_url(current, allow_private=request.allow_private_hosts)
+            except BlockedEgress as exc:
+                return fail(exc.reason, current if current != request.url else None, redirects)
+            try:
+                resp = getter(current, **kwargs)
+            except Exception as exc:
+                return fail(f"{type(exc).__name__}: {exc}", current, redirects)
+
+            resp_headers = {str(k): str(v) for k, v in dict(resp.headers).items()}
+            status = int(resp.status_code)
+            location = _header(resp_headers, "location")
+            if status in _REDIRECT_STATUS and location:
+                redirects.append(current)
+                current = urljoin(current, location)
+                continue
+
+            text = resp.text
+            content = getattr(resp, "content", text.encode("utf-8", errors="replace"))
+            body = read_body(content, _header(resp_headers, "content-type"), request.max_bytes)
+            blocked, reason = detect_block(status, body, resp_headers)
             return FetchResult(
                 url=request.url,
-                status=0,
-                ok=False,
+                final_url=str(getattr(resp, "url", current)),
+                status=status,
+                ok=status < 400,
                 fetched_via=self.fetched_via,
-                error=f"{type(exc).__name__}: {exc}",
+                raw_html=body,
+                content_type=_header(resp_headers, "content-type"),
+                redirects=redirects,
+                headers=resp_headers,
+                blocked=blocked,
+                block_reason=reason,
                 fetch_ms=elapsed(),
             )
-
-        resp_headers = {str(k): str(v) for k, v in dict(resp.headers).items()}
-        text = resp.text
-        content = getattr(resp, "content", text.encode("utf-8", errors="replace"))
-        body = cap_body(content, text, getattr(resp, "encoding", None), request.max_bytes)
-        status = int(resp.status_code)
-        blocked, reason = detect_block(status, body, resp_headers)
-        return FetchResult(
-            url=request.url,
-            final_url=str(getattr(resp, "url", request.url)),
-            status=status,
-            ok=status < 400,
-            fetched_via=self.fetched_via,
-            raw_html=body,
-            content_type=resp_headers.get("content-type"),
-            headers=resp_headers,
-            blocked=blocked,
-            block_reason=reason,
-            fetch_ms=elapsed(),
-        )
+        return fail("too many redirects", current, redirects)

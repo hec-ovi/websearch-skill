@@ -55,6 +55,17 @@ def schema_errors(instance: Any, ref: str) -> list[str]:
     ]
 
 
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    """In tests, hostnames resolve to a public IP so the SSRF egress guard does not
+    block the fake test hosts. Tests that exercise the guard itself pass their own
+    resolver to egress.guard_url, which bypasses this."""
+    monkeypatch.setattr(
+        "websearch.layer2_extract.egress._resolve",
+        lambda host: {"93.184.216.34"},
+    )
+
+
 @pytest.fixture
 def assert_valid():
     def _assert(instance: Any, ref: str) -> None:
@@ -169,20 +180,30 @@ class FakeCurlResponse:
         headers: dict | None = None,
         url: str | None = None,
         encoding: str = "utf-8",
+        content: bytes | None = None,
     ):
         self.text = text
         self.status_code = status_code
         self.headers = headers or {"content-type": "text/html"}
         self.url = url or "https://example.test/"
         self.encoding = encoding
-        self.content = text.encode("utf-8")
+        # content may diverge from a UTF-8 encoding of text (e.g. a latin-1 body),
+        # which is how the real Response behaves and what the fetcher decodes from.
+        self.content = content if content is not None else text.encode("utf-8")
 
 
-def fake_curl_getter(text: str, status_code: int = 200, headers: dict | None = None):
+def fake_curl_getter(
+    text: str,
+    status_code: int = 200,
+    headers: dict | None = None,
+    content: bytes | None = None,
+):
     """A drop-in for curl_cffi.get(url, **kwargs) that returns a canned response."""
 
     def _get(url: str, **kwargs: Any) -> FakeCurlResponse:
-        return FakeCurlResponse(text, status_code=status_code, headers=headers, url=url)
+        return FakeCurlResponse(
+            text, status_code=status_code, headers=headers, url=url, content=content
+        )
 
     return _get
 
