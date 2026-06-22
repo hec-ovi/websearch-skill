@@ -4,7 +4,7 @@ Open-source multi-engine web search and content extraction for AI agents, built 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-272%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-332%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
 ## What it is
@@ -20,9 +20,9 @@ The scope is an honest Pareto win, not a clean sweep. Among 2026 agentic-search 
 | Layer 1: Search | Multi-engine router (SearXNG + ddgs), canonicalize, dedup, de-correlated RRF fusion | Built |
 | Layer 2A: Fetch + Extract | Tiered fetch (httpx, curl_cffi impersonation), Trafilatura extraction to Markdown + metadata | Built |
 | Layer 2B: Format + Store | Paginated Markdown + JSON sidecar, progressive-disclosure index/resolver, MinHash dedup, ephemeral SQLite-FTS5 store | Built |
-| Layer 3: Agent I/O | Consolidated `web_search`/`web_fetch`/`web_open`, optional MCP stdio server, `SKILL.md` | Planned |
+| Layer 3: Agent I/O | Consolidated `web_search`/`web_fetch`/`web_open`, untrusted-content fence, optional MCP stdio server, `SKILL.md` | Built |
 
-Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.0.0`, `fetch@1.1.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
+Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.0.0`, `fetch@1.1.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
 
 ## Layer 1: Search
 
@@ -62,6 +62,14 @@ There is **no output-length cap here either**. The sidecar carries the full body
 
 **Store** is an ephemeral page index behind a `PageIndex` port (`add` / `search` / `get` / `resolve_index`). There is no database for the per-query result set, which is tens of rows of plain Python; the store earns its keep only as the progressive-disclosure index over fetched pages. The default adapter is SQLite FTS5 over an in-memory connection: it ships in the Python stdlib with BM25 and needs no third-party package. FTS5 is not compiled into every SQLite build, so the adapter probes for it at runtime and falls back to a pure-Python BM25 index that returns the identical shapes. Adds are idempotent on url plus content hash, an arbitrary query is escaped so FTS5 operators never raise a syntax error, and persistence is just passing a file path. A vector or Rust backend (`sqlite-vec`, `tantivy`) plugs in behind the same port, opt-in.
 
+## Layer 3: Agent I/O
+
+One consolidated surface over Layers 1, 2A, and 2B: `web_search` (find), `web_fetch` (read a URL), and `web_open` (page through an already-fetched document). Each returns the same `Envelope`. The identical core is exposed three ways: the `websearch web-search` / `web-fetch` / `web-open` CLI, an optional FastMCP stdio server (`websearch mcp`, the `mcp` extra), and a portable `SKILL.md` written to the Agent Skills standard (name plus description, so it loads in Claude Code, Codex, OpenCode, and others).
+
+The cross-layer key is a human-readable **handle** (`site~shorthash`, for example `en.wikipedia.org~3a1f9c2b5e6f`), never an opaque UUID. `web_fetch` indexes the full page into the Layer 2B store and returns one token-budget page; `web_open` pages through the rest from that store, by handle, without re-fetching. The split is **lossless**: pagination is progressive disclosure, not a cap, and the whole body stays reachable page by page. The lower-level `search` / `fetch` / `open` commands remain as the per-layer surfaces for debugging and composition.
+
+Fetched page text is untrusted, so `web_fetch` and `web_open` wrap each page in a fence (see Security). On the MCP face the page also rides the tool-result channel, which models are trained to treat with skepticism.
+
 ## Install
 
 The project is uv-native. With [uv](https://docs.astral.sh/uv/):
@@ -93,6 +101,16 @@ uv run websearch open \
   "https://en.wikipedia.org/wiki/Rust_(programming_language)" \
   "https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html" \
   --search "ownership borrow checker"
+
+# Layer 3: the consolidated, fenced, handle-keyed agent face
+uv run websearch web-search "rust ownership" --json
+uv run websearch web-fetch "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html" \
+  --page-size-tokens 4000 --persist-path /tmp/idx.sqlite
+# page through the rest of a fetched doc by its handle, from cache (no refetch)
+uv run websearch web-open "doc.rust-lang.org~<hash>" --page 2 --persist-path /tmp/idx.sqlite
+
+# or run as an MCP server (needs the optional extra: uv sync --extra mcp)
+uv run websearch mcp
 ```
 
 Every command prints a compact human view by default, or the raw JSON `Envelope` with `--json` (exit 0 on success, 1 on a request-level error). For the fetch command, `--output-format {markdown,text,json}` selects the body representation the human view prints (`text` emits the plain-text rendering), and `--quiet` prints only the extracted body, for piping. For the open command, `--mode {auto,index,full}` controls progressive disclosure, `--no-truncate` inlines every full body, `--search QUERY` runs a BM25 passage search over the opened pages, and `--anthropic-blocks` adds the Anthropic search_result view to the sidecar. Useful search flags include `--engines`, `--searxng-url` (or `WEBSEARCH_SEARXNG_URL`), and `--no-ddgs`. See `uv run websearch <command> --help` for the full flag list.
@@ -158,7 +176,7 @@ hits = index.search(SearchPageRequest(query="borrow checker"))
 A fetch tool an agent can point anywhere is an SSRF and prompt-injection surface, so:
 
 - **SSRF guard (built):** fetch enforces an http(s) scheme allowlist and resolves every host, refusing private, loopback, link-local (the `169.254.169.254` cloud-metadata endpoint), reserved, and multicast addresses. Redirects are followed manually with the same check on each hop, so a public URL cannot redirect into the internal network. Override per request with `--allow-private-hosts` for deliberate internal fetches.
-- **Untrusted content (Layer 3):** fetched page text is untrusted input and must never be treated as instructions. Fencing it in explicit untrusted-content markers at the agent boundary is a Layer 3 (agent I/O) responsibility; Layer 2A returns the clean body unmodified by design, so the contract stays clean and piping works. Until Layer 3 lands, treat `content_markdown` as untrusted in your own prompt assembly.
+- **Untrusted content (built, Layer 3):** fetched page text is untrusted input and is never presented as instructions. `web_fetch` and `web_open` wrap each page in a fence built from the 2026 primary-source guidance: a per-instance 128-bit random nonce in the open and close markers (so injected text cannot forge the close), a data-only directive, and neutralization of any copy of the marker inside the body, with optional datamarking (`--datamark`) for higher resistance. This reduces, but does not eliminate, indirect prompt injection: it prevents the boundary breakout, not persuasion. The real guarantees are channel separation (the MCP face delivers content through the tool-result channel), least privilege, and cutting exfiltration paths. The lower-level `fetch` command still returns the clean body unmodified, so piping and composition stay clean.
 
 ## Architecture
 
@@ -184,17 +202,16 @@ Honest scope: top agentic-search APIs are tied on quality, and hard anti-bot at 
 
 Planned, not built yet:
 
-- **Layer 3 (Agent I/O):** consolidate to `web_search` / `web_fetch` / `web_open`, an optional FastMCP stdio server, and one `SKILL.md` to the Agent Skills standard. `web_open` builds on the Layer 2B format and store ports and adds the untrusted-content fencing.
+- **Distribution:** harness packaging that ships the bundled `SKILL.md` plus tool via `npx skills add`, plugin marketplaces, and PyPI/uvx, with a dual-directory skill drop for Claude, Codex, and OpenCode, and per-harness MCP registration.
 - **Opt-in egress:** gluetun / wg-netns proxy or VPN scoped to search geo and rate limits (not anti-bot), plus a paid residential-proxy adapter for the protected long tail.
 - **Local rerank:** a cross-encoder pass to turn multi-engine recall into precision.
 - **More engines:** keyed adapters (Brave, Exa, Tavily) behind the existing `EngineAdapter` port; an optional neural index.
-- **Distribution:** harness packaging (`npx skills add`, plugin marketplaces, PyPI/uvx), with a dual-directory skill drop for Claude, Codex, and OpenCode.
 
 ## Development
 
 ```bash
 uv sync          # install deps (including the dev group)
-uv run pytest    # 272 tests
+uv run pytest    # 332 tests
 uv run ruff check .
 ```
 

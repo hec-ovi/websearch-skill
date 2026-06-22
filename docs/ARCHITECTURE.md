@@ -27,8 +27,9 @@ emitting and accepting its contract, regardless of language or process.
   - NOT anti-bot for page fetches         page index; opt-in persistence
 ```
 
-Status: Layer 1 (search), Layer 2A (fetch + extract), and Layer 2B (format + store) are
-implemented. The Layer 3 MCP adapter and `SKILL.md` are designed but not built yet.
+Status: Layers 1 (search), 2A (fetch + extract), 2B (format + store), and 3 (agent I/O,
+including the untrusted-content fence, the FastMCP server, and `SKILL.md`) are implemented.
+Harness packaging and the multi-manifest distribution are designed but not built yet.
 
 ## Ports and adapters
 
@@ -100,9 +101,9 @@ never truncated; `max_bytes` is a transport guard only. Neural engines plug in b
 same port.
 
 **Untrusted content.** Fetched page text is untrusted input. Layer 2A returns the clean
-body unmodified by design (so the contract stays clean and piping works); fencing it in
-explicit untrusted-content markers for indirect-prompt-injection defense is a Layer 3
-(agent I/O) responsibility, added with that layer.
+body unmodified by design (so the contract stays clean and piping works); fencing it for
+indirect-prompt-injection defense happens at the Layer 3 agent boundary
+(`web_fetch`/`web_open`), described below.
 
 ## Layer 2B: format + store
 
@@ -141,6 +142,41 @@ shapes. Adds are idempotent on url plus content hash, an arbitrary query is esca
 FTS5 operators never raise a syntax error (tokens are quoted and OR-joined for recall),
 and persistence is just the presence of a file path (WAL enabled). A vector or Rust
 (`sqlite-vec`, `tantivy`) backend plugs in behind the same port, opt-in, never required.
+
+## Layer 3: agent I/O
+
+The consolidated agent-facing surface over Layers 1, 2A, and 2B, behind its own contract
+(`agent-io`). Three capabilities, all over the same `Envelope`:
+
+- `web_search` reshapes Layer 1 results into ranked hits, each with a human-readable `handle`.
+- `web_fetch` runs Layer 2A (fetch + extract), fences the body as untrusted, paginates it by
+  token budget, and indexes the full page into the Layer 2B store.
+- `web_open` pages through an already-fetched document from that store by `handle`, without
+  re-fetching the network.
+
+`handle` (`site~shorthash`) is the only cross-layer key and is human-readable, never an opaque
+id. The store doubles as the handle registry: `web_open` recomputes the handle over the indexed
+URLs, so a persisted store resolves handles across processes, and it fails closed on a same-site
+collision rather than serving the wrong page. A page reached by a redirect is keyed by the
+requested URL (and aliased under the final URL), so a handle from `web_search` stays openable.
+Pagination is lossless progressive disclosure: the pages concatenate back to the exact body and
+every page is reachable, so the no-output-cap rule holds end to end.
+
+**Untrusted-content fence.** A web-search tool funnels attacker-controllable text into the model,
+so each fetched page is wrapped in a fence built from the 2026 primary-source guidance: a
+per-instance 128-bit random nonce in the open and close markers (so injected text cannot forge the
+close), a data-only directive, and neutralization of any in-body copy of the marker, with optional
+datamarking. This is an input-layer mitigation: it prevents the boundary breakout, not persuasion,
+and does not eliminate indirect prompt injection. The real guarantees are channel separation (the
+MCP face delivers content through the tool-result channel, which models are trained to distrust),
+least privilege, and cutting exfiltration paths.
+
+**Faces.** One core, three faces over identical payloads: the `websearch web-search` / `web-fetch`
+/ `web-open` CLI; an optional FastMCP stdio server (`websearch mcp`, the `mcp` extra) whose tools
+return the same Envelope JSON the CLI emits; and a portable `SKILL.md` (Agent Skills standard, name
+plus description) documenting the command grammar so a non-MCP agent can drive the CLI by shell and
+read stdout. The lower-level `search` / `fetch` / `open` commands remain as the per-layer surfaces
+for debugging and composition.
 
 ## Honest scope: a Pareto win
 

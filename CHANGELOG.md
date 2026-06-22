@@ -79,6 +79,52 @@ semantic versioning once it reaches a tagged release.
   rendered Markdown view to the resolver, and `--no-truncate` disables even that.
 - Test suite is now 272 tests (adds dedup, chunk-offset, renderer layout-stability,
   both store adapters, format/store contract conformance, and the `open` end-to-end).
+- Layer 3 contract: `agent-io@1.0.0` (`AgentSearchRequest`/`AgentSearchPayload`,
+  `AgentFetchRequest`/`AgentOpenRequest`/`AgentPage`/`AgentFetchPayload`, `FenceInfo`),
+  the consolidated agent-facing surface over Layers 1/2A/2B.
+- Layer 3 (agent I/O): `web_search` (Layer 1), `web_fetch` (Layer 2A, fenced and
+  paginated), and `web_open` (paginate an already-fetched page from the Layer 2B store
+  by handle, no re-fetch), all over the same `Envelope`. The only cross-layer key is a
+  human-readable `handle` (`site~shorthash`), not an opaque id. Pagination is lossless
+  progressive disclosure, never a content cap.
+- Untrusted-content fence: each fetched page's content is wrapped in delimiters carrying
+  a per-instance 128-bit random nonce (so injected text cannot forge the closing
+  marker), a data-only directive, and neutralization of any in-body copy of the marker,
+  with optional datamarking (`--datamark`). Documented as reducing, not eliminating,
+  indirect prompt injection (it prevents the boundary breakout, not persuasion).
+- Optional FastMCP stdio server (`websearch mcp`, the `mcp` extra) exposing
+  `web_search`/`web_fetch`/`web_open`; the tool returns the same Envelope JSON the CLI
+  emits. New CLI commands `web-search`/`web-fetch`/`web-open`/`mcp`; the lower-level
+  `search`/`fetch`/`open` commands stay as the per-layer surfaces.
+- A portable `SKILL.md` (`skills/web-search/`) to the Agent Skills standard (name plus
+  description), documenting the command grammar, the search/fetch/open decision table,
+  and the untrusted-content rule.
+- Test suite is now 332 tests (adds the fence, token-budget pagination losslessness,
+  the agent-io facade and contract, and the FastMCP server and `web-*` CLI end-to-end).
+
+### Fixed
+
+After an adversarial multi-agent review (eleven confirmed findings) and a fresh-agent
+dogfooding pass of Layer 3:
+
+- A page reached by a redirect is now keyed by the requested URL (and aliased under the
+  final URL), so a `handle` from `web_search` stays resolvable by `web_open` after a
+  redirect instead of diverging to the post-redirect URL.
+- `web_search` no longer advertises a `next_offset` cursor, because the keyless backends
+  do not page results reliably (feeding it back re-showed earlier results); to get
+  different results, refine the query. The `offset` field stays plumbed for a backend
+  that honors it.
+- The fence neutralizes any copy of its marker case-insensitively (a lowercase or
+  mixed-case copy previously survived verbatim in the body).
+- `web_open` fails closed on the astronomically-unlikely same-site handle collision
+  (returns `not_opened`) rather than serving the wrong cached page; the short hash was
+  widened to 48 bits.
+- A single-URL `web-fetch` failure preserves the specific cause in the error message
+  (it previously collapsed to a generic "all 1 url(s) failed").
+- Doc and contract accuracy: `SKILL.md` surfaces the previously-omitted flags
+  (`--tier`, `--quiet`, `--datamark` on `web-open`, and others) and the full output
+  field list; `AgentPage.fence` is now required in the schema (it was always emitted);
+  and the envelope `meta.layer` description lists `agentio`, matching the code.
 
 ### Fixed
 
@@ -135,7 +181,9 @@ dogfooding pass of Layer 2A:
 
 - `fusion.method: score_convex` is accepted but currently falls back to `weighted_rrf`
   (a warning is emitted).
-- Layer 2A returns clean page content unmodified; fencing fetched (untrusted) content in
-  explicit markers for prompt-injection defense is a Layer 3 (agent I/O) responsibility,
-  added with that layer.
-- The Layer 3 MCP adapter and `SKILL.md` are not built yet.
+- Layer 2A still returns clean page content unmodified (so piping and composition stay
+  clean); the untrusted-content fence is applied at the Layer 3 agent boundary
+  (`web_fetch`/`web_open`), not in Layer 2A.
+- The FastMCP server depends on the optional `fastmcp` package; install it with the
+  `mcp` extra. The harness packaging and multi-manifest distribution (npx skills add,
+  plugin marketplaces, PyPI/uvx) are not built yet.
