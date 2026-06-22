@@ -1,0 +1,61 @@
+[project]
+name = "websearch-skill"
+version = "0.1.0"
+description = "Open-source multi-engine web search + extraction SKILL and TOOL for AI agents (uv-native, contract-driven, harness-portable)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Hector Oviedo", email = "hector.ernesto.oviedo@gmail.com" }]
+keywords = ["web-search", "ai-agents", "searxng", "ddgs", "mcp", "claude-skill", "rank-fusion"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+]
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "ddgs>=9.0",
+]
+
+[project.optional-dependencies]
+# Contract validation at runtime (always available in dev; optional at install).
+schema = ["jsonschema>=4.21"]
+
+[project.scripts]
+websearch = "websearch.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/hec-ovi/websearch-skill"
+Repository = "https://github.com/hec-ovi/websearch-skill"
+Issues = "https://github.com/hec-ovi/websearch-skill/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-httpx>=0.30",
+    "jsonschema>=4.21",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/websearch"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
