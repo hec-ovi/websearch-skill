@@ -51,6 +51,16 @@ STORE_PAGE_DOC_REF = f"{STORE_ID}#/$defs/PageDocument"
 STORE_RESOLVE_INDEX_REF = f"{STORE_ID}#/$defs/ResolveIndex"
 STORE_PAGE_INPUT_REF = f"{STORE_ID}#/$defs/PageInput"
 
+AGENTIO_ID = "https://github.com/hec-ovi/websearch-skill/contracts/agent-io.schema.json"
+AGENTIO_SEARCH_REQUEST_REF = f"{AGENTIO_ID}#/$defs/AgentSearchRequest"
+AGENTIO_SEARCH_PAYLOAD_REF = f"{AGENTIO_ID}#/$defs/AgentSearchPayload"
+AGENTIO_SEARCH_RESPONSE_REF = f"{AGENTIO_ID}#/$defs/AgentSearchResponse"
+AGENTIO_FETCH_REQUEST_REF = f"{AGENTIO_ID}#/$defs/AgentFetchRequest"
+AGENTIO_OPEN_REQUEST_REF = f"{AGENTIO_ID}#/$defs/AgentOpenRequest"
+AGENTIO_FETCH_PAYLOAD_REF = f"{AGENTIO_ID}#/$defs/AgentFetchPayload"
+AGENTIO_FETCH_RESPONSE_REF = f"{AGENTIO_ID}#/$defs/AgentFetchResponse"
+AGENTIO_PAGE_REF = f"{AGENTIO_ID}#/$defs/AgentPage"
+
 
 def _build_registry() -> Registry:
     pairs = []
