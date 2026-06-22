@@ -27,6 +27,10 @@ dependencies = [
 [project.optional-dependencies]
 # Contract validation at runtime (always available in dev; optional at install).
 schema = ["jsonschema>=4.21"]
+# Layer 3 MCP face. The base install (CLI) needs none of this; the stdio server and the
+# `websearch mcp` command import it lazily. Standalone FastMCP 3.x (not the mcp SDK's
+# bundled FastMCP 1.0). Pin <4 because minor releases can carry breaking changes.
+mcp = ["fastmcp>=3.4,<4"]
 
 [project.scripts]
 websearch = "websearch.cli:main"
@@ -42,6 +46,8 @@ dev = [
     "pytest-httpx>=0.30",
     "jsonschema>=4.21",
     "ruff>=0.6",
+    # So CI exercises the real MCP server (tool registration + invocation), not a mock.
+    "fastmcp>=3.4,<4",
 ]
 
 [build-system]

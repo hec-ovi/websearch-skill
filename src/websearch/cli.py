@@ -30,6 +30,12 @@ from .layer2_format import (
     build_format_pipeline,
     build_page_index,
 )
+from .layer3_agentio import (
+    AGENTIO_CONTRACT_VERSION,
+    AgentOpenRequest,
+    AgentSearchRequest,
+    build_agent_io,
+)
 
 
 def _add_search_command(sub: Any) -> None:
@@ -504,6 +510,248 @@ def _print_open_human(env: dict, search: dict | None, quiet: bool = False) -> No
             )
 
 
+# --- Layer 3: the consolidated agent face (web-search / web-fetch / web-open / mcp) --
+#
+# These emit the agentio Envelope: fenced, paginated, handle-keyed. They are what a
+# SKILL.md or the MCP tools drive. The bare search/fetch/open commands above stay as the
+# lower-level per-layer surfaces (debugging, composition, raw contracts).
+
+
+def _add_websearch_command(sub: Any) -> None:
+    wp = sub.add_parser(
+        "web-search",
+        help="Agent-facing web search (Layer 3): ranked results with handles, over the "
+        "agentio Envelope. `search` is the lower-level Layer-1 surface.",
+    )
+    wp.add_argument("query")
+    wp.add_argument("--max-results", type=int, default=8)
+    wp.add_argument("--detail", choices=["concise", "detailed"], default="concise")
+    wp.add_argument("--engines", help="Comma-separated engine names (default: all configured).")
+    wp.add_argument("--language", help="ISO 639-1, e.g. en.")
+    wp.add_argument("--country", help="ISO 3166-1 alpha-2, e.g. us.")
+    wp.add_argument("--freshness", choices=["any", "day", "week", "month", "year"], default="any")
+    wp.add_argument("--safesearch", choices=["off", "moderate", "strict"], default="moderate")
+    wp.add_argument("--site", help="Restrict to one host.")
+    wp.add_argument("--offset", type=int, default=0)
+    wp.add_argument("--searxng-url", default=os.environ.get("WEBSEARCH_SEARXNG_URL"))
+    wp.add_argument("--no-ddgs", action="store_true", help="Disable the ddgs fallback engine.")
+    wp.add_argument("--json", action="store_true", help="Emit the raw agentio Envelope.")
+
+
+def _cmd_websearch(args: argparse.Namespace) -> int:
+    engines = [e.strip() for e in args.engines.split(",") if e.strip()] if args.engines else None
+    try:
+        req = AgentSearchRequest(
+            query=args.query,
+            max_results=args.max_results,
+            detail=args.detail,
+            engines=engines,
+            country=args.country,
+            language=args.language,
+            freshness=args.freshness,
+            safesearch=args.safesearch,
+            site=args.site,
+            offset=args.offset,
+        )
+    except ValidationError:
+        return _emit_error(
+            AGENTIO_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message="invalid web-search request.",
+            layer="agentio",
+            as_json=args.json,
+        )
+    aio = build_agent_io(searxng_url=args.searxng_url, enable_ddgs=not args.no_ddgs)
+    env = aio.web_search(req)
+    payload = env.model_dump(mode="json")
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        _print_agent_search_human(payload)
+    return 0 if env.ok else 1
+
+
+def _print_agent_search_human(env: dict) -> None:
+    if not env.get("ok"):
+        err = env.get("error") or {}
+        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+        return
+    data = env.get("data") or {}
+    results = data.get("results", [])
+    print(f"{len(results)} result(s) for: {data.get('query')}")
+    for r in results:
+        print(f"\n{r.get('rank')}. {r.get('title')}")
+        print(f"   {r.get('url')}")
+        meta = []
+        if r.get("score") is not None:
+            meta.append(f"score={r['score']:.4f}")
+        if r.get("engines"):
+            meta.append("engines=[" + ",".join(r["engines"]) + "]")
+        if meta:
+            print("   " + "  ".join(meta))
+        print(f"   handle: {r.get('handle')}")
+        snippet = (r.get("snippet") or "").strip()
+        if snippet:
+            print(f"   {snippet[:200]}")
+    for w in data.get("warnings", []):
+        print(f"\n[warning] {w}", file=sys.stderr)
+
+
+def _add_webfetch_command(sub: Any) -> None:
+    fp = sub.add_parser(
+        "web-fetch",
+        help="Agent-facing fetch + read (Layer 3): clean Markdown fenced as untrusted and "
+        "paginated by token budget, over the agentio Envelope.",
+    )
+    fp.add_argument("urls", nargs="+", help="One or more http(s) URLs.")
+    fp.add_argument("--page", type=int, default=1, help="1-based page over the token pagination.")
+    fp.add_argument("--page-size-tokens", type=int, default=4000)
+    fp.add_argument("--tier", choices=["auto", "http", "browser", "stealth"], default="auto")
+    fp.add_argument(
+        "--datamark", action="store_true", help="Interleave a marker between words in the fence."
+    )
+    fp.add_argument("--timeout-ms", type=int, default=20000)
+    fp.add_argument("--allow-private-hosts", action="store_true")
+    fp.add_argument(
+        "--persist-path", help="Persist the page index so web-open resolves handles across runs."
+    )
+    fp.add_argument("--quiet", action="store_true", help="Print only the fenced content.")
+    fp.add_argument("--json", action="store_true", help="Emit the raw agentio Envelope.")
+
+
+def _cmd_webfetch(args: argparse.Namespace) -> int:
+    for u in args.urls:
+        if not u.startswith(("http://", "https://")):
+            return _emit_error(
+                AGENTIO_CONTRACT_VERSION,
+                code=errors.INVALID_REQUEST,
+                message=f"url must be an absolute http(s) URL: {u}",
+                layer="agentio",
+                as_json=args.json,
+            )
+    aio = build_agent_io(
+        enable_ddgs=False, store_config=StoreConfig(persist_path=args.persist_path)
+    )
+    env = aio.web_fetch_many(
+        args.urls,
+        page=args.page,
+        page_size_tokens=args.page_size_tokens,
+        tier=args.tier,
+        timeout_ms=args.timeout_ms,
+        allow_private_hosts=args.allow_private_hosts,
+        datamark=args.datamark,
+    )
+    payload = env.model_dump(mode="json")
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        _print_agent_pages_human(payload, quiet=args.quiet)
+    return 0 if env.ok else 1
+
+
+def _add_webopen_command(sub: Any) -> None:
+    op = sub.add_parser(
+        "web-open",
+        help="Paginate an already-fetched page from the store by handle (Layer 3); never "
+        "re-fetches. Needs --persist-path matching the web-fetch run (or the same process).",
+    )
+    op.add_argument("handle", help="A handle (site~shorthash) or the page URL.")
+    op.add_argument("--page", type=int, default=1)
+    op.add_argument("--page-size-tokens", type=int, default=4000)
+    op.add_argument("--datamark", action="store_true")
+    op.add_argument("--persist-path", help="The page-index file written by web-fetch.")
+    op.add_argument("--quiet", action="store_true", help="Print only the fenced content.")
+    op.add_argument("--json", action="store_true", help="Emit the raw agentio Envelope.")
+
+
+def _cmd_webopen(args: argparse.Namespace) -> int:
+    try:
+        req = AgentOpenRequest(
+            handle=args.handle,
+            page=args.page,
+            page_size_tokens=args.page_size_tokens,
+            datamark=args.datamark,
+        )
+    except ValidationError:
+        return _emit_error(
+            AGENTIO_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message="invalid web-open request.",
+            layer="agentio",
+            as_json=args.json,
+        )
+    aio = build_agent_io(
+        enable_ddgs=False, store_config=StoreConfig(persist_path=args.persist_path)
+    )
+    env = aio.web_open(req)
+    payload = env.model_dump(mode="json")
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        _print_agent_pages_human(payload, quiet=args.quiet)
+    return 0 if env.ok else 1
+
+
+def _print_agent_pages_human(env: dict, quiet: bool = False) -> None:
+    if not env.get("ok"):
+        err = env.get("error") or {}
+        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+        return
+    data = env.get("data") or {}
+    pages = data.get("pages", [])
+    for i, p in enumerate(pages):
+        if not quiet:
+            if i:
+                print()
+            print(f"# {p.get('title') or '(untitled)'}")
+            print(f"url:    {p.get('url')}")
+            location = f"page {p.get('page')} of {p.get('total_pages')}"
+            more = (
+                f"   (more: web-open {p.get('handle')} --page {p.get('page') + 1})"
+                if p.get("has_more")
+                else ""
+            )
+            print(f"handle: {p.get('handle')}   {location}   source={p.get('source')}{more}")
+            if p.get("blocked"):
+                print(f"[blocked] {p.get('block_reason')}", file=sys.stderr)
+            for w in p.get("warnings", []):
+                print(f"[warning] {w}", file=sys.stderr)
+            print()
+        print(p.get("content") or "(no content)")
+    for w in data.get("warnings", []):
+        print(f"\n[warning] {w}", file=sys.stderr)
+
+
+def _add_mcp_command(sub: Any) -> None:
+    sub.add_parser(
+        "mcp",
+        help="Start the FastMCP stdio server (web_search/web_fetch/web_open). Needs the "
+        "'mcp' extra: pip install 'websearch-skill[mcp]' (or uv sync --extra mcp).",
+    )
+
+
+def _load_mcp_server():
+    """Import the optional FastMCP server module (raises ImportError without the extra)."""
+    from .layer3_agentio import mcp_server
+
+    return mcp_server
+
+
+def _cmd_mcp(args: argparse.Namespace) -> int:
+    try:
+        mcp_server = _load_mcp_server()
+    except ImportError as exc:
+        print(
+            f"error: {errors.DEPENDENCY_MISSING}: the MCP server needs the optional 'fastmcp' "
+            f"dependency. Install it with: pip install 'websearch-skill[mcp]' "
+            f"(or uv sync --extra mcp). [{exc}]",
+            file=sys.stderr,
+        )
+        return 1
+    mcp_server.run()  # blocks: stdio server until the client disconnects
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="websearch",
@@ -513,12 +761,22 @@ def main(argv: list[str] | None = None) -> int:
     _add_search_command(sub)
     _add_fetch_command(sub)
     _add_open_command(sub)
+    _add_websearch_command(sub)
+    _add_webfetch_command(sub)
+    _add_webopen_command(sub)
+    _add_mcp_command(sub)
     args = parser.parse_args(argv)
-    if args.command == "search":
-        return _cmd_search(args)
-    if args.command == "fetch":
-        return _cmd_fetch(args)
-    if args.command == "open":
-        return _cmd_open(args)
-    parser.error(f"unknown command: {args.command}")
-    return 2  # unreachable; argparse.error exits
+    dispatch = {
+        "search": _cmd_search,
+        "fetch": _cmd_fetch,
+        "open": _cmd_open,
+        "web-search": _cmd_websearch,
+        "web-fetch": _cmd_webfetch,
+        "web-open": _cmd_webopen,
+        "mcp": _cmd_mcp,
+    }
+    handler = dispatch.get(args.command)
+    if handler is None:
+        parser.error(f"unknown command: {args.command}")
+        return 2  # unreachable; argparse.error exits
+    return handler(args)
