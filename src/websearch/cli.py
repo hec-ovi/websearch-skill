@@ -1,9 +1,9 @@
 """Layer-3 CLI: the primary agent-facing entry point.
 
-For this slice it exposes ``websearch search``. The optional MCP adapter and the
-other subcommands (fetch, open/resolve) arrive with their layers, over the same
-Envelope payloads. ``--json`` emits the raw Envelope (the contract surface); the
-default is a compact human view. Exit code is 0 on success, 1 on an error Envelope.
+It exposes ``websearch search`` (Layer 1) and ``websearch fetch`` (Layer 2A). The
+optional MCP adapter and the open/resolve subcommand arrive with their layers, over
+the same Envelope payloads. ``--json`` emits the raw Envelope (the contract surface);
+the default is a compact human view. Exit code is 0 on success, 1 on an error Envelope.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from . import errors
 from .envelope import error_envelope
 from .layer1_search import SEARCH_CONTRACT_VERSION, SearchRequest, build_router
+from .layer2_extract import EXTRACT_CONTRACT_VERSION, FetchRequest, build_pipeline
 
 
 def _add_search_command(sub: Any) -> None:
@@ -112,6 +113,150 @@ def _print_human(env: dict) -> None:
         print(f"\n[warning] {w}", file=sys.stderr)
 
 
+def _add_fetch_command(sub: Any) -> None:
+    fp = sub.add_parser(
+        "fetch", help="Fetch a URL and extract clean Markdown + metadata (Layer 2A)."
+    )
+    fp.add_argument("url", help="The http(s) URL to fetch.")
+    fp.add_argument(
+        "--tier",
+        choices=["auto", "http", "browser", "stealth"],
+        default="auto",
+        help="Fetch tier. auto escalates http -> impersonation on a block. "
+        "browser/stealth are opt-in adapters (not in the base install).",
+    )
+    fp.add_argument("--timeout-ms", type=int, default=20000)
+    fp.add_argument("--user-agent", help="Override the request User-Agent.")
+    fp.add_argument("--proxy", help="Egress proxy URL (e.g. socks5h://127.0.0.1:1080).")
+    fp.add_argument("--max-bytes", type=int, help="Transport guard only (not a content cap).")
+    fp.add_argument(
+        "--respect-robots", action="store_true", help="Honor robots.txt (off by default)."
+    )
+    fp.add_argument("--per-host-delay-ms", type=int, default=0)
+    fp.add_argument(
+        "--engine",
+        choices=[
+            "trafilatura",
+            "resiliparse",
+            "rs_trafilatura",
+            "crawl4ai",
+            "jina_readerlm",
+            "auto",
+        ],
+        default="trafilatura",
+        help="Extract engine. Only trafilatura ships in the base install; others are opt-in.",
+    )
+    fp.add_argument("--favor", choices=["precision", "recall", "balanced"], default="balanced")
+    fp.add_argument("--output-format", choices=["markdown", "text", "json"], default="markdown")
+    fp.add_argument("--no-tables", dest="tables", action="store_false", help="Drop tables.")
+    fp.add_argument("--no-links", dest="links", action="store_false", help="Drop links.")
+    fp.add_argument("--images", action="store_true", help="Keep images.")
+    fp.add_argument("--comments", action="store_true", help="Keep comment sections.")
+    fp.add_argument("--query", help="Relevance hint (best-effort; engine-dependent).")
+    fp.add_argument(
+        "--no-neural-fallback",
+        dest="neural_fallback",
+        action="store_false",
+        help="Do not route low-quality pages to a neural/structured fallback.",
+    )
+    fp.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
+
+
+def _cmd_fetch(args: argparse.Namespace) -> int:
+    if not args.url.startswith(("http://", "https://")):
+        return _emit_error(
+            EXTRACT_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message="url must be an absolute http(s) URL.",
+            layer="extract",
+            as_json=args.json,
+        )
+
+    proxy = None
+    if args.proxy:
+        ptype = "socks5" if args.proxy.lower().startswith("socks") else "http"
+        proxy = {"url": args.proxy, "type": ptype}
+
+    try:
+        request = FetchRequest(
+            url=args.url,
+            tier_hint=args.tier,
+            timeout_ms=args.timeout_ms,
+            user_agent=args.user_agent,
+            proxy=proxy,
+            max_bytes=args.max_bytes,
+            politeness={
+                "per_host_delay_ms": args.per_host_delay_ms,
+                "respect_robots": args.respect_robots,
+            },
+        )
+    except ValidationError:
+        return _emit_error(
+            EXTRACT_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message="invalid fetch request.",
+            layer="extract",
+            as_json=args.json,
+        )
+
+    overrides = {
+        "engine": args.engine,
+        "favor": args.favor,
+        "output_format": args.output_format,
+        "include_tables": args.tables,
+        "include_links": args.links,
+        "include_images": args.images,
+        "include_comments": args.comments,
+        "query": args.query,
+        "neural_fallback": args.neural_fallback,
+    }
+    envelope = build_pipeline().run(request, extract_overrides=overrides)
+    payload = envelope.model_dump(mode="json")
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        _print_fetch_human(payload)
+    return 0 if envelope.ok else 1
+
+
+def _print_fetch_human(env: dict) -> None:
+    if not env.get("ok"):
+        err = env.get("error") or {}
+        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+        return
+    data = env.get("data") or {}
+    src = data.get("source") or {}
+    res = data.get("result") or {}
+    print(f"# {res.get('title') or '(untitled)'}")
+    print(f"url:        {src.get('final_url') or src.get('url')}")
+    print(
+        f"fetched:    status={src.get('status')} via={src.get('fetched_via')} "
+        f"type={res.get('page_type')} quality={res.get('quality_score'):.2f} "
+        f"words={res.get('word_count')}"
+    )
+    if res.get("date") or res.get("byline"):
+        print(f"meta:       {res.get('byline') or ''} {res.get('date') or ''}".rstrip())
+    if src.get("blocked"):
+        print(f"[blocked]   {src.get('block_reason')}", file=sys.stderr)
+    for w in (data.get("warnings") or []) + (res.get("warnings") or []):
+        print(f"[warning]   {w}", file=sys.stderr)
+    print()
+    print(res.get("content_markdown") or "(no content extracted)")
+
+
+def _emit_error(
+    contract_version: str, *, code: str, message: str, layer: str, as_json: bool
+) -> int:
+    env = error_envelope(
+        contract_version, code=code, message=message, retriable=False, layer=layer, backend=None
+    )
+    if as_json:
+        print(json.dumps(env.model_dump(mode="json"), indent=2, ensure_ascii=False))
+    else:
+        print(f"error: {code}: {message}", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="websearch",
@@ -119,8 +264,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
     _add_search_command(sub)
+    _add_fetch_command(sub)
     args = parser.parse_args(argv)
     if args.command == "search":
         return _cmd_search(args)
+    if args.command == "fetch":
+        return _cmd_fetch(args)
     parser.error(f"unknown command: {args.command}")
     return 2  # unreachable; argparse.error exits
