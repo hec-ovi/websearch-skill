@@ -33,7 +33,7 @@
       "additionalProperties": false,
       "properties": {
         "per_host_delay_ms": { "type": "integer", "minimum": 0, "default": 0, "description": "Minimum spacing between requests to the same host." },
-        "respect_robots": { "type": "boolean", "default": true, "description": "Honor robots.txt for the fetched URL." }
+        "respect_robots": { "type": "boolean", "default": false, "description": "Honor robots.txt for the fetched URL. Default false: a single deliberate fetch of an agent-chosen URL is closer to a browser open than to crawling. Enable for crawl-like batch use." }
       }
     },
 
@@ -85,7 +85,11 @@
         "redirects": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Redirect chain, in order." },
         "headers": { "type": "object", "additionalProperties": { "type": "string" }, "default": {} },
         "blocked": { "type": "boolean", "default": false, "description": "An anti-bot challenge/interstitial was detected (may still carry partial content)." },
-        "block_reason": { "type": ["string", "null"], "default": null },
+        "block_reason": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Branchable cause when blocked. Recommended vocabulary (kept as a string so new vendors do not force a contract bump): cloudflare_challenge, cloudflare_firewall, datadome, perimeterx, akamai, imperva, ddos_guard, rate_limited, forbidden_suspected_bot, unavailable_suspected_block, auth_required, legal_geo_block."
+        },
         "screenshot_b64": { "type": ["string", "null"], "default": null },
         "tier_attempts": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Adapters tried in order before this result (escalation trail)." },
         "fetch_ms": { "type": "integer", "minimum": 0, "default": 0 },
