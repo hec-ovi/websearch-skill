@@ -36,7 +36,9 @@ class DdgsAdapter(EngineAdapter):
 
     def _region(self, request: SearchRequest) -> str | None:
         if request.country:
-            lang = (request.language or "en").lower()
+            # ddgs needs a two-part cc-ll region; take the language's primary subtag
+            # so a BCP-47 tag like "en-GB" does not produce an invalid "us-en-gb".
+            lang = (request.language or "en").lower().split("-")[0]
             return f"{request.country.lower()}-{lang}"
         return None  # let ddgs use its default region
 

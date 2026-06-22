@@ -74,47 +74,59 @@ class SearxngAdapter(EngineAdapter):
             params["engines"] = ",".join(engines) if isinstance(engines, list) else str(engines)
         return params
 
-    def search(self, request: SearchRequest) -> EngineOutput:
-        if not self.enabled():
-            return EngineOutput(engine=self.name, error="searxng base_url not configured")
-
-        client = self._client or httpx.Client(
-            timeout=self._timeout_s, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
-        )
-        owns_client = self._client is None
-        try:
-            resp = client.get(f"{self.base_url}/search", params=self._params(request))
-            resp.raise_for_status()
-            payload = resp.json()
-        except Exception as exc:
-            return EngineOutput(engine=self.name, error=f"{type(exc).__name__}: {exc}")
-        finally:
-            if owns_client:
-                client.close()
-
+    def _parse_results(self, payload: dict, request: SearchRequest) -> list[RawResult]:
         results: list[RawResult] = []
-        for i, item in enumerate(payload.get("results", []) or []):
+        raw_results = payload.get("results")
+        if not isinstance(raw_results, list):
+            return results
+        for i, item in enumerate(raw_results):
+            if not isinstance(item, dict):
+                continue  # tolerate a malformed entry without crashing the engine
             url = item.get("url") or ""
             if not url:
                 continue
             is_news = item.get("category") == "news" or request.result_type == "news"
+            score = item.get("score")
+            published = item.get("publishedDate")
             results.append(
                 RawResult(
                     url=url,
                     title=item.get("title") or "",
                     snippet=item.get("content") or "",
                     rank=i + 1,
-                    raw_score=item.get("score"),
-                    published_date=item.get("publishedDate"),
+                    raw_score=float(score) if isinstance(score, (int, float)) else None,
+                    published_date=str(published) if published is not None else None,
                     result_type="news" if is_news else "web",
                     thumbnail=item.get("thumbnail") or item.get("img_src"),
                 )
             )
+        return results
 
-        return EngineOutput(
-            engine=self.name,
-            results=results,
-            answers=_as_str_list(payload.get("answers")),
-            suggestions=_as_str_list(payload.get("suggestions")),
-            corrections=_as_str_list(payload.get("corrections")),
+    def search(self, request: SearchRequest) -> EngineOutput:
+        if not self.enabled():
+            return EngineOutput(engine=self.name, error="searxng base_url not configured")
+
+        # Honor the request's per-engine timeout when we own the client.
+        timeout_s = request.timeout_ms / 1000.0 if self._client is None else self._timeout_s
+        client = self._client or httpx.Client(
+            timeout=timeout_s, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
         )
+        owns_client = self._client is None
+        try:
+            resp = client.get(f"{self.base_url}/search", params=self._params(request))
+            resp.raise_for_status()
+            payload = resp.json()
+            if not isinstance(payload, dict):
+                raise ValueError("searxng returned a non-object JSON body")
+            return EngineOutput(
+                engine=self.name,
+                results=self._parse_results(payload, request),
+                answers=_as_str_list(payload.get("answers")),
+                suggestions=_as_str_list(payload.get("suggestions")),
+                corrections=_as_str_list(payload.get("corrections")),
+            )
+        except Exception as exc:
+            return EngineOutput(engine=self.name, error=f"{type(exc).__name__}: {exc}")
+        finally:
+            if owns_client:
+                client.close()
