@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "web-search": {
+      "command": "uvx",
+      "args": ["websearch-skill", "mcp"]
+    }
+  }
+}

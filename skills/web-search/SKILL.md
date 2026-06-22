@@ -29,8 +29,10 @@ below. Everything is keyless: search works with no setup or API key.
 
 ## Commands
 
-Run with `websearch <command>` (or `uv run websearch <command>` from the project, or
-`uvx websearch-skill <command>` once published).
+Run with `websearch <command>` if it is on PATH. With only [uv](https://docs.astral.sh/uv/)
+and no install, run it through `uvx`: `uvx websearch-skill <command>` once it is on PyPI, or
+`uvx --from git+https://github.com/hec-ovi/websearch-skill websearch <command>` straight from
+git today. From a clone, `uv run websearch <command>`.
 
 ### web-search: find pages
 
@@ -54,7 +56,7 @@ query.
 
 ```
 websearch web-fetch "<url>" [more urls...] [--page 1] [--page-size-tokens 4000]
-    [--tier auto|http|browser|stealth] [--datamark] [--allow-private-hosts]
+    [--tier auto|http|browser|stealth] [--timeout-ms MS] [--datamark] [--allow-private-hosts]
     [--persist-path FILE] [--quiet] [--json]
 ```
 
@@ -170,6 +172,8 @@ detect actual failures.
   Engine-selection flags (`--engines`, `--ddgs-backends`, `--no-ddgs`) live only on the
   lower-level `websearch search` command, for debugging and power use. Public SearXNG
   instances are not used by default (they disable the JSON API and block bots).
-- The MCP server is `websearch mcp` (needs the optional `mcp` extra). It exposes all five
-  tools (`web_search`, `web_fetch`, `web_open`, `arxiv_search`, `github_search`) and
-  delivers page content through the tool-result channel.
+- The MCP server is `websearch mcp` (FastMCP stdio, bundled in the base install). It exposes
+  all five tools (`web_search`, `web_fetch`, `web_open`, `arxiv_search`, `github_search`) and
+  delivers page content through the tool-result channel. Point a client at
+  `{"command": "uvx", "args": ["websearch-skill", "mcp"]}`. See `docs/INSTALL.md` for
+  per-harness registration (Claude, Codex, OpenCode, Hermes, OpenClaw).

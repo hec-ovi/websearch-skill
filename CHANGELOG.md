@@ -8,6 +8,11 @@ semantic versioning once it reaches a tagged release.
 
 ### Changed
 
+- fastmcp is now a base dependency, not the optional `mcp` extra, so `websearch mcp`,
+  `uvx websearch-skill mcp`, and the MCP-registry runner start the stdio server with one
+  command and no extra. The `[mcp]` extra stays as a no-op alias so older install commands
+  keep resolving. The package also installs a second console script, `websearch-skill`
+  (matching the distribution name), so `uvx websearch-skill <cmd>` resolves with no `--from`.
 - The agent surface is plug-and-play: `web-search` (CLI) and the `web_search` MCP tool no
   longer take engine-selection flags (`--engines`, `--no-ddgs`, `--ddgs-backends`, the MCP
   `engines` parameter, or `WEBSEARCH_DDGS_BACKENDS`). The keyless multi-engine default
@@ -47,6 +52,15 @@ semantic versioning once it reaches a tagged release.
 
 ### Added
 
+- Distribution layer: a Claude Code plugin and marketplace (`.claude-plugin/`, with no
+  SKILL duplication, since `source: "./"` auto-discovers the root `skills/web-search/` and
+  root `.mcp.json`), a generic root `.mcp.json`, an MCP-registry `server.json`
+  (`io.github.hec-ovi/web-search`, PyPI/uvx), a PyPI Trusted-Publishing release workflow
+  (`.github/workflows/release.yml`, OIDC, no token), and `docs/INSTALL.md` covering every
+  harness route (`npx skills add`, `uvx`, the Claude plugin, Codex with its network-sandbox
+  caveat, OpenCode, Cursor, Hermes, OpenClaw, and the registry). Install with
+  `npx skills add hec-ovi/websearch-skill`, `/plugin install web-search@websearch-skill`, or
+  `uvx websearch-skill <cmd>`.
 - Keyless multi-engine search out of the box: the `ddgs` adapter is treated as the
   metasearch it is (Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek,
   Wikipedia by default, with Bing and others selectable by name). The lower-level
@@ -244,6 +258,6 @@ dogfooding pass of Layer 2A:
 - Layer 2A still returns clean page content unmodified (so piping and composition stay
   clean); the untrusted-content fence is applied at the Layer 3 agent boundary
   (`web_fetch`/`web_open`), not in Layer 2A.
-- The FastMCP server depends on the optional `fastmcp` package; install it with the
-  `mcp` extra. The harness packaging and multi-manifest distribution (npx skills add,
-  plugin marketplaces, PyPI/uvx) are not built yet.
+- The FastMCP server ships in the base install (fastmcp is a base dependency). Harness
+  packaging and distribution (npx skills add, the Claude plugin and marketplace, the MCP
+  registry `server.json`, and PyPI/uvx) are built; see `docs/INSTALL.md`.

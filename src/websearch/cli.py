@@ -931,13 +931,14 @@ def _print_github_human(env: dict) -> None:
 def _add_mcp_command(sub: Any) -> None:
     sub.add_parser(
         "mcp",
-        help="Start the FastMCP stdio server (web_search/web_fetch/web_open). Needs the "
-        "'mcp' extra: pip install 'websearch-skill[mcp]' (or uv sync --extra mcp).",
+        help="Start the FastMCP stdio server (web_search/web_fetch/web_open/arxiv_search/"
+        "github_search). fastmcp ships in the base install.",
     )
 
 
 def _load_mcp_server():
-    """Import the optional FastMCP server module (raises ImportError without the extra)."""
+    """Import the FastMCP server module (a base dependency; imported lazily to keep the
+    other subcommands' startup free of the MCP import)."""
     from .layer3_agentio import mcp_server
 
     return mcp_server
@@ -947,10 +948,11 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     try:
         mcp_server = _load_mcp_server()
     except ImportError as exc:
+        # fastmcp is a base dependency, so this only fires if the install was stripped.
         print(
-            f"error: {errors.DEPENDENCY_MISSING}: the MCP server needs the optional 'fastmcp' "
-            f"dependency. Install it with: pip install 'websearch-skill[mcp]' "
-            f"(or uv sync --extra mcp). [{exc}]",
+            f"error: {errors.DEPENDENCY_MISSING}: the MCP server needs 'fastmcp', which ships "
+            f"with this package. Reinstall it, e.g. pip install 'websearch-skill' "
+            f"(or uv sync). [{exc}]",
             file=sys.stderr,
         )
         return 1

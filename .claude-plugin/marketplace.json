@@ -1,0 +1,27 @@
+{
+  "name": "websearch-skill",
+  "owner": {
+    "name": "Hector Oviedo",
+    "email": "hector.ernesto.oviedo@gmail.com"
+  },
+  "metadata": {
+    "description": "Keyless web search, fetch, and clean extraction tooling for AI agents.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "web-search",
+      "source": "./",
+      "description": "Keyless multi-engine web search, clean-Markdown fetch, and paginated read for AI agents, plus arxiv and github lookup. Bundles a portable SKILL and a FastMCP stdio server. Needs internet; no API keys.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Hector Oviedo"
+      },
+      "homepage": "https://github.com/hec-ovi/websearch-skill",
+      "repository": "https://github.com/hec-ovi/websearch-skill",
+      "license": "MIT",
+      "category": "productivity",
+      "keywords": ["web-search", "web-fetch", "ai-agents", "agent-skills", "mcp", "keyless"]
+    }
+  ]
+}

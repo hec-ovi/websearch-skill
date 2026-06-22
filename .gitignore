@@ -33,6 +33,9 @@ coverage.xml
 .vscode/
 .DS_Store
 
+# Local Claude Code state (settings.local.json etc.); NOT the .claude-plugin/ manifests.
+.claude/
+
 # Local secrets (search-engine API keys, SearXNG URL overrides)
 .env
 .env.*

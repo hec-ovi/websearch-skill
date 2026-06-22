@@ -1,0 +1,32 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.hec-ovi/web-search",
+  "title": "Web Search",
+  "description": "Keyless multi-engine web search, fetch, and clean-Markdown read for AI agents. No API keys.",
+  "repository": {
+    "url": "https://github.com/hec-ovi/websearch-skill",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/hec-ovi/websearch-skill",
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "websearch-skill",
+      "version": "0.1.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "valueHint": "subcommand",
+          "description": "Start the FastMCP stdio server"
+        }
+      ]
+    }
+  ]
+}

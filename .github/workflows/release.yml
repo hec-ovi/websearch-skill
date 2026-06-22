@@ -1,0 +1,60 @@
+# Publishes websearch-skill to PyPI on a v* tag push, using PyPI Trusted
+# Publishing (OIDC). No API token is stored anywhere: the `id-token: write`
+# permission lets PyPI mint a short-lived credential for this exact workflow
+# file plus environment pair, which you register once on PyPI (see docs/INSTALL.md).
+#
+# Build is uv-native (`uv build`), delegating to the hatchling backend declared
+# in pyproject.toml, and writes both sdist and wheel to dist/.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # This GitHub environment name must match the one you register on PyPI's
+    # "Add a publisher" form. It also lets you gate releases (required reviewers).
+    environment:
+      name: pypi
+      url: https://pypi.org/p/websearch-skill
+    permissions:
+      id-token: write # REQUIRED for Trusted Publishing (OIDC). No token secret.
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI (Trusted Publishing, OIDC)
+        uses: pypa/gh-action-pypi-publish@release/v1

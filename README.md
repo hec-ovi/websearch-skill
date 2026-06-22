@@ -1,10 +1,12 @@
 # websearch-skill
 
+<!-- mcp-name: io.github.hec-ovi/web-search -->
+
 Open-source multi-engine web search and content extraction for AI agents, built as isolated layers connected only by versioned JSON Schema contracts.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-405%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-423%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
 ## What it is
@@ -86,7 +88,7 @@ There is **no output-length cap here either**. The sidecar carries the full body
 
 ## Layer 3: Agent I/O
 
-One consolidated surface over Layers 1, 2A, and 2B: `web_search` (find), `web_fetch` (read a URL), and `web_open` (page through an already-fetched document). Each returns the same `Envelope`. The identical core is exposed three ways: the `websearch web-search` / `web-fetch` / `web-open` CLI, an optional FastMCP stdio server (`websearch mcp`, the `mcp` extra), and a portable `SKILL.md` written to the Agent Skills standard (name plus description, so it loads in Claude Code, Codex, OpenCode, and others).
+One consolidated surface over Layers 1, 2A, and 2B: `web_search` (find), `web_fetch` (read a URL), and `web_open` (page through an already-fetched document). Each returns the same `Envelope`. The identical core is exposed three ways: the `websearch web-search` / `web-fetch` / `web-open` CLI, a FastMCP stdio server (`websearch mcp`, bundled in the base install), and a portable `SKILL.md` written to the Agent Skills standard (name plus description, so it loads in Claude Code, Codex, OpenCode, and others).
 
 The cross-layer key is a human-readable **handle** (`site~shorthash`, for example `en.wikipedia.org~3a1f9c2b5e6f`), never an opaque UUID. `web_fetch` indexes the full page into the Layer 2B store and returns one token-budget page; `web_open` pages through the rest from that store, by handle, without re-fetching. The split is **lossless**: pagination is progressive disclosure, not a cap, and the whole body stays reachable page by page. The lower-level `search` / `fetch` / `open` commands remain as the per-layer surfaces for debugging and composition.
 
@@ -113,12 +115,44 @@ uv run websearch web-search "frontier model release" --site x.com
 
 ## Install
 
-The project is uv-native. With [uv](https://docs.astral.sh/uv/):
+Pick the route that matches how you use it. Everything is keyless and needs internet; the only hard requirement is [uv](https://docs.astral.sh/uv/). Full per-harness instructions (Claude Code, Codex, OpenCode, Cursor, Hermes, OpenClaw, the MCP registry, and PyPI publishing) are in [`docs/INSTALL.md`](docs/INSTALL.md).
+
+**As a CLI tool, no install** (`uvx` builds an ephemeral env and runs it):
+
+```bash
+# straight from git today (no PyPI needed):
+uvx --from git+https://github.com/hec-ovi/websearch-skill websearch web-search "your query"
+# once published to PyPI, the short form:
+uvx websearch-skill web-search "your query"
+```
+
+**As an agent skill** across 40+ agents via the [`skills`](https://www.npmjs.com/package/skills) CLI (it installs the `skills/web-search/` directory into each detected agent):
+
+```bash
+npx skills add hec-ovi/websearch-skill            # all detected agents
+npx skills add hec-ovi/websearch-skill -a claude-code -a codex -s web-search
+```
+
+**As a Claude Code plugin** (bundles the skill and the MCP server in one install):
+
+```text
+/plugin marketplace add hec-ovi/websearch-skill
+/plugin install web-search@websearch-skill
+```
+
+**As an MCP server** (FastMCP stdio, bundled in the base install). Point any MCP client at:
+
+```json
+{ "mcpServers": { "web-search": { "command": "uvx", "args": ["websearch-skill", "mcp"] } } }
+```
+
+**From source** (development, uv-native):
 
 ```bash
 git clone https://github.com/hec-ovi/websearch-skill
 cd websearch-skill
 uv sync
+uv run websearch web-search "your query"
 ```
 
 ## Quickstart
@@ -157,7 +191,7 @@ uv run websearch web-open "doc.rust-lang.org~<hash>" --page 2 --persist-path /tm
 uv run websearch arxiv "mixture of experts scaling laws" --max-results 5
 uv run websearch github "llm agent framework" --language Python --sort stars
 
-# or run as an MCP server (needs the optional extra: uv sync --extra mcp)
+# or run as an MCP server (FastMCP stdio; bundled, no extra needed)
 uv run websearch mcp
 ```
 
@@ -264,9 +298,10 @@ A same-query, same-moment head-to-head against the web search built into Claude 
 
 ## Roadmap
 
+Built: harness packaging ships the `SKILL.md` plus the bundled tool via `npx skills add`, a Claude Code plugin and marketplace, the MCP registry (`server.json`), and PyPI/uvx, with per-harness MCP registration documented in [`docs/INSTALL.md`](docs/INSTALL.md).
+
 Planned, not built yet:
 
-- **Distribution:** harness packaging that ships the bundled `SKILL.md` plus tool via `npx skills add`, plugin marketplaces, and PyPI/uvx, with a dual-directory skill drop for Claude, Codex, and OpenCode, and per-harness MCP registration.
 - **Opt-in egress:** gluetun / wg-netns proxy or VPN scoped to search geo and rate limits (not anti-bot), plus a paid residential-proxy adapter for the protected long tail.
 - **Local rerank:** a cross-encoder pass to turn multi-engine recall into precision.
 - **More engines:** keyed adapters (Brave, Exa, Tavily) behind the existing `EngineAdapter` port; an optional neural index.
@@ -275,7 +310,7 @@ Planned, not built yet:
 
 ```bash
 uv sync          # install deps (including the dev group)
-uv run pytest    # 405 tests
+uv run pytest    # 423 tests
 uv run ruff check .
 ```
 

@@ -2136,6 +2136,7 @@ source = { editable = "." }
 dependencies = [
     { name = "curl-cffi" },
     { name = "ddgs" },
+    { name = "fastmcp" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "trafilatura" },
@@ -2151,7 +2152,6 @@ schema = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "fastmcp" },
     { name = "jsonschema" },
     { name = "pytest" },
     { name = "pytest-httpx" },
@@ -2162,6 +2162,7 @@ dev = [
 requires-dist = [
     { name = "curl-cffi", specifier = ">=0.15" },
     { name = "ddgs", specifier = ">=9.0" },
+    { name = "fastmcp", specifier = ">=3.4,<4" },
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=3.4,<4" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jsonschema", marker = "extra == 'schema'", specifier = ">=4.21" },
@@ -2172,7 +2173,6 @@ provides-extras = ["schema", "mcp"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "fastmcp", specifier = ">=3.4,<4" },
     { name = "jsonschema", specifier = ">=4.21" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-httpx", specifier = ">=0.30" },
