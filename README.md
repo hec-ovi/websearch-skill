@@ -146,6 +146,8 @@ npx skills add hec-ovi/websearch-skill -a claude-code -a codex -s web-search
 { "mcpServers": { "web-search": { "command": "uvx", "args": ["websearch-skill", "mcp"] } } }
 ```
 
+It is also published in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.hec-ovi/web-search`, so registry-aware clients can discover and install it by name.
+
 **From source** (development, uv-native):
 
 ```bash

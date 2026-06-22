@@ -188,17 +188,26 @@ workflow is `.github/workflows/release.yml`.
 
 Subsequent releases: bump the version, push a new `v*` tag. No PyPI reconfiguration needed.
 
-## Listing in the MCP Registry (maintainer, optional)
+## In the MCP Registry
 
-`server.json` is ready for the official MCP Registry. It requires the package to be on PyPI
-first, because the registry proves PyPI ownership through a marker in the published README.
+This server is published in the official MCP Registry as `io.github.hec-ovi/web-search`
+(mapped to the PyPI package `websearch-skill`, launched with `uvx`). Registry-aware clients
+can discover and install it by that name. Look it up with:
 
-1. The README carries `mcp-name: io.github.hec-ovi/web-search` (in an HTML comment near the
-   top). That string must match `server.json`'s `name` and ship in the PyPI long
-   description, which it does (`readme = "README.md"`).
-2. Install the publisher CLI (`mcp-publisher`, from the modelcontextprotocol/registry
-   releases).
-3. `mcp-publisher login github` (device/OAuth flow; grants the `io.github.hec-ovi/*`
-   namespace), then `mcp-publisher publish`.
-4. Confirm with
-   `curl 'https://registry.modelcontextprotocol.io/v0/servers?search=io.github.hec-ovi/web-search'`.
+```bash
+curl 'https://registry.modelcontextprotocol.io/v0/servers?search=io.github.hec-ovi/web-search'
+```
+
+### Publishing a new version (maintainer)
+
+The registry proves PyPI ownership through the `mcp-name: io.github.hec-ovi/web-search`
+marker in the published README (it must match `server.json`'s `name`; it ships in the PyPI
+long description because `readme = "README.md"`). To publish a new version after it is on
+PyPI:
+
+1. Bump the `version` in `server.json` (keep it in lockstep with `pyproject.toml`).
+2. Install the publisher CLI: `mcp-publisher` is a single Go binary from the verified
+   `modelcontextprotocol/registry` GitHub releases (sha256-verify the tarball, drop the
+   binary in `~/.local/bin`). It is not an apt package.
+3. `mcp-publisher login github` (browser OAuth as the repo owner; grants the
+   `io.github.hec-ovi/*` namespace), then `mcp-publisher publish` from the repo root.
