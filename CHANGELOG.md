@@ -8,6 +8,28 @@ semantic versioning once it reaches a tagged release.
 
 ### Added
 
+- Keyless multi-engine search out of the box: the `ddgs` adapter is treated as the
+  metasearch it is (Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek,
+  Wikipedia by default, with Bing and others selectable by name), with a
+  `--ddgs-backends google,brave,mojeek` flag on `search`/`web-search`
+  and a `ddgs_backend` parameter on `build_router` / `build_agent_io` to force a subset.
+  `ddgs` is the keyless default; a self-hosted SearXNG is the optional broader engine.
+  Public SearXNG instances are not used as a default (most disable the JSON API and
+  rate-limit automated clients).
+- `arxiv@1.0.0` contract and a keyless `websearch arxiv` tool (also the MCP
+  `arxiv_search` tool): arXiv paper search over the official Atom API with field-targeted
+  search (`--field`), sorting, GET caching, and exponential backoff on HTTP 429. Returns
+  structured papers (authors, abstract, categories, abstract and PDF links).
+- `github@1.0.0` contract and a keyless `websearch github` tool (also the MCP
+  `github_search` tool): GitHub repository search over the unauthenticated REST API with
+  typed fields (stars, forks, language, topics) and a clean `rate_limited` error on the
+  ~10 req/min limit. Code search needs a token and is left out of the keyless path.
+- New cross-cutting error codes `upstream_error` and `rate_limited` for the extra tools.
+- `docker/searxng/`: a lean one-container SearXNG self-host config (JSON API enabled, bot
+  limiter off, no Valkey needed) with its own README and a before-you-expose-it checklist.
+- `docs/BENCHMARK.md`: a reproducible, same-query head-to-head against the web search
+  built into Claude Code, with the honest verdict (comparable on retrieval; this tool
+  wins on cost, privacy, control, and extraction).
 - Frozen contracts as JSON Schema 2020-12: `envelope@1.0.0` (the cross-cutting wrapper
   for every inter-layer message and CLI `--json` output) and `search@1.0.0` (the
   Layer-1 search port). The semver rule (additive is MINOR, removal/rename/retype is

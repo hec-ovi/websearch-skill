@@ -1,13 +1,16 @@
 ---
 name: web-search
 description: >-
-  Multi-engine web search and clean-Markdown page reader for AI agents. Use it when the
-  user asks to search the web, look something up online, find current or recent
-  information, research a topic, fetch or read a URL, or verify a claim against live
-  sources. It fuses results across engines (SearXNG, DuckDuckGo) with rank fusion and
+  Keyless, self-hostable multi-engine web search and clean-Markdown page reader for AI
+  agents. Use it when the user asks to search the web, look something up online, find
+  current or recent information, research a topic, fetch or read a URL, find academic
+  papers or GitHub repositories, or verify a claim against live sources. Search fuses many
+  keyless engines (Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia
+  via the ddgs metasearch, plus an optional self-hosted SearXNG) with rank fusion and
   dedup, then fetches and extracts clean Markdown, fenced as untrusted and paginated so a
-  large page never overflows context. Three commands: web-search (find), web-fetch (read a
-  URL), web-open (page through an already-fetched document).
+  large page never overflows context. Commands: web-search (find pages), web-fetch (read a
+  URL), web-open (page through a fetched document), arxiv (search papers), github (search
+  repositories).
 compatibility: >-
   Requires internet access and the bundled websearch CLI (Python >=3.11 with uv). Not
   usable on the Claude API code-execution surface, which has no network.
@@ -20,8 +23,9 @@ shell and read its stdout. Add `--json` to any command for the structured Envelo
 default is a compact human view. Every command exits 0 on success and 1 on an error
 Envelope (`error.code`, `error.message`).
 
-If a `web_search` / `web_fetch` / `web_open` MCP tool is registered, prefer it (same
-arguments and output as the CLI). Otherwise use the CLI below.
+If the MCP tools (`web_search`, `web_fetch`, `web_open`, `arxiv_search`, `github_search`)
+are registered, prefer them (same arguments and output as the CLI). Otherwise use the CLI
+below. Everything is keyless: search works with no setup or API key.
 
 ## Commands
 
@@ -33,14 +37,17 @@ Run with `websearch <command>` (or `uv run websearch <command>` from the project
 ```
 websearch web-search "<query>" [--max-results 8] [--detail concise|detailed]
     [--freshness any|day|week|month|year] [--site HOST] [--language en] [--country us]
-    [--engines searxng,ddgs] [--searxng-url URL] [--no-ddgs] [--json]
+    [--ddgs-backends google,brave,mojeek] [--searxng-url URL] [--no-ddgs] [--json]
 ```
 
 Returns ranked, deduplicated results. Each result has a `url` and a human-readable
 `handle` (e.g. `en.wikipedia.org~3a1f9c2b5e6f`). `--detail detailed` adds the contributing
-engines and the fused score. This returns one ranked page; the keyless backends do not
-page results reliably, so to get different results refine the query. (`--offset` exists
-but is honored only by a SearXNG backend configured for it.)
+engines and the fused score. Search is keyless by default via the `ddgs` metasearch, which
+spans Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, and Wikipedia (Bing
+and others are selectable by name); `--ddgs-backends` forces a subset. Use `--site HOST` to restrict to one host (the only
+keyless way to find Reddit or X content: `--site reddit.com`, `--site x.com`). This returns
+one ranked page; the keyless backends do not page results reliably, so to get different
+results refine the query.
 
 ### web-fetch: read a URL
 
@@ -72,6 +79,32 @@ the network. Pass the `handle` (or URL) from a prior `web-search`/`web-fetch` re
 the page was not fetched first, it returns a `not_opened` error telling you to `web-fetch`
 the URL.
 
+### arxiv: search academic papers
+
+```
+websearch arxiv "<query>" [--field all|title|author|abstract] [--max-results 10]
+    [--sort-by relevance|lastUpdatedDate|submittedDate] [--sort-order descending|ascending]
+    [--start 0] [--json]
+```
+
+Keyless arXiv search. Returns structured papers: title, authors, abstract, categories,
+published and updated dates, and abstract and PDF links. Use it for academic papers or
+preprints, or when the user mentions arXiv. `--field author "Vaswani"` targets one field;
+`--sort-by submittedDate` gets the newest.
+
+### github: search code repositories
+
+```
+websearch github "<query>" [--language LANG] [--sort stars|forks|updated|best-match]
+    [--order desc|asc] [--per-page 10] [--json]
+```
+
+Keyless GitHub repository search. Returns typed fields you can sort on: full name, stars,
+forks, language, topics, and update date. Use it to find libraries, tools, or projects.
+`--language Rust` filters by language. Unauthenticated search is about 10 requests per
+minute; on a rate limit it returns a `rate_limited` error (wait and retry, do not loop).
+Repository search only; code search is not available keyless.
+
 ## When to use which
 
 | Situation | Command |
@@ -79,6 +112,9 @@ the URL.
 | The user asks a question that needs current or external facts | `web-search` |
 | You have a specific URL to read (from search, or the user gave one) | `web-fetch` |
 | A fetched page reported `has_more` and you need the next page | `web-open --page N` |
+| The user wants academic papers or preprints | `arxiv` |
+| The user wants code, libraries, or GitHub projects | `github` |
+| The user wants Reddit or X (Twitter) content | `web-search --site reddit.com` (or `x.com`) |
 | The first page of results was not enough | refine the `web-search` query (keyless backends do not page results reliably) |
 
 Typical flow: `web-search` to find candidates, `web-fetch` the two or three most relevant
@@ -127,8 +163,10 @@ detect actual failures.
 
 ## Notes
 
-- Set `WEBSEARCH_SEARXNG_URL` to point at a SearXNG instance (recommended for quality);
-  without it, DuckDuckGo is the keyless fallback. Pass `--no-ddgs` to disable that
-  fallback.
-- The MCP server is `websearch mcp` (needs the optional `mcp` extra). It exposes the same
-  three tools and delivers page content through the tool-result channel.
+- Search is keyless out of the box via the `ddgs` metasearch (many engines at once). For
+  broader, more reliable search, set `WEBSEARCH_SEARXNG_URL` to a self-hosted SearXNG and
+  the router fuses it with ddgs. Pass `--no-ddgs` to disable the ddgs engine. Public
+  SearXNG instances are not used by default (they disable the JSON API and block bots).
+- The MCP server is `websearch mcp` (needs the optional `mcp` extra). It exposes all five
+  tools (`web_search`, `web_fetch`, `web_open`, `arxiv_search`, `github_search`) and
+  delivers page content through the tool-result channel.
