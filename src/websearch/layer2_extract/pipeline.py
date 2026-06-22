@@ -20,6 +20,7 @@ from .models import (
     EXTRACT_CONTRACT_VERSION,
     ExtractPayload,
     ExtractRequest,
+    ExtractResult,
     ExtractSource,
     ExtractTiming,
     FetchRequest,
@@ -27,6 +28,14 @@ from .models import (
 from .ports import ExtractAdapter
 
 _DEFAULT_ENGINES = {"trafilatura", "auto"}
+
+
+def _is_extractable(content_type: str | None) -> bool:
+    """Whether the HTML extractor should be run on this content type."""
+    if not content_type:
+        return True  # unknown type: attempt extraction
+    ct = content_type.lower()
+    return "html" in ct or "xml" in ct or ct.startswith("text/")
 
 
 class FetchExtractPipeline:
@@ -51,7 +60,7 @@ class FetchExtractPipeline:
         try:
             fr = self._fetch_router.fetch(fetch_request)
         except DependencyMissing as exc:
-            return self._dep_error(exc, fetch_request, trace_id, elapsed_ms())
+            return self._dep_error(exc, request_id, trace_id, elapsed_ms())
 
         if fr.status == 0 and not fr.ok:
             retriable = not (fr.error and ("not installed" in fr.error or "opt-in" in fr.error))
@@ -75,28 +84,43 @@ class FetchExtractPipeline:
                 f"this build; used '{self._extractor.name}' instead."
             )
             overrides.pop("engine", None)
+        # Never let an override collide with the fields the pipeline owns.
+        overrides.pop("html", None)
+        overrides.pop("base_url", None)
 
-        extract_request = ExtractRequest(
-            html=fr.raw_html or "",
-            base_url=fr.final_url or fetch_request.url,
-            **overrides,
-        )
-        try:
-            result = self._extractor.extract(extract_request)
-        except DependencyMissing as exc:
-            return self._dep_error(exc, fetch_request, trace_id, elapsed_ms())
-        except Exception as exc:  # extractor should not raise, but never leak a traceback
-            return error_envelope(
-                EXTRACT_CONTRACT_VERSION,
-                code=errors.EXTRACT_FAILED,
-                message=f"extraction failed: {type(exc).__name__}: {exc}",
-                retriable=False,
-                layer="extract",
-                backend=self._extractor.name,
-                elapsed_ms=elapsed_ms(),
-                trace_id=trace_id,
-                request_id=request_id,
+        if not _is_extractable(fr.content_type):
+            warnings.append(
+                f"content type '{fr.content_type}' is not HTML/text; extraction was skipped."
             )
+            result = ExtractResult(
+                content_markdown="",
+                page_type="unknown",
+                quality_score=0.0,
+                extracted_via="none",
+                warnings=[f"non-HTML document ({fr.content_type})"],
+            )
+        else:
+            extract_request = ExtractRequest(
+                html=fr.raw_html or "",
+                base_url=fr.final_url or fetch_request.url,
+                **overrides,
+            )
+            try:
+                result = self._extractor.extract(extract_request)
+            except DependencyMissing as exc:
+                return self._dep_error(exc, request_id, trace_id, elapsed_ms())
+            except Exception as exc:  # extractor should not raise; never leak a traceback
+                return error_envelope(
+                    EXTRACT_CONTRACT_VERSION,
+                    code=errors.EXTRACT_FAILED,
+                    message=f"extraction failed: {type(exc).__name__}: {exc}",
+                    retriable=False,
+                    layer="extract",
+                    backend=self._extractor.name,
+                    elapsed_ms=elapsed_ms(),
+                    trace_id=trace_id,
+                    request_id=request_id,
+                )
 
         if fr.blocked:
             warnings.append(
@@ -136,10 +160,11 @@ class FetchExtractPipeline:
             backend=fr.fetched_via,
             elapsed_ms=elapsed_ms(),
             trace_id=trace_id,
+            request_id=request_id,
         )
 
     def _dep_error(
-        self, exc: DependencyMissing, fetch_request: FetchRequest, trace_id: str, ms: float
+        self, exc: DependencyMissing, request_id: str, trace_id: str, ms: float
     ) -> Envelope:
         return error_envelope(
             EXTRACT_CONTRACT_VERSION,
@@ -150,4 +175,5 @@ class FetchExtractPipeline:
             backend=None,
             elapsed_ms=ms,
             trace_id=trace_id,
+            request_id=request_id,
         )

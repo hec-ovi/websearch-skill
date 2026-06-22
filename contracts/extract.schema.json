@@ -18,7 +18,7 @@
           "description": "auto resolves to the default closure (trafilatura). The others are opt-in adapters."
         },
         "favor": { "enum": ["precision", "recall", "balanced"], "default": "balanced" },
-        "output_format": { "enum": ["markdown", "text", "json"], "default": "markdown" },
+        "output_format": { "enum": ["markdown", "text", "json"], "default": "markdown", "description": "Preferred body representation for the consumer. The result always provides both content_markdown and content_text; the agent-facing surface (the CLI, later the MCP tools) renders per this value." },
         "include_tables": { "type": "boolean", "default": true },
         "include_links": { "type": "boolean", "default": true },
         "include_images": { "type": "boolean", "default": false },

@@ -119,6 +119,36 @@ def test_dependency_missing_on_extract_is_clean_error():
     assert env.error.code == "dependency_missing"
 
 
+def test_non_html_content_type_skips_extraction():
+    fetcher = _FetcherReturning(
+        status=200, ok=True, raw_html="%PDF-1.7 binary", content_type="application/pdf"
+    )
+    env = _pipeline(fetcher).run(FetchRequest(url="https://x.test/file.pdf"))
+    assert env.ok is True
+    assert env.data["result"]["extracted_via"] == "none"
+    assert any("not HTML" in w for w in env.data["warnings"])
+
+
+def test_request_id_present_in_meta_on_success_and_error():
+    ok = _pipeline(_FetcherReturning(status=200, ok=True, raw_html=ARTICLE_HTML)).run(
+        FetchRequest(url="https://x.test/")
+    )
+    err = _pipeline(_FetcherReturning(status=0, ok=False, error="boom")).run(
+        FetchRequest(url="https://x.test/")
+    )
+    assert ok.meta.request_id  # type: ignore[attr-defined]
+    assert err.meta.request_id  # type: ignore[attr-defined]
+
+
+def test_override_collision_does_not_crash():
+    fetcher = _FetcherReturning(status=200, ok=True, raw_html=ARTICLE_HTML)
+    env = _pipeline(fetcher).run(
+        FetchRequest(url="https://x.test/"),
+        extract_overrides={"html": "INJECTED", "base_url": "https://evil.test/"},
+    )
+    assert env.ok is True  # reserved keys are stripped, no TypeError
+
+
 def test_unavailable_engine_falls_back_to_default_with_warning():
     fetcher = _FetcherReturning(status=200, ok=True, raw_html=ARTICLE_HTML)
     env = _pipeline(fetcher).run(
