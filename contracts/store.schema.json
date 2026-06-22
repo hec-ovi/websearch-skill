@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/store.schema.json",
+  "title": "Layer 2B - Store / PageIndex sub-port contract",
+  "description": "Pages-in / ranked-passages-out, plus the progressive-disclosure resolver. The second of Layer 2B's two ports (the other is format.schema.json). The store is ephemeral and holds NO content cap: full Markdown is stored verbatim and recoverable by id. The default adapter is SQLite FTS5 over an in-memory connection (Python stdlib, zero third-party install, built-in BM25); a pure-Python in-memory BM25 adapter is the fallback when FTS5 is not compiled into the local SQLite. Persistence is the presence of persist_path (otherwise identical behavior). vector and tantivy are named in the adapter enum but are opt-in, not part of the base install.",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "StoreConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "adapter": {
+          "enum": ["sqlite-fts5", "memory", "sqlite-vec", "tantivy"],
+          "default": "sqlite-fts5",
+          "description": "Index backend. sqlite-fts5 (default) and memory (the pure-Python BM25 fallback) require zero third-party packages. sqlite-vec/tantivy are opt-in adapters honoring the same shapes."
+        },
+        "persist_path": { "type": ["string", "null"], "default": null, "description": "null => in-memory (ephemeral). A path => persistence; behavior is otherwise identical (WAL is enabled for a file-backed SQLite)." },
+        "cache_ttl_seconds": { "type": ["integer", "null"], "minimum": 0, "default": null, "description": "When set, enables cross-query URL/content-hash dedup so a re-add of an unchanged page is a no-op within the TTL." },
+        "chunk_strategy": { "enum": ["heading", "fixed"], "default": "heading", "description": "How Markdown is split into passages before indexing: heading-aware (split on Markdown headings, then size-bound) or fixed-size windows." },
+        "chunk_max_chars": { "type": "integer", "minimum": 1, "default": 1200, "description": "Upper bound on a passage's character length." },
+        "chunk_overlap": { "type": "integer", "minimum": 0, "default": 0, "description": "Character overlap between adjacent fixed windows." }
+      }
+    },
+
+    "PageInput": {
+      "type": "object",
+      "required": ["url", "markdown"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string", "minLength": 1, "description": "Canonical URL; the natural key." },
+        "markdown": { "type": "string", "description": "Full clean Markdown body, stored verbatim (never truncated)." },
+        "title": { "type": ["string", "null"], "default": null },
+        "fetched_at": { "type": ["string", "null"], "default": null, "description": "ISO 8601 fetch time." },
+        "content_hash": { "type": ["string", "null"], "default": null, "description": "Hash of the normalized body; derived when null. Used for idempotent add on (url, content_hash)." }
+      }
+    },
+
+    "StoredDoc": {
+      "type": "object",
+      "required": ["id", "url", "n_passages", "content_hash"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Stable opaque id (deterministic from the canonical url)." },
+        "url": { "type": "string" },
+        "title": { "type": ["string", "null"], "default": null },
+        "n_passages": { "type": "integer", "minimum": 0 },
+        "content_hash": { "type": "string" },
+        "fetched_at": { "type": ["string", "null"], "default": null },
+        "token_estimate": { "type": "integer", "minimum": 0, "default": 0 },
+        "deduped": { "type": "boolean", "default": false, "description": "True when this add was a no-op because (url, content_hash) was already present (idempotent)." }
+      }
+    },
+
+    "AddRequest": {
+      "type": "object",
+      "required": ["pages"],
+      "additionalProperties": false,
+      "properties": {
+        "pages": { "type": "array", "items": { "$ref": "#/$defs/PageInput" } }
+      }
+    },
+
+    "AddResult": {
+      "type": "object",
+      "required": ["added"],
+      "additionalProperties": false,
+      "properties": {
+        "added": { "type": "array", "items": { "$ref": "#/$defs/StoredDoc" } }
+      }
+    },
+
+    "Passage": {
+      "type": "object",
+      "required": ["id", "doc_id", "url", "text", "score", "char_span", "ordinal"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Stable passage id (doc id + ordinal)." },
+        "doc_id": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": ["string", "null"], "default": null },
+        "text": { "type": "string", "description": "The passage text, verbatim from the stored Markdown." },
+        "score": { "type": "number", "description": "Relevance score, higher is better (BM25 negated to a positive number)." },
+        "char_span": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 0 }, "description": "[start, end) character offsets of this passage within the document Markdown." },
+        "ordinal": { "type": "integer", "minimum": 0, "description": "Zero-based passage index within its document." }
+      }
+    },
+
+    "SearchPageRequest": {
+      "type": "object",
+      "required": ["query"],
+      "additionalProperties": false,
+      "properties": {
+        "query": { "type": "string", "minLength": 1, "description": "Free text; the adapter escapes FTS operators so an arbitrary query is treated as plain terms." },
+        "top_k": { "type": "integer", "minimum": 1, "default": 10, "description": "Max passages considered before pagination." },
+        "page": { "type": "integer", "minimum": 1, "default": 1, "description": "1-based page over the ranked passages." },
+        "page_size": { "type": "integer", "minimum": 1, "default": 5 },
+        "mode": { "enum": ["bm25", "vector", "hybrid"], "default": "bm25", "description": "bm25 is the default (FTS5 built-in, or the pure-Python fallback). vector/hybrid are opt-in adapters returning the same Passage shape." }
+      }
+    },
+
+    "SearchPageResult": {
+      "type": "object",
+      "required": ["passages", "total", "page", "page_size", "has_more", "backend"],
+      "additionalProperties": false,
+      "properties": {
+        "passages": { "type": "array", "items": { "$ref": "#/$defs/Passage" } },
+        "total": { "type": "integer", "minimum": 0, "description": "Total ranked passages matched (capped at top_k)." },
+        "page": { "type": "integer", "minimum": 1 },
+        "page_size": { "type": "integer", "minimum": 1 },
+        "has_more": { "type": "boolean" },
+        "backend": { "type": "string", "description": "The active index backend id, e.g. \"sqlite-fts5\" or \"memory-bm25\"." }
+      }
+    },
+
+    "PageDocument": {
+      "type": "object",
+      "description": "The full document for a Layer-3 deep dive / resolve(id). markdown is the complete body, never truncated.",
+      "required": ["id", "url", "markdown"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": ["string", "null"], "default": null },
+        "markdown": { "type": "string" },
+        "fetched_at": { "type": ["string", "null"], "default": null },
+        "content_hash": { "type": ["string", "null"], "default": null },
+        "n_passages": { "type": "integer", "minimum": 0, "default": 0 },
+        "token_estimate": { "type": "integer", "minimum": 0, "default": 0 }
+      }
+    },
+
+    "ResolveIndexEntry": {
+      "type": "object",
+      "required": ["id", "url", "n_passages"],
+      "additionalProperties": false,
+      "description": "Lightweight metadata about one held document, for the agent to decide what to expand (the GBrain resolver pattern: cheap index first, full content on demand).",
+      "properties": {
+        "id": { "type": "string" },
+        "url": { "type": "string" },
+        "title": { "type": ["string", "null"], "default": null },
+        "n_passages": { "type": "integer", "minimum": 0 },
+        "fetched_at": { "type": ["string", "null"], "default": null },
+        "token_estimate": { "type": "integer", "minimum": 0, "default": 0 }
+      }
+    },
+
+    "ResolveIndex": {
+      "type": "object",
+      "required": ["docs", "total", "backend"],
+      "additionalProperties": false,
+      "properties": {
+        "docs": { "type": "array", "items": { "$ref": "#/$defs/ResolveIndexEntry" } },
+        "total": { "type": "integer", "minimum": 0 },
+        "backend": { "type": "string" }
+      }
+    }
+  }
+}

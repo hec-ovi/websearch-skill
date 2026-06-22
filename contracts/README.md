@@ -13,12 +13,24 @@ of language or process boundary.
 | `search.schema.json` | Layer 1 search (`SearchRequest`, `SearchPayload`, `ResultItem`, `SourceProvenance`) | 1.0.0 | frozen |
 | `fetch.schema.json` | Layer 2A fetch sub-port (`FetchRequest`, `FetchResult`) | 1.1.0 | frozen |
 | `extract.schema.json` | Layer 2A extract sub-port + agent-facing response (`ExtractRequest`, `ExtractResult`, `ExtractSource`, `ExtractPayload`) | 1.0.0 | frozen |
+| `format.schema.json` | Layer 2B format sub-port (`ResultInput`, `FormatRequest`, `FormatPayload`, `FormatSidecar`, `AnthropicSearchResultBlock`) | 1.0.0 | frozen |
+| `store.schema.json` | Layer 2B store/page-index sub-port (`PageInput`, `Passage`, `SearchPageRequest`, `SearchPageResult`, `PageDocument`, `ResolveIndex`, `StoreConfig`) | 1.0.0 | frozen |
 
 Layer 2A is two decoupled sub-ports: `fetch` (URL in, raw HTML out) and `extract`
-(HTML in, clean Markdown + metadata out). They are independently swappable, so each
-gets its own contract file and version. The format/store (2B) and agent-io (Layer 3)
-contracts are added when those layers are built (progressive disclosure), each as its
-own file with its own `x-contract-version`.
+(HTML in, clean Markdown + metadata out). Layer 2B is likewise two decoupled
+sub-ports: `format` (vendor-neutral results in, one layout-stable Markdown document
+plus a parallel JSON sidecar out, relevance-ordered and paginated with near-duplicate
+dedup and progressive disclosure) and `store` (full pages in, ranked passages and a
+resolver out, default adapter SQLite FTS5 in-memory). All sub-ports are independently
+swappable, so each gets its own contract file and version. The agent-io (Layer 3)
+contract is added when that layer is built (progressive disclosure), as its own file
+with its own `x-contract-version`.
+
+Two cross-cutting guarantees the 2B contracts make explicit: there is **no
+output-length cap** (full bodies are stored and echoed in the sidecar verbatim;
+`body_char_budget` only offloads the *rendered* Markdown view to the resolver), and
+`anthropic_search_result_blocks` is an **optional, derived, vendor-specific view** off
+the vendor-neutral `ResultInput`, never the canonical shape.
 
 ## Versioning rule
 

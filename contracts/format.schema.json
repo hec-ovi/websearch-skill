@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/format.schema.json",
+  "title": "Layer 2B - Format sub-port contract",
+  "description": "Results-in / LLM-ready-document-out. The first of Layer 2B's two ports (the other is store.schema.json). FORMAT takes vendor-neutral, pre-extracted results and renders ONE layout-stable Markdown document plus a parallel JSON sidecar carrying identical data, ordered by descending relevance, paginated, with near-duplicate dedup folded in and progressive disclosure (index vs full vs auto). There is NO output-length cap: body_char_budget only triggers a resolver offload of the RENDERED view; the full body always stays in the sidecar (and the store) and is recoverable by id. The optional anthropic_search_result_blocks view down-renders 1:1 into Anthropic search_result content blocks (a derived, vendor-specific view; Layer 3 owns the citations-vs-structured-output toggle).",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "Highlight": {
+      "type": "object",
+      "required": ["text"],
+      "additionalProperties": false,
+      "description": "A query-relevant span supplied by an upstream engine (e.g. Exa highlights). Pass-through metadata; FORMAT never synthesizes or truncates content to produce these.",
+      "properties": {
+        "text": { "type": "string" },
+        "score": { "type": ["number", "null"], "default": null }
+      }
+    },
+
+    "ResultInput": {
+      "type": "object",
+      "required": ["url"],
+      "additionalProperties": false,
+      "description": "One vendor-neutral result. The union of what Layer 1 (url/title/published_date/site/score/lang) and Layer 2A (body_markdown/summary/page_type/quality_score/content_hash) supply. A backend's native shape is mapped onto this by the caller, never the other way around.",
+      "properties": {
+        "id": { "type": ["string", "null"], "default": null, "description": "Stable opaque resolver id. When null, FORMAT derives a deterministic id from the canonical url so the same url always resolves to the same id." },
+        "url": { "type": "string", "minLength": 1, "description": "Canonical URL. The dedup key, the Anthropic source, and the resolver handle." },
+        "title": { "type": ["string", "null"], "default": null },
+        "published_date": { "type": ["string", "null"], "default": null, "description": "ISO 8601 if known." },
+        "author": { "type": ["string", "null"], "default": null },
+        "site": { "type": ["string", "null"], "default": null, "description": "Display site/host. Derived from url when null." },
+        "score": { "type": ["number", "null"], "default": null, "description": "Relevance score; results are ordered by this descending. Missing scores sort last in stable input order." },
+        "lang": { "type": ["string", "null"], "default": null, "description": "ISO 639-1 if known." },
+        "fetched_at": { "type": ["string", "null"], "default": null, "description": "ISO 8601 fetch time if known." },
+        "highlights": { "type": "array", "items": { "$ref": "#/$defs/Highlight" }, "default": [] },
+        "summary": { "type": ["string", "null"], "default": null, "description": "Optional pass-through summary supplied by an upstream engine. FORMAT never generates this." },
+        "body_markdown": { "type": ["string", "null"], "default": null, "description": "Full clean Markdown body. NEVER truncated in storage or in the sidecar; the source for full-mode rendering." },
+        "body_blocks": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Pre-chunked passages for per-passage citation. When empty, FORMAT derives blocks from body_markdown (heading/paragraph aware)." },
+        "page_type": { "type": ["string", "null"], "default": null },
+        "quality_score": { "type": ["number", "null"], "default": null },
+        "content_hash": { "type": ["string", "null"], "default": null, "description": "Hash of the normalized body for byte-exact dedup. Derived from body_markdown when null." },
+        "token_estimate": { "type": ["integer", "null"], "minimum": 0, "default": null, "description": "Caller-supplied token estimate of the body. Computed by FORMAT when null." }
+      }
+    },
+
+    "DedupParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Near-duplicate handling. Byte-exact (content hash) runs first, then MinHash near-dup clustering on the survivors, keeping one canonical per cluster and folding the rest into dropped_duplicates.",
+      "properties": {
+        "enabled": { "type": "boolean", "default": true },
+        "method": { "enum": ["exact", "minhash", "both"], "default": "both" },
+        "jaccard_threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9, "description": "Estimated-Jaccard at/above which two bodies are near-duplicates. 0.9 is conservative; lower for heavy boilerplate." },
+        "num_perm": { "type": "integer", "minimum": 16, "default": 128, "description": "MinHash permutation count (signature length). Error ~ 1/sqrt(num_perm)." },
+        "shingle_size": { "type": "integer", "minimum": 1, "default": 4, "description": "Word n-gram size for shingling; bodies shorter than this fall back to character shingles." }
+      }
+    },
+
+    "FormatRequest": {
+      "type": "object",
+      "required": ["results"],
+      "additionalProperties": false,
+      "properties": {
+        "query": { "type": ["string", "null"], "default": null, "description": "The originating query, echoed into the header and sidecar." },
+        "results": { "type": "array", "items": { "$ref": "#/$defs/ResultInput" }, "description": "Pre-extracted results. Need not be pre-ordered or pre-deduped; FORMAT orders by score descending and dedups." },
+        "page": { "type": "integer", "minimum": 0, "default": 0, "description": "Zero-based page index over the deduped, ordered result set." },
+        "page_size": { "type": "integer", "minimum": 1, "default": 5, "description": "Results per page." },
+        "mode": {
+          "enum": ["auto", "index", "full"],
+          "default": "auto",
+          "description": "auto = render full bodies inline when the page's estimated tokens fit inline_token_budget, otherwise index. index = preview (one highlight/summary/snippet) + stable id, full body fetched on demand via the store resolver. full = inline every body (subject to body_char_budget offload of the RENDERED view only)."
+        },
+        "body": {
+          "enum": ["highlights", "summary", "text"],
+          "default": "highlights",
+          "description": "In index mode, which compact preview to show per result: a top highlight, the summary field, or the leading text of the body. The full body is always recoverable by id regardless."
+        },
+        "inline_token_budget": { "type": "integer", "minimum": 0, "default": 6000, "description": "auto mode renders the page full when its estimated tokens are at or below this, else index. Mitigates needless resolver round-trips for small result sets." },
+        "body_char_budget": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "default": 4000,
+          "description": "Per-result soft budget for the RENDERED Markdown body in full mode. A longer body is shown up to the budget with a resolve hint; the FULL body is never discarded (it stays in the sidecar and the store, recoverable by id). This is a progressive-disclosure offload trigger, NOT a content cap. null inlines every body in full, no offload."
+        },
+        "dedup": { "$ref": "#/$defs/DedupParams", "default": { "enabled": true, "method": "both", "jaccard_threshold": 0.9, "num_perm": 128, "shingle_size": 4 } },
+        "include_sidecar": { "type": "boolean", "default": true, "description": "Emit the parallel JSON sidecar (identical data)." },
+        "include_anthropic_blocks": { "type": "boolean", "default": false, "description": "Emit the derived anthropic_search_result_blocks view in the sidecar." },
+        "anthropic_citations": { "type": "boolean", "default": true, "description": "When include_anthropic_blocks, set citations.enabled on EVERY block (Anthropic requires citations be all-or-nothing across a request). A caller that also uses structured outputs must set this false (citations + output_config.format is an API error)." },
+        "chars_per_token": { "type": "number", "exclusiveMinimum": 0, "default": 4, "description": "Divisor for the dependency-free token estimate (ceil(chars/divisor)); 4 is OpenAI's documented rule of thumb. Lower (e.g. 3.5) over-estimates for dense markdown/code. Callers may inject a real tokenizer instead." }
+      }
+    },
+
+    "DroppedDuplicate": {
+      "type": "object",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string" },
+        "id": { "type": ["string", "null"], "default": null },
+        "similarity": { "type": ["number", "null"], "default": null, "description": "Estimated Jaccard to the canonical (null for a byte-exact duplicate)." },
+        "reason": { "enum": ["exact", "minhash"], "default": "minhash" }
+      }
+    },
+
+    "FormattedResult": {
+      "type": "object",
+      "description": "One result as echoed in the sidecar: the lossless data view of the rendered block.",
+      "required": ["id", "url", "rank"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Stable opaque resolver id." },
+        "url": { "type": "string" },
+        "rank": { "type": "integer", "minimum": 1, "description": "1-based position in the deduped, descending-relevance set (rank == position)." },
+        "title": { "type": ["string", "null"], "default": null },
+        "published_date": { "type": ["string", "null"], "default": null },
+        "author": { "type": ["string", "null"], "default": null },
+        "site": { "type": ["string", "null"], "default": null },
+        "score": { "type": ["number", "null"], "default": null },
+        "lang": { "type": ["string", "null"], "default": null },
+        "fetched_at": { "type": ["string", "null"], "default": null },
+        "page_type": { "type": ["string", "null"], "default": null },
+        "quality_score": { "type": ["number", "null"], "default": null },
+        "highlights": { "type": "array", "items": { "$ref": "#/$defs/Highlight" }, "default": [] },
+        "summary": { "type": ["string", "null"], "default": null },
+        "body_markdown": { "type": ["string", "null"], "default": null, "description": "The FULL body, verbatim, in BOTH index and full modes (the sidecar is the lossless program-side record; only the rendered Markdown VIEW is offloaded, never the sidecar data). null only when the input carried no body. The store resolver is the alternative recovery path when a caller keeps the Markdown but discards the sidecar." },
+        "body_blocks": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Citation chunks; the minimal citable unit." },
+        "token_estimate": { "type": "integer", "minimum": 0, "default": 0 },
+        "rendered_full": { "type": "boolean", "default": false, "description": "Whether the Markdown view inlined this body in full." },
+        "truncated_in_markdown": { "type": "boolean", "default": false, "description": "Whether the Markdown VIEW showed only body_char_budget chars with a resolve hint. The sidecar/store still hold the full body." },
+        "dedup_of": { "type": ["string", "null"], "default": null, "description": "Set on a result that is itself a folded duplicate (normally absent; duplicates are dropped, not emitted)." },
+        "dropped_duplicates": { "type": "array", "items": { "$ref": "#/$defs/DroppedDuplicate" }, "default": [], "description": "Near/exact duplicates folded into this canonical result." }
+      }
+    },
+
+    "AnthropicTextBlock": {
+      "type": "object",
+      "required": ["type", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "text" },
+        "text": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "AnthropicSearchResultBlock": {
+      "type": "object",
+      "description": "A derived view that maps 1:1 onto an Anthropic messages-API search_result content block. source is a bare URL/identifier STRING (not a nested object). content has at least one non-empty text block. citations/cache_control are omitted entirely (never null) when not used.",
+      "required": ["type", "source", "title", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "search_result" },
+        "source": { "type": "string", "minLength": 1, "description": "The result URL/identifier (a plain string)." },
+        "title": { "type": "string" },
+        "content": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/AnthropicTextBlock" } },
+        "citations": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "enabled": { "type": "boolean" } },
+          "description": "Present only when emitted. All blocks in one request must agree (all enabled or all disabled)."
+        },
+        "cache_control": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "type": { "const": "ephemeral" } }
+        }
+      }
+    },
+
+    "FormatSidecar": {
+      "type": "object",
+      "description": "The parallel JSON view. Carries the same data as the Markdown document; either may be dropped, and the full result set is recoverable from the other (the Markdown carries stable ids + a resolve hint when a body was offloaded).",
+      "required": ["page", "page_size", "total_results", "total_pages", "mode", "results"],
+      "additionalProperties": false,
+      "properties": {
+        "query": { "type": ["string", "null"], "default": null },
+        "page": { "type": "integer", "minimum": 0 },
+        "page_size": { "type": "integer", "minimum": 1 },
+        "total_results": { "type": "integer", "minimum": 0, "description": "Count AFTER dedup." },
+        "total_pages": { "type": "integer", "minimum": 0 },
+        "next_cursor": { "type": ["string", "null"], "default": null, "description": "Opaque next-page cursor; null on the last page." },
+        "mode": { "enum": ["index", "full"], "description": "The RESOLVED render mode for this page (auto collapses to one of these)." },
+        "page_token_estimate": { "type": "integer", "minimum": 0, "default": 0 },
+        "total_dropped_duplicates": { "type": "integer", "minimum": 0, "default": 0 },
+        "results": { "type": "array", "items": { "$ref": "#/$defs/FormattedResult" } },
+        "anthropic_search_result_blocks": { "type": "array", "items": { "$ref": "#/$defs/AnthropicSearchResultBlock" }, "default": [], "description": "Populated only when include_anthropic_blocks is set; one block per result on the page." }
+      }
+    },
+
+    "FormatPayload": {
+      "type": "object",
+      "description": "Envelope.data for a format response.",
+      "required": ["request_id", "markdown"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": { "type": "string", "description": "UUID for this request." },
+        "markdown": { "type": "string", "description": "The single layout-stable Markdown document for this page." },
+        "sidecar": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/FormatSidecar" }], "default": null },
+        "warnings": { "type": "array", "items": { "type": "string" }, "default": [] }
+      }
+    },
+
+    "FormatResponse": {
+      "description": "An Envelope whose meta.layer is \"format\" and whose data is a FormatPayload (or null on error).",
+      "allOf": [
+        { "$ref": "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json" },
+        {
+          "properties": {
+            "data": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/FormatPayload" }] },
+            "meta": {
+              "properties": { "layer": { "const": "format" } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
