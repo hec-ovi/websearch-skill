@@ -79,9 +79,9 @@ def dedupe(tagged: list[tuple[str, str, RawResult]]) -> list[DedupedDoc]:
             existing.snippets.append(r.snippet)
         if r.snippet and len(r.snippet) > len(existing.snippet):
             existing.snippet = r.snippet
-        # Title from the best-ranked source seen so far.
+        # Title from the best-ranked source; also fill an empty title from any source.
         best_rank = min(s.rank for s in existing.sources[:-1])
-        if r.rank < best_rank and r.title:
+        if r.title and (not existing.title or r.rank < best_rank):
             existing.title = r.title
         # Fill missing optional fields from later engines.
         if existing.published_date is None and r.published_date is not None:

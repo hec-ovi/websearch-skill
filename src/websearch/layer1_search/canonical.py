@@ -58,40 +58,43 @@ def canonicalize_url(url: str) -> str:
     raw = (url or "").strip()
     if not raw:
         return ""
+    # The whole body is guarded: urlsplit is lazy, so an invalid port only raises when
+    # parts.port is accessed, and an IPv6 literal needs its brackets put back. Any parse
+    # failure falls back to the stripped input rather than crashing the caller (a single
+    # bad URL from one engine must not abort the whole search).
     try:
         parts = urlsplit(raw)
+        scheme = parts.scheme.lower()
+        host = parts.hostname.lower() if parts.hostname else ""
+        if host.startswith("www."):
+            host = host[4:]
+        # parts.hostname strips the brackets off an IPv6 literal; put them back.
+        host_part = f"[{host}]" if ":" in host else host
+
+        port = parts.port  # may raise ValueError for a non-numeric / out-of-range port
+        netloc = host_part
+        if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+            netloc = f"{host_part}:{port}"
+        if parts.username:
+            userinfo = parts.username
+            if parts.password:
+                userinfo += f":{parts.password}"
+            netloc = f"{userinfo}@{netloc}"
+
+        path = parts.path
+        if not path:
+            path = "/"  # normalize bare domain so https://host and https://host/ dedupe
+        elif len(path) > 1 and path.endswith("/"):
+            path = path.rstrip("/")
+
+        kept = [
+            (k, v)
+            for k, v in parse_qsl(parts.query, keep_blank_values=True)
+            if k not in _TRACKING_PARAMS
+        ]
+        kept.sort(key=lambda kv: (kv[0], kv[1]))
+        query = urlencode(kept)
+
+        return urlunsplit((scheme, netloc, path, query, ""))
     except ValueError:
         return raw
-
-    scheme = parts.scheme.lower()
-    host = parts.hostname.lower() if parts.hostname else ""
-    if host.startswith("www."):
-        host = host[4:]
-
-    # Reattach a non-default port and any userinfo (userinfo is rare but preserved).
-    netloc = host
-    if parts.port and not (
-        (scheme == "http" and parts.port == 80) or (scheme == "https" and parts.port == 443)
-    ):
-        netloc = f"{host}:{parts.port}"
-    if parts.username:
-        userinfo = parts.username
-        if parts.password:
-            userinfo += f":{parts.password}"
-        netloc = f"{userinfo}@{netloc}"
-
-    path = parts.path
-    if not path:
-        path = "/"  # normalize bare domain so https://host and https://host/ dedupe
-    elif len(path) > 1 and path.endswith("/"):
-        path = path.rstrip("/")
-
-    kept = [
-        (k, v)
-        for k, v in parse_qsl(parts.query, keep_blank_values=True)
-        if k not in _TRACKING_PARAMS
-    ]
-    kept.sort(key=lambda kv: (kv[0], kv[1]))
-    query = urlencode(kept)
-
-    return urlunsplit((scheme, netloc, path, query, ""))

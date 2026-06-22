@@ -38,3 +38,34 @@ def test_www_and_bare_domain_collapse_to_same_key():
     a = canonicalize_url("https://www.python.org/?utm_source=foo")
     b = canonicalize_url("https://python.org")
     assert a == b
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "https://example.com:abc/p",  # non-numeric port
+        "https://example.com:99999/p",  # out-of-range port
+    ],
+)
+def test_malformed_port_falls_back_instead_of_crashing(raw):
+    # A bad port must not raise: one weird URL from one engine must not abort the request.
+    assert canonicalize_url(raw) == raw
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("http://[2001:db8::1]:8080/p", "http://[2001:db8::1]:8080/p"),
+        ("http://[2001:db8::1]/p", "http://[2001:db8::1]/p"),
+        ("https://[2001:db8::1]:443/p", "https://[2001:db8::1]/p"),  # default port dropped
+    ],
+)
+def test_ipv6_hosts_keep_their_brackets(raw, expected):
+    assert canonicalize_url(raw) == expected
+
+
+def test_ipv6_canonical_url_reparses_cleanly():
+    from urllib.parse import urlsplit
+
+    out = canonicalize_url("http://[2001:db8::1]:8080/p")
+    assert urlsplit(out).port == 8080  # round-trips with no ValueError
