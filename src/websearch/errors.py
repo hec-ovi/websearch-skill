@@ -13,3 +13,6 @@ NO_ENGINES_ENABLED = "no_engines_enabled"
 # Layer 2A (fetch + extract)
 FETCH_FAILED = "fetch_failed"
 EXTRACT_FAILED = "extract_failed"
+
+# Layer 3 (agent I/O)
+NOT_OPENED = "not_opened"
