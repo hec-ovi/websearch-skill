@@ -179,7 +179,7 @@ MCP face delivers content through the tool-result channel, which models are trai
 least privilege, and cutting exfiltration paths.
 
 **Faces.** One core, three faces over identical payloads: the `websearch web-search` / `web-fetch`
-/ `web-open` CLI; an optional FastMCP stdio server (`websearch mcp`, the `mcp` extra) whose tools
+/ `web-open` CLI; a FastMCP stdio server (`websearch mcp`, bundled in the base install) whose tools
 return the same Envelope JSON the CLI emits; and a portable `SKILL.md` (Agent Skills standard, name
 plus description) documenting the command grammar so a non-MCP agent can drive the CLI by shell and
 read stdout. The lower-level `search` / `fetch` / `open` commands remain as the per-layer surfaces

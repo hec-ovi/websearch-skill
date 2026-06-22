@@ -1,9 +1,10 @@
-"""Optional FastMCP stdio server: web_search / web_fetch / web_open.
+"""FastMCP stdio server: web_search / web_fetch / web_open / arxiv_search / github_search.
 
-Requires the optional ``fastmcp`` dependency (``pip install 'websearch-skill[mcp]'`` or
-``uv sync --extra mcp``). This module imports ``fastmcp`` at the top level, so it is only
-importable when that extra is installed; the base install and the ``websearch mcp``
-command import it lazily and surface an actionable error when it is missing.
+``fastmcp`` is a base dependency, so it ships with the package. This module imports it at
+the top level, so it is only loaded when something actually starts the server: the
+``websearch mcp`` command imports this module lazily, which keeps the other subcommands'
+startup free of the fastmcp import (and still surfaces an actionable error in the unlikely
+case the install was stripped of fastmcp).
 
 ``mcp`` is a module-level object on purpose: the ``fastmcp run path/mcp_server.py:mcp``
 CLI imports the server object directly (it does NOT run ``__main__``). The three tools
