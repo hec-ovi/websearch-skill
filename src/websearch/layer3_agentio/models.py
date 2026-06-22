@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 AGENTIO_CONTRACT_VERSION = "1.0.0"
 
@@ -45,6 +45,15 @@ class AgentSearchRequest(BaseModel):
     freshness: Freshness = "any"
     safesearch: SafeSearch = "moderate"
     site: str | None = None
+
+    @field_validator("query")
+    @classmethod
+    def _non_blank_query(cls, v: str) -> str:
+        # min_length=1 still admits "   "; a whitespace-only query just wastes an engine
+        # round-trip on junk, so reject it as invalid like the arxiv/github tools do.
+        if not v.strip():
+            raise ValueError("query must not be empty or whitespace")
+        return v
 
 
 class AgentSearchHit(BaseModel):

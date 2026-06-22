@@ -17,6 +17,8 @@ escalatable causes (vendor challenges) warrant a stealthier tier; terminal cause
 
 from __future__ import annotations
 
+import re
+
 # A short body is the gate for generic body-marker scanning (a full-size article that
 # merely links to challenges.cloudflare.com must not be misflagged).
 _SHORT_BODY_BYTES = 30_000
@@ -72,15 +74,27 @@ _ALWAYS_SCAN_MARKERS: dict[str, tuple[str, ...]] = {
     "perimeterx": ("client.perimeterx.net", "captcha.px-cdn.net", "_pxappid", "px-captcha"),
 }
 
-_ERROR_TITLE_MARKERS = (
-    "404",
+# Specific multi-word block/error phrases: distinctive enough to flag anywhere in a title.
+_STRONG_ERROR_PHRASES = (
     "not found",
     "access denied",
     "just a moment",
     "are you a robot",
+    "are you human",
     "attention required",
-    "forbidden",
+    "request blocked",
+    "verify you are human",
+    "page unavailable",
+    "site unavailable",
 )
+_STRONG_ERROR_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(p) for p in _STRONG_ERROR_PHRASES) + r")\b"
+)
+# Ambiguous single words and bare HTTP codes ("forbidden", "404"): a legitimate title can
+# contain them ("Forbidden City", "Top 500 Companies"), so they count only in a SHORT or
+# explicitly-error-shaped title. The quality.py veto additionally corroborates with a low
+# word count, so a long real article is never tanked.
+_WEAK_ERROR_RE = re.compile(r"\b(?:forbidden|40[0-9]|50[0-9])\b")
 
 
 def _akamai_deny(body_lc: str) -> bool:
@@ -143,4 +157,10 @@ def title_looks_like_error(title: str | None) -> bool:
     if not title:
         return False
     t = title.strip().lower()
-    return any(m in t for m in _ERROR_TITLE_MARKERS)
+    if _STRONG_ERROR_RE.search(t):
+        return True
+    if _WEAK_ERROR_RE.search(t):
+        # A weak signal (bare "forbidden"/HTTP code) counts only in a short or explicitly
+        # error-shaped title, so "Forbidden City" / "Top 500 Companies" do not trip it.
+        return len(t.split()) <= 4 or "error" in t
+    return False

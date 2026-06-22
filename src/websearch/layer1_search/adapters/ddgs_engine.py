@@ -53,6 +53,11 @@ class DdgsAdapter(EngineAdapter):
             kwargs["region"] = region
         if not isinstance(request.freshness, FreshnessRange) and request.freshness != "any":
             kwargs["timelimit"] = _FRESH[request.freshness]
+        # Translate offset into ddgs's native 1-based page param (mirrors the searxng
+        # adapter). Without this, offset is silently ignored and paging returns page-1
+        # results again. ddgs.text accepts page via **kwargs.
+        if request.offset:
+            kwargs["page"] = (request.offset // max(request.count, 1)) + 1
 
         try:
             client = self._make_client()

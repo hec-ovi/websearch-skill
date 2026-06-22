@@ -40,6 +40,9 @@ def chunk_markdown(
 
     Empty/blank input yields no passages. Offsets are absolute into ``markdown``.
     """
+    # A non-positive max_chars would make the heading path's _window never advance i
+    # (j == i), hanging in an infinite loop; clamp so a window is always at least one char.
+    max_chars = max(1, max_chars)
     if not markdown or not markdown.strip():
         return []
 

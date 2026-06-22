@@ -66,8 +66,10 @@ privacy, self-hosting, configurability, or clean extraction matter; the gap on r
 # this tool (zero config, keyless)
 uv run websearch web-search "open source vector database comparison 2026" --max-results 5
 
-# force specific engines, or add your own SearXNG for broader recall
-uv run websearch web-search "..." --ddgs-backends google,brave,mojeek
+# force specific engines (power-user knob, on the lower-level `search` command)
+uv run websearch search "..." --ddgs-backends google,brave,mojeek
+
+# add your own SearXNG for broader recall (works on web-search too)
 export WEBSEARCH_SEARXNG_URL=http://localhost:8080   # see docker/searxng/
 ```
 

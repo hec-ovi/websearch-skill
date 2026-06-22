@@ -3,7 +3,7 @@
   "$id": "https://github.com/hec-ovi/websearch-skill/contracts/fetch.schema.json",
   "title": "Layer 2A - Fetch sub-port contract",
   "description": "URL-in / raw-content-out. The first of Layer 2A's two decoupled sub-ports (the other is extract.schema.json). FETCH escalates by tier and never extracts or truncates; it hands raw HTML to EXTRACT. It enforces an http(s) scheme allowlist and refuses private/reserved egress targets unless allow_private_hosts is set, and follows redirects with the same guard on each hop. The default closure is permissive (httpx, curl_cffi); browser and stealth tiers (Crawl4AI, nodriver, Camoufox) and the jina_reader fallback are opt-in adapters named in the enums but not part of the base install. Proxy egress is owned by Layer 1; FETCH only consumes an endpoint, never holds credentials.",
-  "x-contract-version": "1.1.0",
+  "x-contract-version": "1.2.0",
   "$defs": {
     "Proxy": {
       "type": "object",
@@ -98,7 +98,13 @@
         "screenshot_b64": { "type": ["string", "null"], "default": null },
         "tier_attempts": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Adapters tried in order before this result (escalation trail)." },
         "fetch_ms": { "type": "integer", "minimum": 0, "default": 0 },
-        "error": { "type": ["string", "null"], "default": null, "description": "Transport error when no response was obtained." }
+        "error": { "type": ["string", "null"], "default": null, "description": "Transport error when no response was obtained." },
+        "failure_kind": {
+          "type": ["string", "null"],
+          "enum": ["egress_refused", "redirect_loop", "transport_error", "timeout", "dependency_missing", null],
+          "default": null,
+          "description": "Structured cause for a failed fetch (status 0), letting a consumer set retriability precisely instead of parsing the error text. Null on success."
+        }
       }
     }
   }

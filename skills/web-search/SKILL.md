@@ -37,17 +37,18 @@ Run with `websearch <command>` (or `uv run websearch <command>` from the project
 ```
 websearch web-search "<query>" [--max-results 8] [--detail concise|detailed]
     [--freshness any|day|week|month|year] [--site HOST] [--language en] [--country us]
-    [--ddgs-backends google,brave,mojeek] [--searxng-url URL] [--no-ddgs] [--json]
+    [--safesearch off|moderate|strict] [--offset 0] [--searxng-url URL] [--json]
 ```
 
 Returns ranked, deduplicated results. Each result has a `url` and a human-readable
 `handle` (e.g. `en.wikipedia.org~3a1f9c2b5e6f`). `--detail detailed` adds the contributing
 engines and the fused score. Search is keyless by default via the `ddgs` metasearch, which
-spans Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, and Wikipedia (Bing
-and others are selectable by name); `--ddgs-backends` forces a subset. Use `--site HOST` to restrict to one host (the only
-keyless way to find Reddit or X content: `--site reddit.com`, `--site x.com`). This returns
-one ranked page; the keyless backends do not page results reliably, so to get different
-results refine the query.
+spans Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, and Wikipedia at once.
+There are no engine-selection flags here: `web-search` is plug-and-play and just uses the
+keyless default. Use `--site HOST` to restrict to one host (the only keyless way to find
+Reddit or X content: `--site reddit.com`, `--site x.com`). This returns one ranked page;
+the keyless backends do not page results reliably, so to get different results refine the
+query.
 
 ### web-fetch: read a URL
 
@@ -163,10 +164,12 @@ detect actual failures.
 
 ## Notes
 
-- Search is keyless out of the box via the `ddgs` metasearch (many engines at once). For
-  broader, more reliable search, set `WEBSEARCH_SEARXNG_URL` to a self-hosted SearXNG and
-  the router fuses it with ddgs. Pass `--no-ddgs` to disable the ddgs engine. Public
-  SearXNG instances are not used by default (they disable the JSON API and block bots).
+- Search is keyless out of the box via the `ddgs` metasearch (many engines at once), and
+  `web-search` takes no engine flags. For broader, more reliable search, set
+  `WEBSEARCH_SEARXNG_URL` to a self-hosted SearXNG and the router fuses it with ddgs.
+  Engine-selection flags (`--engines`, `--ddgs-backends`, `--no-ddgs`) live only on the
+  lower-level `websearch search` command, for debugging and power use. Public SearXNG
+  instances are not used by default (they disable the JSON API and block bots).
 - The MCP server is `websearch mcp` (needs the optional `mcp` extra). It exposes all five
   tools (`web_search`, `web_fetch`, `web_open`, `arxiv_search`, `github_search`) and
   delivers page content through the tool-result channel.

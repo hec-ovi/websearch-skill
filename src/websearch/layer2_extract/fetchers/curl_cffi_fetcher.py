@@ -69,7 +69,12 @@ class CurlCffiFetcher(FetchAdapter):
         def elapsed() -> int:
             return int((time.perf_counter() - t0) * 1000)
 
-        def fail(reason: str, final_url: str | None, redirects: list[str]) -> FetchResult:
+        def fail(
+            reason: str,
+            final_url: str | None,
+            redirects: list[str],
+            kind: str = "transport_error",
+        ) -> FetchResult:
             return FetchResult(
                 url=request.url,
                 final_url=final_url,
@@ -78,13 +83,14 @@ class CurlCffiFetcher(FetchAdapter):
                 fetched_via=self.fetched_via,
                 redirects=redirects,
                 error=reason,
+                failure_kind=kind,  # type: ignore[arg-type]
                 fetch_ms=elapsed(),
             )
 
         try:
             getter = self._resolve_getter()
         except ImportError as exc:
-            return fail(f"curl_cffi not installed: {exc}", None, [])
+            return fail(f"curl_cffi not installed: {exc}", None, [], kind="dependency_missing")
 
         headers = dict(request.headers)
         headers.setdefault("User-Agent", request.user_agent or DEFAULT_USER_AGENT)
@@ -105,36 +111,48 @@ class CurlCffiFetcher(FetchAdapter):
             try:
                 guard_url(current, allow_private=request.allow_private_hosts)
             except BlockedEgress as exc:
-                return fail(exc.reason, current if current != request.url else None, redirects)
+                return fail(
+                    exc.reason,
+                    current if current != request.url else None,
+                    redirects,
+                    kind="egress_refused",
+                )
             try:
                 resp = getter(current, **kwargs)
             except Exception as exc:
                 return fail(f"{type(exc).__name__}: {exc}", current, redirects)
+            # curl_cffi (libcurl) materializes and decodes the body lazily, so a mid-body
+            # connection reset or a charset error surfaces on .headers/.status_code/.text
+            # here, NOT on the getter() call above. Guard the whole response-processing
+            # block (mirroring the httpx tier) so such a failure becomes a status==0 result
+            # the router can escalate, never an uncaught traceback out of the pipeline.
+            try:
+                resp_headers = {str(k): str(v) for k, v in dict(resp.headers).items()}
+                status = int(resp.status_code)
+                location = _header(resp_headers, "location")
+                if status in _REDIRECT_STATUS and location:
+                    redirects.append(current)
+                    current = urljoin(current, location)
+                    continue
 
-            resp_headers = {str(k): str(v) for k, v in dict(resp.headers).items()}
-            status = int(resp.status_code)
-            location = _header(resp_headers, "location")
-            if status in _REDIRECT_STATUS and location:
-                redirects.append(current)
-                current = urljoin(current, location)
-                continue
-
-            text = resp.text
-            content = getattr(resp, "content", text.encode("utf-8", errors="replace"))
-            body = read_body(content, _header(resp_headers, "content-type"), request.max_bytes)
-            blocked, reason = detect_block(status, body, resp_headers)
-            return FetchResult(
-                url=request.url,
-                final_url=str(getattr(resp, "url", current)),
-                status=status,
-                ok=status < 400,
-                fetched_via=self.fetched_via,
-                raw_html=body,
-                content_type=_header(resp_headers, "content-type"),
-                redirects=redirects,
-                headers=resp_headers,
-                blocked=blocked,
-                block_reason=reason,
-                fetch_ms=elapsed(),
-            )
-        return fail("too many redirects", current, redirects)
+                text = resp.text
+                content = getattr(resp, "content", text.encode("utf-8", errors="replace"))
+                body = read_body(content, _header(resp_headers, "content-type"), request.max_bytes)
+                blocked, reason = detect_block(status, body, resp_headers)
+                return FetchResult(
+                    url=request.url,
+                    final_url=str(getattr(resp, "url", current)),
+                    status=status,
+                    ok=status < 400,
+                    fetched_via=self.fetched_via,
+                    raw_html=body,
+                    content_type=_header(resp_headers, "content-type"),
+                    redirects=redirects,
+                    headers=resp_headers,
+                    blocked=blocked,
+                    block_reason=reason,
+                    fetch_ms=elapsed(),
+                )
+            except Exception as exc:
+                return fail(f"{type(exc).__name__}: {exc}", current, redirects)
+        return fail("too many redirects", current, redirects, kind="redirect_loop")

@@ -70,20 +70,15 @@ def test_cli_search_default_backend_is_auto(monkeypatch):
     assert captured["ddgs_backend"] == "auto"
 
 
-def test_cli_websearch_threads_ddgs_backends(monkeypatch):
-    from websearch.layer3_agentio import build_agent_io as real_build_agent_io
+def test_websearch_has_no_engine_flags(monkeypatch):
+    # The agent-facing web-search is plug-and-play: engine/backend selection is intentionally
+    # NOT exposed here (it lives on the lower-level `search` command), so these flags are
+    # rejected by the parser rather than trapping an agent.
+    import pytest
 
-    captured: dict = {}
-
-    def spy(**kwargs):
-        captured.update(kwargs)
-        router = build_router(ddgs_factory=_factory)
-        return real_build_agent_io(router=router)
-
-    monkeypatch.setattr(cli_mod, "build_agent_io", spy)
-    rc = main(["web-search", "x", "--ddgs-backends", "brave", "--json"])
-    assert rc == 0
-    assert captured["ddgs_backend"] == "brave"
+    for flag in (["--ddgs-backends", "brave"], ["--engines", "google"], ["--no-ddgs"]):
+        with pytest.raises(SystemExit):
+            main(["web-search", "x", *flag, "--json"])
 
 
 class _RecordingDDGSClass:

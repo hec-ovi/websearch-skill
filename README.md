@@ -4,7 +4,7 @@ Open-source multi-engine web search and content extraction for AI agents, built 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-370%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-405%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
 ## What it is
@@ -24,7 +24,7 @@ Two extra keyless tools cover what general web search does not:
 
 ### Engines, out of the box, no keys
 
-Search works the moment you install it. The default engine is the keyless [`ddgs`](https://github.com/deedy5/ddgs) metasearch library, which by itself spans **Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, and Wikipedia** (Bing and others are selectable by name with `--ddgs-backends`). Each query is served by whichever of those respond fastest, and you can force a subset with `--ddgs-backends google,brave,mojeek`. No API key, no account, no service to run.
+Search works the moment you install it. The default engine is the keyless [`ddgs`](https://github.com/deedy5/ddgs) metasearch library, which by itself spans **Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, and Wikipedia**. Each query is served by whichever of those respond fastest. No API key, no account, no service to run, and no engine flags: the agent surface (`web-search`) is plug-and-play. Picking a subset of underlying engines (or adding Bing by name) is a power-user knob on the lower-level `search` command via `--ddgs-backends google,brave,mojeek`, not on `web-search`.
 
 For broader and more reliable search you can run your own SearXNG (hundreds of engines, your own server, still no keys), and the router fuses it with `ddgs` and de-correlates the engines they share. A one-command Docker setup is in [`docker/searxng/`](docker/searxng/); see Self-hosting SearXNG below. Public SearXNG instances are deliberately not a default: most disable the JSON API and rate-limit automated clients, so depending on them would break on a fresh install.
 
@@ -46,7 +46,7 @@ Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.0.0`, `
 
 ## Layer 1: Search
 
-A thin router fans a normalized request out to per-engine adapters behind an `EngineAdapter` port, canonicalizes URLs, dedups with provenance merge, and fuses results with provenance-aware weighted Reciprocal Rank Fusion (RRF, k=60). The keyless default is `ddgs`, a metasearch library that is itself multi-engine (Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, with Bing and others selectable); `--ddgs-backends` forces a subset. Point `WEBSEARCH_SEARXNG_URL` at a self-hosted SearXNG to add it as a second, broader engine, and the router fuses both. Keyed engines (Brave, Exa, Tavily, and others) are a planned drop-in behind the same port.
+A thin router fans a normalized request out to per-engine adapters behind an `EngineAdapter` port, canonicalizes URLs, dedups with provenance merge, and fuses results with provenance-aware weighted Reciprocal Rank Fusion (RRF, k=60). The keyless default is `ddgs`, a metasearch library that is itself multi-engine (Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, with Bing and others selectable). On this lower-level `search` command, `--ddgs-backends` forces a subset and `--engines` picks which adapters (ddgs, searxng) run; the agent-facing `web-search` command takes none of those and just uses the keyless default. Point `WEBSEARCH_SEARXNG_URL` at a self-hosted SearXNG to add it as a second, broader engine, and the router fuses both. Keyed engines (Brave, Exa, Tavily, and others) are a planned drop-in behind the same port.
 
 `ddgs` and SearXNG do the same job (query many engines and merge) in different forms: `ddgs` is a keyless Python library that runs in-process, while SearXNG is a separate server you host that covers far more engines. They are interchangeable adapters behind this port; run either, or both fused. SearXNG only overlaps with this search layer, it does not fetch or extract pages, so it never replaces the rest of the tool.
 
@@ -123,13 +123,13 @@ uv sync
 
 ## Quickstart
 
-Search works with no setup: the keyless `ddgs` metasearch is the default. Force specific underlying engines, or add a self-hosted SearXNG for broader recall and let the router fuse across both:
+Search works with no setup: the keyless `ddgs` metasearch is the default. The agent-facing `web-search` (Layer 3) needs no engine flags. The lower-level `search` (Layer 1) is for debugging and power use, and is the only command that takes `--engines`, `--ddgs-backends`, and `--no-ddgs`:
 
 ```bash
 # Layer 1: search (keyless, multi-engine via ddgs)
 uv run websearch search "rust ownership" --json
 
-# force specific keyless engines
+# force specific keyless engines (search command only, not web-search)
 uv run websearch search "rust ownership" --ddgs-backends google,brave,mojeek
 
 # add a self-hosted SearXNG (see docker/searxng/) as a second, broader engine
@@ -161,7 +161,7 @@ uv run websearch github "llm agent framework" --language Python --sort stars
 uv run websearch mcp
 ```
 
-Every command prints a compact human view by default, or the raw JSON `Envelope` with `--json` (exit 0 on success, 1 on a request-level error). For the fetch command, `--output-format {markdown,text,json}` selects the body representation the human view prints (`text` emits the plain-text rendering), and `--quiet` prints only the extracted body, for piping. For the open command, `--mode {auto,index,full}` controls progressive disclosure, `--no-truncate` inlines every full body, `--search QUERY` runs a BM25 passage search over the opened pages, and `--anthropic-blocks` adds the Anthropic search_result view to the sidecar. Useful search flags include `--engines`, `--searxng-url` (or `WEBSEARCH_SEARXNG_URL`), and `--no-ddgs`. See `uv run websearch <command> --help` for the full flag list.
+Every command prints a compact human view by default, or the raw JSON `Envelope` with `--json` (exit 0 on success, 1 on a request-level error). For the fetch command, `--output-format {markdown,text,json}` selects the body representation the human view prints (`text` emits the plain-text rendering), and `--quiet` prints only the extracted body, for piping. For the open command, `--mode {auto,index,full}` controls progressive disclosure, `--no-truncate` inlines every full body, `--search QUERY` runs a BM25 passage search over the opened pages, and `--anthropic-blocks` adds the Anthropic search_result view to the sidecar. The agent-facing `web-search` takes `--max-results`, `--detail`, `--freshness`, `--site`, `--language`, `--country`, `--safesearch`, `--offset`, and `--searxng-url`; the engine-selection flags (`--engines`, `--ddgs-backends`, `--no-ddgs`) live only on the lower-level `search` command, alongside `--searxng-url` (or `WEBSEARCH_SEARXNG_URL`). See `uv run websearch <command> --help` for the full flag list.
 
 A `fetch --json` response looks like:
 
@@ -275,7 +275,7 @@ Planned, not built yet:
 
 ```bash
 uv sync          # install deps (including the dev group)
-uv run pytest    # 370 tests
+uv run pytest    # 405 tests
 uv run ruff check .
 ```
 

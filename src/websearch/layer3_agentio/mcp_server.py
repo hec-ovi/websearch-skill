@@ -19,11 +19,13 @@ depth. The fence reduces, but does not eliminate, indirect prompt injection.
 from __future__ import annotations
 
 import os
+import threading
+from collections.abc import Callable
 
 from fastmcp import FastMCP
 
 from .. import errors
-from ..envelope import error_envelope
+from ..envelope import Envelope, error_envelope
 from ..layer2_format import StoreConfig
 from ..tool_arxiv import ARXIV_CONTRACT_VERSION, ArxivSearchRequest, ArxivTool, build_arxiv_tool
 from ..tool_github import (
@@ -42,6 +44,10 @@ from .models import (
 
 mcp = FastMCP("websearch")
 
+# FastMCP runs sync tools on a worker thread pool, so two first-calls can race to build a
+# singleton; double-checked locking on this lock keeps it to one instance (a discarded
+# AgentIO would otherwise orphan its in-memory page store, losing fetched pages).
+_LOCK = threading.RLock()
 _AGENT: AgentIO | None = None
 _ARXIV: ArxivTool | None = None
 _GITHUB: GithubTool | None = None
@@ -68,14 +74,18 @@ def set_github_tool(tool: GithubTool) -> None:
 def _arxiv() -> ArxivTool:
     global _ARXIV
     if _ARXIV is None:
-        _ARXIV = build_arxiv_tool()
+        with _LOCK:
+            if _ARXIV is None:
+                _ARXIV = build_arxiv_tool()
     return _ARXIV
 
 
 def _github() -> GithubTool:
     global _GITHUB
     if _GITHUB is None:
-        _GITHUB = build_github_tool()
+        with _LOCK:
+            if _GITHUB is None:
+                _GITHUB = build_github_tool()
     return _GITHUB
 
 
@@ -84,11 +94,12 @@ def _agent() -> AgentIO:
     can resolve any handle fetched earlier in the session."""
     global _AGENT
     if _AGENT is None:
-        _AGENT = build_agent_io(
-            searxng_url=os.environ.get("WEBSEARCH_SEARXNG_URL"),
-            ddgs_backend=os.environ.get("WEBSEARCH_DDGS_BACKENDS") or "auto",
-            store_config=StoreConfig(persist_path=os.environ.get("WEBSEARCH_PERSIST_PATH")),
-        )
+        with _LOCK:
+            if _AGENT is None:
+                _AGENT = build_agent_io(
+                    searxng_url=os.environ.get("WEBSEARCH_SEARXNG_URL"),
+                    store_config=StoreConfig(persist_path=os.environ.get("WEBSEARCH_PERSIST_PATH")),
+                )
     return _AGENT
 
 
@@ -103,26 +114,45 @@ def _invalid(message: str, backend: str) -> dict:
     ).model_dump(mode="json")
 
 
+def _safe(call: Callable[[], Envelope], *, contract: str, layer: str, backend: str) -> dict:
+    """Run a tool's body and convert ANY escaped exception into a clean error Envelope.
+
+    The per-tool try/except only guards request construction; the singleton build and the
+    actual .web_*/.search() call happen here, so a store-open failure or an unexpected bug
+    surfaces as a structured internal_error envelope, never a raw MCP traceback.
+    """
+    try:
+        return call().model_dump(mode="json")
+    except Exception as exc:
+        return error_envelope(
+            contract,
+            code=errors.INTERNAL_ERROR,
+            message=f"{layer} tool failed: {type(exc).__name__}: {exc}",
+            retriable=False,
+            layer=layer,
+            backend=backend,
+        ).model_dump(mode="json")
+
+
 @mcp.tool
 def web_search(
     query: str,
     max_results: int = 8,
     detail: str = "concise",
-    engines: list[str] | None = None,
     country: str | None = None,
     language: str | None = None,
     freshness: str = "any",
     safesearch: str = "moderate",
     site: str | None = None,
-    offset: int = 0,
 ) -> dict:
     """Search the web across multiple engines and return ranked, deduplicated results.
 
     Use this when the user wants to look something up online, find current information,
-    research a topic, or check a claim against live sources. Results are fused across
-    engines (provenance-aware rank fusion) and deduplicated. Each result carries a
-    human-readable ``handle``; after you ``web_fetch`` its URL you can ``web_open`` that
-    handle to page through the document.
+    research a topic, or check a claim against live sources. It is keyless and queries
+    several engines at once out of the box (no engine selection needed); results are fused
+    (provenance-aware rank fusion) and deduplicated. Each result carries a human-readable
+    ``handle``; after you ``web_fetch`` its URL you can ``web_open`` that handle to page
+    through the document.
 
     Args:
         query: The search query, e.g. "rust ownership model" or "site:nature.com crispr".
@@ -130,20 +160,16 @@ def web_search(
             for a quick lookup.
         detail: "concise" (default) omits per-result engines and score to save tokens;
             "detailed" includes them.
-        engines: Engine names to query (e.g. ["searxng", "ddgs"]); omit for all configured.
         country: ISO 3166-1 alpha-2 country code (e.g. "us"); omit for engine default.
         language: ISO 639-1 language code (e.g. "en"); omit for engine default.
         freshness: One of "any", "day", "week", "month", "year" (best-effort recency).
         safesearch: One of "off", "moderate", "strict".
         site: Restrict to a single host (e.g. "docs.python.org").
-        offset: Advanced result offset. Best-effort only: the keyless backends do not page
-            reliably, so to get different results prefer refining the query.
 
     Returns:
         An Envelope (contract_version, ok, data, error, meta). On success, data has
         ``query``, ``results`` (rank/title/url/snippet/handle, plus engines/score when
-        detailed), ``total_returned``, ``next_offset`` (currently null; see offset above),
-        and ``warnings``.
+        detailed), ``total_returned``, ``next_offset``, and ``warnings``.
 
     Examples:
         web_search(query="best static site generators 2026")
@@ -155,17 +181,20 @@ def web_search(
             query=query,
             max_results=max_results,
             detail=detail,  # type: ignore[arg-type]
-            engines=engines,
             country=country,
             language=language,
             freshness=freshness,  # type: ignore[arg-type]
             safesearch=safesearch,  # type: ignore[arg-type]
             site=site,
-            offset=offset,
         )
     except Exception as exc:  # pydantic ValidationError on a bad enum/value
         return _invalid(f"invalid web_search arguments: {exc}", backend="search")
-    return _agent().web_search(req).model_dump(mode="json")
+    return _safe(
+        lambda: _agent().web_search(req),
+        contract=AGENTIO_CONTRACT_VERSION,
+        layer="agentio",
+        backend="search",
+    )
 
 
 @mcp.tool
@@ -212,7 +241,12 @@ def web_fetch(
         )
     except Exception as exc:
         return _invalid(f"invalid web_fetch arguments: {exc}", backend="fetch")
-    return _agent().web_fetch(req).model_dump(mode="json")
+    return _safe(
+        lambda: _agent().web_fetch(req),
+        contract=AGENTIO_CONTRACT_VERSION,
+        layer="agentio",
+        backend="fetch",
+    )
 
 
 @mcp.tool
@@ -251,7 +285,12 @@ def web_open(
         )
     except Exception as exc:
         return _invalid(f"invalid web_open arguments: {exc}", backend="store")
-    return _agent().web_open(req).model_dump(mode="json")
+    return _safe(
+        lambda: _agent().web_open(req),
+        contract=AGENTIO_CONTRACT_VERSION,
+        layer="agentio",
+        backend="store",
+    )
 
 
 @mcp.tool
@@ -305,7 +344,12 @@ def arxiv_search(
             layer="arxiv",
             backend="arxiv-api",
         ).model_dump(mode="json")
-    return _arxiv().search(req).model_dump(mode="json")
+    return _safe(
+        lambda: _arxiv().search(req),
+        contract=ARXIV_CONTRACT_VERSION,
+        layer="arxiv",
+        backend="arxiv-api",
+    )
 
 
 @mcp.tool
@@ -357,7 +401,12 @@ def github_search(
             layer="github",
             backend="github-api",
         ).model_dump(mode="json")
-    return _github().search(req).model_dump(mode="json")
+    return _safe(
+        lambda: _github().search(req),
+        contract=GITHUB_CONTRACT_VERSION,
+        layer="github",
+        backend="github-api",
+    )
 
 
 def run() -> None:

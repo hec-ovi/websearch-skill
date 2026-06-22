@@ -44,7 +44,12 @@ class HttpxFetcher(FetchAdapter):
         def elapsed() -> int:
             return int((time.perf_counter() - t0) * 1000)
 
-        def fail(reason: str, final_url: str | None, redirects: list[str]) -> FetchResult:
+        def fail(
+            reason: str,
+            final_url: str | None,
+            redirects: list[str],
+            kind: str = "transport_error",
+        ) -> FetchResult:
             return FetchResult(
                 url=request.url,
                 final_url=final_url,
@@ -53,6 +58,7 @@ class HttpxFetcher(FetchAdapter):
                 fetched_via=self.fetched_via,
                 redirects=redirects,
                 error=reason,
+                failure_kind=kind,  # type: ignore[arg-type]
                 fetch_ms=elapsed(),
             )
 
@@ -77,7 +83,10 @@ class HttpxFetcher(FetchAdapter):
                         guard_url(current, allow_private=request.allow_private_hosts)
                     except BlockedEgress as exc:
                         return fail(
-                            exc.reason, current if current != request.url else None, redirects
+                            exc.reason,
+                            current if current != request.url else None,
+                            redirects,
+                            kind="egress_refused",
                         )
 
                     content, status, resp_headers, final_url = self._get(
@@ -108,9 +117,11 @@ class HttpxFetcher(FetchAdapter):
                         block_reason=reason,
                         fetch_ms=elapsed(),
                     )
-                return fail("too many redirects", current, redirects)
+                return fail("too many redirects", current, redirects, kind="redirect_loop")
+        except httpx.TimeoutException as exc:
+            return fail(f"{type(exc).__name__}: {exc}", None, redirects, kind="timeout")
         except Exception as exc:  # transport failure: no usable response
-            return fail(f"{type(exc).__name__}: {exc}", None, redirects)
+            return fail(f"{type(exc).__name__}: {exc}", None, redirects, kind="transport_error")
 
     def _get(
         self, client: httpx.Client, url: str, max_bytes: int | None

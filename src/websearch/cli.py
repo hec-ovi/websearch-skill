@@ -32,6 +32,7 @@ from .layer2_format import (
 )
 from .layer3_agentio import (
     AGENTIO_CONTRACT_VERSION,
+    AgentFetchRequest,
     AgentOpenRequest,
     AgentSearchRequest,
     build_agent_io,
@@ -457,24 +458,33 @@ def _cmd_open(args: argparse.Namespace) -> int:
             as_json=args.json,
         )
 
-    format_request = FormatRequest(
-        query=args.query,
-        results=results,
-        page=args.page,
-        page_size=args.page_size,
-        mode=args.mode,
-        body=args.body,
-        body_char_budget=None if args.no_truncate else args.body_char_budget,
-        inline_token_budget=args.inline_token_budget,
-        include_anthropic_blocks=args.anthropic_blocks,
-        dedup={
-            "enabled": not args.no_dedup,
-            "method": "both",
-            "jaccard_threshold": args.jaccard,
-            "num_perm": 128,
-            "shingle_size": 4,
-        },
-    )
+    try:
+        format_request = FormatRequest(
+            query=args.query,
+            results=results,
+            page=args.page,
+            page_size=args.page_size,
+            mode=args.mode,
+            body=args.body,
+            body_char_budget=None if args.no_truncate else args.body_char_budget,
+            inline_token_budget=args.inline_token_budget,
+            include_anthropic_blocks=args.anthropic_blocks,
+            dedup={
+                "enabled": not args.no_dedup,
+                "method": "both",
+                "jaccard_threshold": args.jaccard,
+                "num_perm": 128,
+                "shingle_size": 4,
+            },
+        )
+    except ValidationError as exc:
+        return _emit_error(
+            FORMAT_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=f"invalid format request: {exc}",
+            layer="format",
+            as_json=args.json,
+        )
     envelope = build_format_pipeline().run(format_request)
     payload = envelope.model_dump(mode="json")
     payload["data"]["warnings"] = (payload["data"].get("warnings") or []) + warnings
@@ -539,33 +549,25 @@ def _add_websearch_command(sub: Any) -> None:
     wp.add_argument("query")
     wp.add_argument("--max-results", type=int, default=8)
     wp.add_argument("--detail", choices=["concise", "detailed"], default="concise")
-    wp.add_argument("--engines", help="Comma-separated engine names (default: all configured).")
     wp.add_argument("--language", help="ISO 639-1, e.g. en.")
     wp.add_argument("--country", help="ISO 3166-1 alpha-2, e.g. us.")
     wp.add_argument("--freshness", choices=["any", "day", "week", "month", "year"], default="any")
     wp.add_argument("--safesearch", choices=["off", "moderate", "strict"], default="moderate")
     wp.add_argument("--site", help="Restrict to one host.")
     wp.add_argument("--offset", type=int, default=0)
+    # Self-host opt-in only; the keyless ddgs metasearch (many engines at once) is the
+    # zero-config default and needs no engine flags. Engine/backend selection lives on the
+    # lower-level `search` command for debugging, not on this plug-and-play agent surface.
     wp.add_argument("--searxng-url", default=os.environ.get("WEBSEARCH_SEARXNG_URL"))
-    wp.add_argument("--no-ddgs", action="store_true", help="Disable the ddgs fallback engine.")
-    wp.add_argument(
-        "--ddgs-backends",
-        help="Which keyless engines ddgs queries, comma-separated (default auto = all). "
-        "Engines include google, brave, duckduckgo, yandex, yahoo, startpage, mojeek, "
-        "wikipedia (default); bing and others are selectable by name. "
-        "Example: --ddgs-backends google,brave,mojeek",
-    )
     wp.add_argument("--json", action="store_true", help="Emit the raw agentio Envelope.")
 
 
 def _cmd_websearch(args: argparse.Namespace) -> int:
-    engines = [e.strip() for e in args.engines.split(",") if e.strip()] if args.engines else None
     try:
         req = AgentSearchRequest(
             query=args.query,
             max_results=args.max_results,
             detail=args.detail,
-            engines=engines,
             country=args.country,
             language=args.language,
             freshness=args.freshness,
@@ -573,19 +575,15 @@ def _cmd_websearch(args: argparse.Namespace) -> int:
             site=args.site,
             offset=args.offset,
         )
-    except ValidationError:
+    except ValidationError as exc:
         return _emit_error(
             AGENTIO_CONTRACT_VERSION,
             code=errors.INVALID_REQUEST,
-            message="invalid web-search request.",
+            message=f"invalid web-search request: {exc}",
             layer="agentio",
             as_json=args.json,
         )
-    aio = build_agent_io(
-        searxng_url=args.searxng_url,
-        enable_ddgs=not args.no_ddgs,
-        ddgs_backend=args.ddgs_backends or "auto",
-    )
+    aio = build_agent_io(searxng_url=args.searxng_url)
     env = aio.web_search(req)
     payload = env.model_dump(mode="json")
     if args.json:
@@ -653,6 +651,27 @@ def _cmd_webfetch(args: argparse.Namespace) -> int:
                 layer="agentio",
                 as_json=args.json,
             )
+    # web-fetch is multi-URL so it calls web_fetch_many with raw kwargs; validate the shared
+    # paging params through the request model here (page>=1, page_size_tokens>=1, etc.) so a
+    # bad --page yields a clean invalid_request rather than crashing deep in the facade.
+    try:
+        AgentFetchRequest(
+            url=args.urls[0],
+            page=args.page,
+            page_size_tokens=args.page_size_tokens,
+            tier=args.tier,
+            timeout_ms=args.timeout_ms,
+            allow_private_hosts=args.allow_private_hosts,
+            datamark=args.datamark,
+        )
+    except ValidationError as exc:
+        return _emit_error(
+            AGENTIO_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=f"invalid web-fetch request: {exc}",
+            layer="agentio",
+            as_json=args.json,
+        )
     aio = build_agent_io(
         enable_ddgs=False, store_config=StoreConfig(persist_path=args.persist_path)
     )
@@ -669,7 +688,7 @@ def _cmd_webfetch(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        _print_agent_pages_human(payload, quiet=args.quiet)
+        _print_agent_pages_human(payload, quiet=args.quiet, persist_path=args.persist_path)
     return 0 if env.ok else 1
 
 
@@ -712,11 +731,23 @@ def _cmd_webopen(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        _print_agent_pages_human(payload, quiet=args.quiet)
+        _print_agent_pages_human(payload, quiet=args.quiet, persist_path=args.persist_path)
     return 0 if env.ok else 1
 
 
-def _print_agent_pages_human(env: dict, quiet: bool = False) -> None:
+def _more_hint(p: dict, persist_path: str | None) -> str:
+    """The copy-paste-correct next-page command. web-open resolves a handle only against a
+    shared store, so it is suggested only with the --persist-path the user already passed;
+    otherwise suggest re-running web-fetch on the URL (always works, re-fetches)."""
+    nxt = (p.get("page") or 1) + 1
+    if persist_path:
+        return f"   (more: web-open {p.get('handle')} --page {nxt} --persist-path {persist_path})"
+    return f'   (more: web-fetch "{p.get("url")}" --page {nxt})'
+
+
+def _print_agent_pages_human(
+    env: dict, quiet: bool = False, persist_path: str | None = None
+) -> None:
     if not env.get("ok"):
         err = env.get("error") or {}
         print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
@@ -730,11 +761,7 @@ def _print_agent_pages_human(env: dict, quiet: bool = False) -> None:
             print(f"# {p.get('title') or '(untitled)'}")
             print(f"url:    {p.get('url')}")
             location = f"page {p.get('page')} of {p.get('total_pages')}"
-            more = (
-                f"   (more: web-open {p.get('handle')} --page {p.get('page') + 1})"
-                if p.get("has_more")
-                else ""
-            )
+            more = _more_hint(p, persist_path) if p.get("has_more") else ""
             print(f"handle: {p.get('handle')}   {location}   source={p.get('source')}{more}")
             if p.get("blocked"):
                 print(f"[blocked] {p.get('block_reason')}", file=sys.stderr)
@@ -932,6 +959,14 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Fetched/extracted content is frequently non-ASCII; under a C/POSIX locale a bare
+    # print() would die with UnicodeEncodeError, so pin the output streams to UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
+
     parser = argparse.ArgumentParser(
         prog="websearch",
         description="Open-source multi-engine web search for AI agents.",
@@ -962,4 +997,16 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         parser.error(f"unknown command: {args.command}")
         return 2  # unreachable; argparse.error exits
-    return handler(args)
+    try:
+        return handler(args)
+    except Exception as exc:
+        # Final backstop: a command must never surface a raw traceback to the user. Any
+        # unexpected error becomes a clean internal_error (honoring --json when present).
+        # SystemExit / KeyboardInterrupt are BaseExceptions and intentionally propagate.
+        return _emit_error(
+            AGENTIO_CONTRACT_VERSION,
+            code=errors.INTERNAL_ERROR,
+            message=f"{args.command} failed unexpectedly: {type(exc).__name__}: {exc}",
+            layer="cli",
+            as_json=getattr(args, "json", False),
+        )

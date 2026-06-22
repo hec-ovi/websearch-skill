@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 import re
+import threading
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
@@ -84,6 +85,10 @@ class MemoryBm25Index:
         self._passages: list[_MemPassage] = []
         self._df: Counter = Counter()
         self._avgdl: float = 0.0
+        # Mutating add() and the read methods can run on different FastMCP worker threads
+        # for one shared store; serialize so a concurrent reindex never sees half-updated
+        # lists. RLock because _reindex is called from within the add() critical section.
+        self._lock = threading.RLock()
 
     def available(self) -> bool:
         return True
@@ -98,6 +103,10 @@ class MemoryBm25Index:
         self._avgdl = (total_len / len(self._passages)) if self._passages else 0.0
 
     def add(self, pages: list[PageInput]) -> AddResult:
+        with self._lock:
+            return self._add_locked(pages)
+
+    def _add_locked(self, pages: list[PageInput]) -> AddResult:
         added: list[StoredDoc] = []
         changed = False
         for page in pages:
@@ -190,25 +199,31 @@ class MemoryBm25Index:
         return score
 
     def search(self, request: SearchPageRequest) -> SearchPageResult:
-        query_terms = _tokenize(request.query)
-        n = len(self._passages)
-        if not query_terms or n == 0:
-            return SearchPageResult(
-                passages=[],
-                total=0,
-                page=request.page,
-                page_size=request.page_size,
-                has_more=False,
-                backend=self.name,
-            )
-        scored = [(self._score(p, query_terms, n), idx, p) for idx, p in enumerate(self._passages)]
-        scored = [s for s in scored if s[0] > 0]
-        # Descending score; ties broken by insertion order for determinism.
-        scored.sort(key=lambda s: (-s[0], s[1]))
-        scored = scored[: request.top_k]
-        total = len(scored)
+        with self._lock:
+            query_terms = _tokenize(request.query)
+            n = len(self._passages)
+            if not query_terms or n == 0:
+                return SearchPageResult(
+                    passages=[],
+                    total=0,
+                    page=request.page,
+                    page_size=request.page_size,
+                    has_more=False,
+                    backend=self.name,
+                )
+            scored = [
+                (self._score(p, query_terms, n), idx, p) for idx, p in enumerate(self._passages)
+            ]
+            matched = [s for s in scored if s[0] > 0]
+            # Descending score; ties broken by insertion order for determinism.
+            matched.sort(key=lambda s: (-s[0], s[1]))
+            pool = matched[: request.top_k]
+        # `total` is the TRUE match count (mirrors the SQLite adapter's count(*)); `pool` is
+        # the top_k-ranked candidates and `has_more` walks that pool only.
+        total = len(matched)
+        pool_size = len(pool)
         start = (request.page - 1) * request.page_size
-        window = scored[start : start + request.page_size]
+        window = pool[start : start + request.page_size]
         passages = [
             Passage(
                 id=passage_id(p.doc_id, p.ordinal),
@@ -227,14 +242,15 @@ class MemoryBm25Index:
             total=total,
             page=request.page,
             page_size=request.page_size,
-            has_more=start + request.page_size < total,
+            has_more=start + request.page_size < pool_size,
             backend=self.name,
         )
 
     def get(self, id_or_url: str) -> PageDocument | None:
-        doc = self._docs.get(id_or_url)
-        if doc is None:
-            doc = next((d for d in self._docs.values() if d.url == id_or_url), None)
+        with self._lock:
+            doc = self._docs.get(id_or_url)
+            if doc is None:
+                doc = next((d for d in self._docs.values() if d.url == id_or_url), None)
         if doc is None:
             return None
         return PageDocument(
@@ -249,20 +265,22 @@ class MemoryBm25Index:
         )
 
     def resolve_index(self) -> ResolveIndex:
-        docs = [
-            ResolveIndexEntry(
-                id=self._docs[did].id,
-                url=self._docs[did].url,
-                title=self._docs[did].title,
-                n_passages=self._docs[did].n_passages,
-                fetched_at=self._docs[did].fetched_at,
-                token_estimate=self._docs[did].token_estimate,
-            )
-            for did in self._order
-        ]
+        with self._lock:
+            docs = [
+                ResolveIndexEntry(
+                    id=self._docs[did].id,
+                    url=self._docs[did].url,
+                    title=self._docs[did].title,
+                    n_passages=self._docs[did].n_passages,
+                    fetched_at=self._docs[did].fetched_at,
+                    token_estimate=self._docs[did].token_estimate,
+                )
+                for did in self._order
+            ]
         return ResolveIndex(docs=docs, total=len(docs), backend=self.name)
 
     def close(self) -> None:
-        self._docs.clear()
-        self._order.clear()
-        self._passages.clear()
+        with self._lock:
+            self._docs.clear()
+            self._order.clear()
+            self._passages.clear()

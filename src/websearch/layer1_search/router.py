@@ -122,6 +122,7 @@ class SearchRouter:
         selected = self._select(request)
         backend_id = "+".join(a.name for a in selected) or None
         known_names = sorted(a.name for a in self._adapters)
+        enabled_names = sorted(a.name for a in self._adapters if a.enabled())
         unknown_requested = (
             [e for e in request.engines if e not in known_names]
             if request.engines is not None
@@ -129,15 +130,17 @@ class SearchRouter:
         )
 
         if not selected:
+            # Report the ENABLED adapters as available (a configured-but-disabled engine is
+            # not something the caller can select), so the hint is actionable.
             if request.engines is not None:
                 message = (
                     f"No engines matched the requested set {list(request.engines)}. "
-                    f"Available engines: {known_names}."
+                    f"Available engines: {enabled_names}."
                 )
             elif not known_names:
                 message = "No search engines are configured (set a SearXNG URL or enable ddgs)."
             else:
-                message = f"No search engines are enabled. Available engines: {known_names}."
+                message = f"No search engines are enabled. Available engines: {enabled_names}."
             return error_envelope(
                 SEARCH_CONTRACT_VERSION,
                 code=errors.NO_ENGINES_ENABLED,

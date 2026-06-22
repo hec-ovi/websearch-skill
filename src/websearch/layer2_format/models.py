@@ -12,9 +12,10 @@ anywhere: full bodies are stored and echoed in the sidecar verbatim.
 
 from __future__ import annotations
 
+import math
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 FORMAT_CONTRACT_VERSION = "1.0.0"
 STORE_CONTRACT_VERSION = "1.0.0"
@@ -60,6 +61,16 @@ class ResultInput(BaseModel):
     quality_score: float | None = None
     content_hash: str | None = None
     token_estimate: int | None = Field(default=None, ge=0)
+
+    @field_validator("score", "quality_score")
+    @classmethod
+    def _finite_or_none(cls, v: float | None) -> float | None:
+        # A NaN/inf score would corrupt the descending-relevance sort and the dedup
+        # canonical pick (NaN compares false against everything). Treat non-finite as
+        # "no score" at the boundary so every downstream consumer sees None-or-finite.
+        if v is None or not math.isfinite(v):
+            return None
+        return v
 
 
 class DedupParams(BaseModel):

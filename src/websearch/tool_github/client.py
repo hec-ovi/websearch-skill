@@ -15,6 +15,8 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from pydantic import ValidationError
+
 from ..envelope import Envelope, error_envelope, ok_envelope
 from ..errors import RATE_LIMITED, UPSTREAM_ERROR
 from .models import (
@@ -72,7 +74,9 @@ def _forbidden_message(resp: Any) -> str:
     return f"GitHub returned HTTP 403 (not a rate limit){': ' + body_msg if body_msg else '.'}"
 
 
-def _parse_item(it: dict) -> GithubRepo | None:
+def _parse_item(it: Any) -> GithubRepo | None:
+    if not isinstance(it, dict):
+        return None  # a swapped/misbehaving upstream could emit a non-object item; drop it
     full_name = it.get("full_name")
     html_url = it.get("html_url")
     if not (full_name and html_url):
@@ -179,24 +183,42 @@ class GithubTool:
                 retriable=True,
                 elapsed_ms=elapsed,
             )
+        if not isinstance(body, dict):
+            return self._error(
+                code=UPSTREAM_ERROR,
+                message="GitHub response was not a JSON object.",
+                retriable=True,
+                elapsed_ms=elapsed,
+            )
 
-        repos = [r for it in body.get("items", []) if (r := _parse_item(it))]
-        incomplete = bool(body.get("incomplete_results", False))
-        warnings = (
-            [
-                "GitHub returned incomplete_results: the search index timed out, results "
-                "may be partial."
-            ]
-            if incomplete
-            else []
-        )
-        payload = GithubSearchPayload(
-            query=params["q"],
-            total_count=body.get("total_count"),
-            incomplete_results=incomplete,
-            repos=repos,
-            warnings=warnings,
-        )
+        # Shaping a mistyped upstream/mirror field (or items[] of the wrong type) must yield
+        # a clean error Envelope, never a raw traceback out of search().
+        try:
+            items = body.get("items")
+            repos = [r for it in (items or []) if (r := _parse_item(it))]
+            incomplete = bool(body.get("incomplete_results", False))
+            warnings = (
+                [
+                    "GitHub returned incomplete_results: the search index timed out, results "
+                    "may be partial."
+                ]
+                if incomplete
+                else []
+            )
+            payload = GithubSearchPayload(
+                query=params["q"],
+                total_count=body.get("total_count"),
+                incomplete_results=incomplete,
+                repos=repos,
+                warnings=warnings,
+            )
+        except (ValidationError, TypeError, ValueError) as exc:
+            return self._error(
+                code=UPSTREAM_ERROR,
+                message=f"GitHub response had an unexpected shape: {type(exc).__name__}: {exc}",
+                retriable=True,
+                elapsed_ms=elapsed,
+            )
         return ok_envelope(
             GITHUB_CONTRACT_VERSION,
             payload.model_dump(mode="json"),

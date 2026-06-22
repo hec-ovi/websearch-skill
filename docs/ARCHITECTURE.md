@@ -75,7 +75,8 @@ router emits a warning recording the de-correlation.
 
 Default backbone is keyless and works with zero setup: the `ddgs` metasearch library,
 which is itself multi-engine (Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage,
-Mojeek, Wikipedia, with Bing and others selectable by name). `ddgs_backend` (CLI `--ddgs-backends`) forces a subset. A self-hosted
+Mojeek, Wikipedia, with Bing and others selectable by name). `ddgs_backend` (the
+`search` command's `--ddgs-backends` flag) forces a subset. A self-hosted
 SearXNG plugs in as a second, broader engine when `WEBSEARCH_SEARXNG_URL` is set, and the
 router fuses both. Public SearXNG instances are not a default: most disable the JSON API
 and rate-limit automated clients, so they fail on a fresh install. Keyed, decorrelated

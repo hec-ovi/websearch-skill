@@ -12,6 +12,8 @@ from __future__ import annotations
 import time
 import uuid
 
+from pydantic import ValidationError
+
 from .. import errors
 from ..envelope import Envelope, error_envelope, ok_envelope
 from .exceptions import DependencyMissing
@@ -63,7 +65,14 @@ class FetchExtractPipeline:
             return self._dep_error(exc, request_id, trace_id, elapsed_ms())
 
         if fr.status == 0 and not fr.ok:
-            retriable = not (fr.error and ("not installed" in fr.error or "opt-in" in fr.error))
+            # A permanent refusal (egress policy, redirect loop, missing optional dependency)
+            # is NOT retriable; a transport error or timeout is. Prefer the fetcher's
+            # structured failure_kind; fall back to the legacy text check only if it is unset.
+            non_retriable_kinds = {"egress_refused", "redirect_loop", "dependency_missing"}
+            if fr.failure_kind is not None:
+                retriable = fr.failure_kind not in non_retriable_kinds
+            else:
+                retriable = not (fr.error and ("not installed" in fr.error or "opt-in" in fr.error))
             return error_envelope(
                 EXTRACT_CONTRACT_VERSION,
                 code=errors.FETCH_FAILED,
@@ -100,11 +109,29 @@ class FetchExtractPipeline:
                 warnings=[f"non-HTML document ({fr.content_type})"],
             )
         else:
-            extract_request = ExtractRequest(
-                html=fr.raw_html or "",
-                base_url=fr.final_url or fetch_request.url,
-                **overrides,
-            )
+            try:
+                extract_request = ExtractRequest(
+                    # Prefer the post-JS DOM when a rendering tier filled it; fall back to the
+                    # raw body. A browser tier that only sets rendered_html would otherwise
+                    # extract an empty raw_html.
+                    html=fr.rendered_html or fr.raw_html or "",
+                    base_url=fr.final_url or fetch_request.url,
+                    **overrides,
+                )
+            except ValidationError as exc:
+                # A bad extract_override (e.g. favor='bogus', or an unknown key) must not
+                # crash run(); it is a caller error, reported precisely as INVALID_REQUEST.
+                return error_envelope(
+                    EXTRACT_CONTRACT_VERSION,
+                    code=errors.INVALID_REQUEST,
+                    message=f"invalid extract overrides: {exc}",
+                    retriable=False,
+                    layer="extract",
+                    backend=self._extractor.name,
+                    elapsed_ms=elapsed_ms(),
+                    trace_id=trace_id,
+                    request_id=request_id,
+                )
             try:
                 result = self._extractor.extract(extract_request)
             except DependencyMissing as exc:

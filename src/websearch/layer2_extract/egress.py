@@ -32,14 +32,12 @@ class BlockedEgress(Exception):
 
 
 def _ip_is_internal(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
-    return (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_reserved
-        or ip.is_multicast
-        or ip.is_unspecified
-    )
+    # Allowlist, not denylist: an address is internal unless it is globally routable.
+    # `is_global` is False for private, loopback, link-local (incl. the 169.254.169.254
+    # cloud-metadata endpoint), reserved, multicast, unspecified, AND CGNAT 100.64.0.0/10
+    # (RFC 6598) which an explicit denylist of the above flags silently misses. Requiring
+    # is_global closes every non-public range at once and fails safe on future ones.
+    return not ip.is_global
 
 
 def _resolve(host: str) -> set[str]:

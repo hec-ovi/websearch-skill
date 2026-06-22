@@ -15,6 +15,7 @@ accumulates the pages it fetched and can open any of them.
 from __future__ import annotations
 
 import hashlib
+import time
 
 from pydantic import ValidationError
 
@@ -79,6 +80,11 @@ class AgentIO:
     # --- web_search ----------------------------------------------------------------
 
     def web_search(self, req: AgentSearchRequest) -> Envelope:
+        t0 = time.perf_counter()
+
+        def elapsed() -> float:
+            return (time.perf_counter() - t0) * 1000
+
         # When a site is requested, push a `site:` operator into the query so the engine
         # itself restricts (a post-filter alone only keeps whatever the engine happened to
         # return, which is unreliable). Keep include_sites as a belt-and-suspenders filter.
@@ -86,6 +92,13 @@ class AgentIO:
         site = req.site.strip().lstrip(".") if req.site else None
         if site and f"site:{site}".lower() not in query.lower():
             query = f"{query} site:{site}"
+
+        # Be forgiving about `engines`: it names Layer-1 ADAPTERS (ddgs/searxng), not the
+        # underlying providers. If a caller passes names that match no adapter, fall back to
+        # the default set (run anyway) with a warning instead of hard-failing with
+        # no_engines_enabled, so a misunderstanding never returns zero results.
+        engines, engine_warning = self._resolve_engines(req.engines)
+
         try:
             search_req = SearchRequest(
                 query=query,
@@ -97,28 +110,29 @@ class AgentIO:
                 freshness=req.freshness,
                 max_total_results=req.max_results,
                 include_sites=[site] if site else [],
-                engines=req.engines,
+                engines=engines,
             )
-        except ValidationError:
+        except ValidationError as exc:
             return error_envelope(
                 AGENTIO_CONTRACT_VERSION,
                 code=errors.INVALID_REQUEST,
-                message="invalid search request.",
+                message=f"invalid search request: {exc}",
                 retriable=False,
                 layer="agentio",
                 backend="search",
+                elapsed_ms=elapsed(),
             )
 
         env = self._router.search(search_req)
         if not env.ok:
-            return self._propagate_error(env, backend="search")
+            return self._propagate_error(env, backend="search", elapsed_ms=elapsed())
 
         data = env.data or {}
         detailed = req.detail == "detailed"
         hits: list[AgentSearchHit] = []
         for rank, r in enumerate(data.get("results", []), start=1):
             url = r["url"]
-            engines = [s["engine"] for s in r.get("sources", [])]
+            engines_seen = [s["engine"] for s in r.get("sources", [])]
             hits.append(
                 AgentSearchHit(
                     rank=rank,
@@ -126,34 +140,61 @@ class AgentIO:
                     handle=make_handle(url),
                     title=r.get("title"),
                     snippet=r.get("snippet"),
-                    engines=engines if detailed else [],
+                    engines=engines_seen if detailed else [],
                     score=r.get("fused_score") if detailed else None,
                     published=r.get("published_date"),
                 )
             )
 
-        # next_offset is left null: the default keyless backends do not support reliable
-        # result paging (ddgs ignores offset; SearXNG pages only at offset >= count), so
-        # advertising a cursor would lure an agent into re-fetching overlapping results. The
-        # offset field stays plumbed for a backend that honors it; until Layer 1 applies
-        # offset uniformly, the honest answer is "refine the query" (documented in SKILL.md).
+        # next_offset is left null on purpose. Manual `--offset` IS honored now (the ddgs
+        # adapter maps it to a page, and SearXNG pages at offset >= count), so a caller can
+        # page by hand. But across fused engines the page boundaries and cross-page dedup do
+        # not line up, so advertising an automatic cursor would lure an agent into
+        # overlapping re-fetches. The simple, honest agent-facing answer stays "refine the
+        # query" (documented in SKILL.md); offset remains available for deliberate paging.
+        warnings = list(data.get("warnings", []))
+        if engine_warning:
+            warnings.append(engine_warning)
         payload = AgentSearchPayload(
             query=req.query,
             results=hits,
             total_returned=len(hits),
             next_offset=None,
-            warnings=list(data.get("warnings", [])),
+            warnings=warnings,
         )
         return ok_envelope(
             AGENTIO_CONTRACT_VERSION,
             payload.model_dump(mode="json"),
             layer="agentio",
             backend="search",
+            elapsed_ms=elapsed(),
         )
+
+    def _resolve_engines(self, requested: list[str] | None) -> tuple[list[str] | None, str | None]:
+        """Filter requested engine names to the adapters actually present.
+
+        Returns ``(engines, warning)``. ``engines`` is None to mean "use all configured
+        adapters". If the caller named engines but none match an adapter, we drop the filter
+        (fall back to the default) and return a warning rather than letting Layer 1 fail with
+        no_engines_enabled, so a wrong engine name never yields zero results.
+        """
+        if not requested:
+            return None, None
+        known = {a.name for a in getattr(self._router, "adapters", [])}
+        if not known:
+            return requested, None  # cannot validate (injected router): pass through
+        valid = [e for e in requested if e in known]
+        if not valid:
+            return None, (
+                f"requested engine(s) {sorted(set(requested))} are not available "
+                f"(adapters: {sorted(known)}); searched all available engines instead."
+            )
+        return valid, None
 
     # --- web_fetch -----------------------------------------------------------------
 
     def web_fetch(self, req: AgentFetchRequest) -> Envelope:
+        t0 = time.perf_counter()
         page, req_warnings = self._fetch_one(
             req.url,
             page=req.page,
@@ -172,6 +213,7 @@ class AgentIO:
                 retriable=True,
                 layer="agentio",
                 backend="fetch",
+                elapsed_ms=(time.perf_counter() - t0) * 1000,
             )
         payload = AgentFetchPayload(pages=[page], warnings=req_warnings)
         return ok_envelope(
@@ -179,6 +221,7 @@ class AgentIO:
             payload.model_dump(mode="json"),
             layer="agentio",
             backend="fetch",
+            elapsed_ms=(time.perf_counter() - t0) * 1000,
         )
 
     def web_fetch_many(
@@ -194,6 +237,7 @@ class AgentIO:
         chars_per_token: float = DEFAULT_CHARS_PER_TOKEN,
         query: str | None = None,
     ) -> Envelope:
+        t0 = time.perf_counter()
         pages: list[AgentPage] = []
         warnings: list[str] = []
         for url in urls:
@@ -222,6 +266,7 @@ class AgentIO:
                 retriable=True,
                 layer="agentio",
                 backend="fetch",
+                elapsed_ms=(time.perf_counter() - t0) * 1000,
             )
         payload = AgentFetchPayload(pages=pages, query=query, warnings=warnings)
         return ok_envelope(
@@ -229,6 +274,7 @@ class AgentIO:
             payload.model_dump(mode="json"),
             layer="agentio",
             backend="fetch",
+            elapsed_ms=(time.perf_counter() - t0) * 1000,
         )
 
     def _fetch_one(
@@ -250,8 +296,8 @@ class AgentIO:
                 timeout_ms=timeout_ms,
                 allow_private_hosts=allow_private_hosts,
             )
-        except ValidationError:
-            return None, [f"{url}: invalid fetch request; skipped."]
+        except ValidationError as exc:
+            return None, [f"{url}: invalid fetch request ({exc}); skipped."]
 
         env = self._pipeline.run(freq)
         if not env.ok:
@@ -309,7 +355,22 @@ class AgentIO:
     # --- web_open ------------------------------------------------------------------
 
     def web_open(self, req: AgentOpenRequest) -> Envelope:
-        doc = self._resolve(req.handle)
+        t0 = time.perf_counter()
+        # Building/opening the store (lazy) or reading a persisted file can raise
+        # (locked/corrupt/read-only sqlite). That must degrade to a clean Envelope, never a
+        # raw traceback out of the CLI or an MCP tool.
+        try:
+            doc = self._resolve(req.handle)
+        except Exception as exc:
+            return error_envelope(
+                AGENTIO_CONTRACT_VERSION,
+                code=errors.INTERNAL_ERROR,
+                message=f"page store unavailable: {type(exc).__name__}: {exc}",
+                retriable=False,
+                layer="agentio",
+                backend="store",
+                elapsed_ms=(time.perf_counter() - t0) * 1000,
+            )
         if doc is None:
             return error_envelope(
                 AGENTIO_CONTRACT_VERSION,
@@ -322,6 +383,7 @@ class AgentIO:
                 retriable=False,
                 layer="agentio",
                 backend="store",
+                elapsed_ms=(time.perf_counter() - t0) * 1000,
             )
         page_obj = self._build_page(
             url=doc.url,
@@ -341,6 +403,7 @@ class AgentIO:
             payload.model_dump(mode="json"),
             layer="agentio",
             backend="store",
+            elapsed_ms=(time.perf_counter() - t0) * 1000,
         )
 
     def _resolve(self, handle: str):
@@ -385,12 +448,17 @@ class AgentIO:
             markdown, page_size_tokens=page_size_tokens, chars_per_token=chars_per_token
         )
         total_pages = len(pages)
-        effective_page = page
+        # Clamp to [1, total_pages] in BOTH directions. The page can arrive unvalidated via
+        # web_fetch_many (a bare int kwarg, not an AgentFetchRequest), so page<=0 must not
+        # index pages[-1] (silently wrong) or build an AgentPage(page=0) that violates its
+        # own ge=1 and raises an uncaught ValidationError.
+        effective_page = min(max(1, page), total_pages)
         if page > total_pages:
             warnings.append(
                 f"page {page} requested; document has {total_pages} page(s); showing the last."
             )
-            effective_page = total_pages
+        elif page < 1:
+            warnings.append(f"page {page} is below 1; showing the first page.")
         page_markdown = pages[effective_page - 1]
         fenced, info = fence_untrusted(page_markdown, source_url=url, datamark=datamark)
         return AgentPage(
@@ -411,15 +479,21 @@ class AgentIO:
             warnings=warnings,
         )
 
-    def _propagate_error(self, env: Envelope, *, backend: str) -> Envelope:
+    def _propagate_error(self, env: Envelope, *, backend: str, elapsed_ms: float = 0.0) -> Envelope:
+        # Preserve the upstream cause AND correlation: keep its trace_id so a failure can be
+        # tied back to the Layer-1/2 envelope, and report the facade's own end-to-end elapsed.
+        # The fallback code is a real, documented code (never the undefined "unknown_error").
         err = env.error
+        up = env.meta
         return error_envelope(
             AGENTIO_CONTRACT_VERSION,
-            code=err.code if err else "unknown_error",
+            code=err.code if err else errors.INTERNAL_ERROR,
             message=err.message if err else "upstream error",
             retriable=err.retriable if err else False,
             layer="agentio",
             backend=backend,
+            elapsed_ms=elapsed_ms,
+            trace_id=up.trace_id if up else None,
         )
 
 

@@ -37,9 +37,10 @@ def test_cli_web_search_json(httpx_mock, monkeypatch, capsys, assert_valid):
     assert env["data"]["results"][0]["handle"]
 
 
-def test_cli_web_search_human(httpx_mock, capsys):
+def test_cli_web_search_human(httpx_mock, monkeypatch, capsys):
     httpx_mock.add_response(json=SEARXNG_JSON)
-    rc = cli.main(["web-search", "rust", "--no-ddgs", "--searxng-url", SEARXNG_URL])
+    monkeypatch.setattr("ddgs.DDGS", lambda *a, **k: FakeDDGS(DDGS_ROWS))
+    rc = cli.main(["web-search", "rust", "--searxng-url", SEARXNG_URL])
     assert rc == 0
     out = capsys.readouterr().out
     assert "result(s) for: rust" in out

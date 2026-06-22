@@ -14,6 +14,8 @@ from collections.abc import Callable
 from datetime import UTC
 from typing import Any
 
+from pydantic import ValidationError
+
 from ..envelope import Envelope, error_envelope, ok_envelope
 from ..errors import RATE_LIMITED, UPSTREAM_ERROR
 from .models import ARXIV_CONTRACT_VERSION, ArxivPaper, ArxivSearchPayload, ArxivSearchRequest
@@ -238,6 +240,15 @@ class ArxivTool:
             return self._error(
                 code=UPSTREAM_ERROR,
                 message=f"arXiv response was not valid Atom XML: {exc}",
+                retriable=True,
+                elapsed_ms=(time.perf_counter() - t0) * 1000,
+            )
+        except (ValidationError, ValueError, TypeError) as exc:
+            # A malformed entry that slips past _parse_entry's guards (e.g. an ArxivPaper
+            # field of the wrong type) must surface as a clean error, never a traceback.
+            return self._error(
+                code=UPSTREAM_ERROR,
+                message=f"arXiv response had an unexpected shape: {type(exc).__name__}: {exc}",
                 retriable=True,
                 elapsed_ms=(time.perf_counter() - t0) * 1000,
             )

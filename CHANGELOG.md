@@ -6,16 +6,54 @@ semantic versioning once it reaches a tagged release.
 
 ## [Unreleased]
 
+### Changed
+
+- The agent surface is plug-and-play: `web-search` (CLI) and the `web_search` MCP tool no
+  longer take engine-selection flags (`--engines`, `--no-ddgs`, `--ddgs-backends`, the MCP
+  `engines` parameter, or `WEBSEARCH_DDGS_BACKENDS`). The keyless multi-engine default
+  needs no flags. Engine and backend selection stays on the lower-level `search` command
+  for debugging. `web-search --offset` now actually pages results (the ddgs adapter maps
+  offset to a page), instead of silently returning page one.
+- `fetch@1.2.0`: `FetchResult` gains a structured `failure_kind`
+  (`egress_refused` / `redirect_loop` / `transport_error` / `timeout` /
+  `dependency_missing`) so retriability is set from the cause, not by matching error text.
+
+### Fixed
+
+- No command can dump a raw traceback. `web-fetch --page 0` (or negative), invalid
+  `open`/extract parameters, a store-open failure, and any unexpected error now return a
+  clean `invalid_request` / `internal_error` Envelope. `web-search` rejects a
+  whitespace-only query; an unknown `engines` value falls back to the default with a
+  warning instead of failing.
+- `meta.elapsed_ms` is populated on every Layer-3 (`web_search` / `web_fetch` / `web_open`)
+  and format Envelope (it was always `0.0`); `_propagate_error` keeps the upstream
+  `trace_id` and uses a defined error code.
+- Retriability precision: a permanent fetch failure (egress refusal, redirect loop, missing
+  optional dependency) is non-retriable; a transport error or timeout is retriable.
+- SSRF egress guard uses an allowlist (`is_global`), closing CGNAT `100.64.0.0/10`
+  (RFC 6598) and any other non-public range the prior denylist missed.
+- The page store (SQLite FTS5 and the BM25 fallback) serializes its methods with a lock and
+  writes each document in one atomic transaction, so concurrent MCP tool calls cannot race
+  the shared connection or leave a half-written document. `search().total` is the true match
+  count, not the capped top-k pool. MCP singletons build under a lock.
+- curl_cffi response handling is fully guarded (a mid-body decode/reset becomes an
+  escalatable result, not a crash); GitHub/arXiv tolerate a malformed upstream shape with a
+  clean `upstream_error`; a non-positive chunk size no longer hangs; a NaN score no longer
+  corrupts result ordering; the error-title quality veto no longer tanks a long article
+  whose title merely contains a word like "forbidden" or a number like "404".
+- The CLI pins stdout/stderr to UTF-8 (no `UnicodeEncodeError` under a C/POSIX locale), and
+  the `web-fetch` "more pages" hint suggests a command that actually works in context
+  (`web-open ... --persist-path` when persisting, else a re-fetch).
+
 ### Added
 
 - Keyless multi-engine search out of the box: the `ddgs` adapter is treated as the
   metasearch it is (Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek,
-  Wikipedia by default, with Bing and others selectable by name), with a
-  `--ddgs-backends google,brave,mojeek` flag on `search`/`web-search`
-  and a `ddgs_backend` parameter on `build_router` / `build_agent_io` to force a subset.
-  `ddgs` is the keyless default; a self-hosted SearXNG is the optional broader engine.
-  Public SearXNG instances are not used as a default (most disable the JSON API and
-  rate-limit automated clients).
+  Wikipedia by default, with Bing and others selectable by name). The lower-level
+  `search` command can force a subset with `--ddgs-backends google,brave,mojeek`, and
+  `build_router` / `build_agent_io` take a `ddgs_backend` parameter. `ddgs` is the keyless
+  default; a self-hosted SearXNG is the optional broader engine. Public SearXNG instances
+  are not used as a default (most disable the JSON API and rate-limit automated clients).
 - `arxiv@1.0.0` contract and a keyless `websearch arxiv` tool (also the MCP
   `arxiv_search` tool): arXiv paper search over the official Atom API with field-targeted
   search (`--field`), sorting, GET caching, and exponential backoff on HTTP 429. Returns

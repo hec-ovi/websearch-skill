@@ -188,7 +188,10 @@ def score_extraction(
     # Hard vetoes: catch soft-404s / shells the weighted mean would rate as borderline.
     if word_count < 25:
         score = min(score, 0.3)
-    if title and title_looks_like_error(title):
+    # An error-shaped title vetoes only when corroborated by a short body: a genuine
+    # soft-404 / challenge page is brief, whereas a long article that merely contains a
+    # word like "forbidden" or a number like "404" is not an error and keeps its score.
+    if word_count < 200 and title and title_looks_like_error(title):
         score = min(score, 0.25)
     if raw_html_len > 0 and (text_len / raw_html_len) < 0.005:
         score = min(score, 0.2)

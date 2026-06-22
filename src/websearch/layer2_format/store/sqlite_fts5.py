@@ -16,6 +16,7 @@ behavior is otherwise identical to the in-memory case.
 from __future__ import annotations
 
 import sqlite3
+import threading
 
 from ..ids import passage_id
 from ..models import (
@@ -56,6 +57,12 @@ class SqliteFts5Index:
         target = self._config.persist_path or ":memory:"
         self._con = sqlite3.connect(target, check_same_thread=False)
         self._con.row_factory = sqlite3.Row
+        # One sqlite3.Connection is shared across threads (check_same_thread=False).
+        # FastMCP runs sync tools on a worker pool, so web_fetch (write) and web_open
+        # (read) can land on different threads at once. sqlite cursors are not
+        # concurrency-safe, so every public method serializes on this lock; it is an
+        # RLock so a method may call another (and to tolerate future re-entrancy).
+        self._lock = threading.RLock()
         if self._config.persist_path:
             self._con.execute("PRAGMA journal_mode=WAL")
             self._con.execute("PRAGMA synchronous=NORMAL")
@@ -92,63 +99,68 @@ class SqliteFts5Index:
 
     def add(self, pages: list[PageInput]) -> AddResult:
         added: list[StoredDoc] = []
-        for page in pages:
-            prepared = prepare_doc(page, self._config)
-            row = self._con.execute(
-                "SELECT content_hash, n_passages FROM docs WHERE id = ?", (prepared.id,)
-            ).fetchone()
-            if row is not None and row["content_hash"] == prepared.content_hash:
+        with self._lock:
+            for page in pages:
+                prepared = prepare_doc(page, self._config)
+                row = self._con.execute(
+                    "SELECT content_hash, n_passages FROM docs WHERE id = ?", (prepared.id,)
+                ).fetchone()
+                if row is not None and row["content_hash"] == prepared.content_hash:
+                    added.append(
+                        StoredDoc(
+                            id=prepared.id,
+                            url=prepared.url,
+                            title=prepared.title,
+                            n_passages=row["n_passages"],
+                            content_hash=prepared.content_hash,
+                            fetched_at=prepared.fetched_at,
+                            token_estimate=prepared.token_estimate,
+                            deduped=True,
+                        )
+                    )
+                    continue
+                # One doc = one atomic transaction. `with self._con` commits on success
+                # and ROLLS BACK on any error, so a mid-write failure never leaves a
+                # half-written doc or a dangling open transaction on the shared connection;
+                # the exception re-raises for the caller (the facade) to degrade to a warning.
+                with self._con:
+                    if row is not None:  # content changed: replace doc + passages
+                        self._con.execute("DELETE FROM passages WHERE doc_id = ?", (prepared.id,))
+                        self._con.execute("DELETE FROM docs WHERE id = ?", (prepared.id,))
+                    self._con.execute(
+                        "INSERT INTO docs (id, url, title, markdown, fetched_at, content_hash, "
+                        "n_passages, token_estimate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            prepared.id,
+                            prepared.url,
+                            prepared.title,
+                            prepared.markdown,
+                            prepared.fetched_at,
+                            prepared.content_hash,
+                            len(prepared.passages),
+                            prepared.token_estimate,
+                        ),
+                    )
+                    self._con.executemany(
+                        "INSERT INTO passages (text, doc_id, url, title, ordinal, start_off, "
+                        "end_off) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        [
+                            (p.text, p.doc_id, p.url, p.title, p.ordinal, p.start, p.end)
+                            for p in prepared.passages
+                        ],
+                    )
                 added.append(
                     StoredDoc(
                         id=prepared.id,
                         url=prepared.url,
                         title=prepared.title,
-                        n_passages=row["n_passages"],
+                        n_passages=len(prepared.passages),
                         content_hash=prepared.content_hash,
                         fetched_at=prepared.fetched_at,
                         token_estimate=prepared.token_estimate,
-                        deduped=True,
+                        deduped=False,
                     )
                 )
-                continue
-            if row is not None:  # content changed: replace doc + passages
-                self._con.execute("DELETE FROM passages WHERE doc_id = ?", (prepared.id,))
-                self._con.execute("DELETE FROM docs WHERE id = ?", (prepared.id,))
-            self._con.execute(
-                "INSERT INTO docs (id, url, title, markdown, fetched_at, content_hash, "
-                "n_passages, token_estimate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    prepared.id,
-                    prepared.url,
-                    prepared.title,
-                    prepared.markdown,
-                    prepared.fetched_at,
-                    prepared.content_hash,
-                    len(prepared.passages),
-                    prepared.token_estimate,
-                ),
-            )
-            self._con.executemany(
-                "INSERT INTO passages (text, doc_id, url, title, ordinal, start_off, end_off) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [
-                    (p.text, p.doc_id, p.url, p.title, p.ordinal, p.start, p.end)
-                    for p in prepared.passages
-                ],
-            )
-            self._con.commit()
-            added.append(
-                StoredDoc(
-                    id=prepared.id,
-                    url=prepared.url,
-                    title=prepared.title,
-                    n_passages=len(prepared.passages),
-                    content_hash=prepared.content_hash,
-                    fetched_at=prepared.fetched_at,
-                    token_estimate=prepared.token_estimate,
-                    deduped=False,
-                )
-            )
         return AddResult(added=added)
 
     def search(self, request: SearchPageRequest) -> SearchPageResult:
@@ -162,13 +174,22 @@ class SqliteFts5Index:
                 has_more=False,
                 backend=self.name,
             )
-        rows = self._con.execute(
-            "SELECT text, doc_id, url, title, ordinal, start_off, end_off, "
-            "bm25(passages) AS rank FROM passages WHERE passages MATCH ? "
-            "ORDER BY rank ASC LIMIT ?",
-            (match, request.top_k),
-        ).fetchall()
-        total = len(rows)
+        with self._lock:
+            rows = self._con.execute(
+                "SELECT text, doc_id, url, title, ordinal, start_off, end_off, "
+                "bm25(passages) AS rank FROM passages WHERE passages MATCH ? "
+                "ORDER BY rank ASC LIMIT ?",
+                (match, request.top_k),
+            ).fetchall()
+            count_row = self._con.execute(
+                "SELECT count(*) AS c FROM passages WHERE passages MATCH ?", (match,)
+            ).fetchone()
+        # `rows` is the top_k-ranked candidate pool; `total` is the TRUE match count (which
+        # may exceed the pool) so the caller can tell more matches exist than were ranked.
+        # `has_more` walks the returned pool only; you cannot page past top_k (documented on
+        # SearchPageResult).
+        total = int(count_row["c"]) if count_row is not None else len(rows)
+        pool_size = len(rows)
         start = (request.page - 1) * request.page_size
         window = rows[start : start + request.page_size]
         passages = [
@@ -189,16 +210,17 @@ class SqliteFts5Index:
             total=total,
             page=request.page,
             page_size=request.page_size,
-            has_more=start + request.page_size < total,
+            has_more=start + request.page_size < pool_size,
             backend=self.name,
         )
 
     def get(self, id_or_url: str) -> PageDocument | None:
-        row = self._con.execute(
-            "SELECT id, url, title, markdown, fetched_at, content_hash, n_passages, "
-            "token_estimate FROM docs WHERE id = ? OR url = ? LIMIT 1",
-            (id_or_url, id_or_url),
-        ).fetchone()
+        with self._lock:
+            row = self._con.execute(
+                "SELECT id, url, title, markdown, fetched_at, content_hash, n_passages, "
+                "token_estimate FROM docs WHERE id = ? OR url = ? LIMIT 1",
+                (id_or_url, id_or_url),
+            ).fetchone()
         if row is None:
             return None
         return PageDocument(
@@ -213,9 +235,11 @@ class SqliteFts5Index:
         )
 
     def resolve_index(self) -> ResolveIndex:
-        rows = self._con.execute(
-            "SELECT id, url, title, n_passages, fetched_at, token_estimate FROM docs ORDER BY rowid"
-        ).fetchall()
+        with self._lock:
+            rows = self._con.execute(
+                "SELECT id, url, title, n_passages, fetched_at, token_estimate FROM docs "
+                "ORDER BY rowid"
+            ).fetchall()
         docs = [
             ResolveIndexEntry(
                 id=r["id"],
@@ -230,4 +254,5 @@ class SqliteFts5Index:
         return ResolveIndex(docs=docs, total=len(docs), backend=self.name)
 
     def close(self) -> None:
-        self._con.close()
+        with self._lock:
+            self._con.close()

@@ -110,6 +110,14 @@ class FetchResult(BaseModel):
     tier_attempts: list[str] = Field(default_factory=list)
     fetch_ms: int = Field(default=0, ge=0)
     error: str | None = None
+    # Structured cause for a failed fetch (status==0), so the pipeline can set `retriable`
+    # precisely instead of substring-matching the human error text. None on success.
+    failure_kind: (
+        Literal[
+            "egress_refused", "redirect_loop", "transport_error", "timeout", "dependency_missing"
+        ]
+        | None
+    ) = None
 
 
 # --- EXTRACT sub-port --------------------------------------------------------------

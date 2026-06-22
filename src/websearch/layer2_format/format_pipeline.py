@@ -18,6 +18,8 @@ search or cross-turn resolution); keeping them decoupled mirrors the fetch/extra
 
 from __future__ import annotations
 
+import math
+import time
 import uuid
 
 from ..envelope import Envelope, ok_envelope
@@ -40,8 +42,12 @@ from .tokens import Estimator, estimate_tokens
 
 
 def _score_key(item: ResultInput) -> tuple[int, float]:
-    """Sort key: present scores first (descending); missing scores last, stably."""
-    if item.score is None:
+    """Sort key: present scores first (descending); missing/non-finite scores last, stably.
+
+    A NaN would make the sort order undefined (NaN compares false against everything), so a
+    non-finite score is treated as missing here in addition to the model-level sanitization.
+    """
+    if item.score is None or not math.isfinite(item.score):
         return (0, 0.0)
     return (1, item.score)
 
@@ -65,6 +71,7 @@ class FormatPipeline:
         of the character heuristic. Never raises on valid input.
         """
         request_id = str(uuid.uuid4())
+        t0 = time.perf_counter()
         cpt = request.chars_per_token
 
         def toks(text: str | None) -> int:
@@ -227,6 +234,7 @@ class FormatPipeline:
             payload.model_dump(mode="json"),
             layer="format",
             backend=self._renderer.name,
+            elapsed_ms=(time.perf_counter() - t0) * 1000,
             trace_id=trace_id,
             request_id=request_id,
         )

@@ -5,6 +5,9 @@ from __future__ import annotations
 # Cross-cutting
 INVALID_REQUEST = "invalid_request"
 DEPENDENCY_MISSING = "dependency_missing"
+# An unexpected failure that escaped a lower layer (store I/O, a bug). Always surfaced as a
+# clean Envelope rather than a raw traceback so an agent/CLI never sees a stack trace.
+INTERNAL_ERROR = "internal_error"
 
 # Layer 1 (search)
 ALL_ENGINES_FAILED = "all_engines_failed"
