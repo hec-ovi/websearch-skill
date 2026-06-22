@@ -135,6 +135,16 @@ def test_cli_open_invalid_url_is_clean_error(capsys):
     assert env["error"]["code"] == "invalid_request"
 
 
+def test_cli_open_search_control_char_query_is_clean(httpx_mock, capsys):
+    # A control-char --search must not crash the command after a successful fetch+format.
+    httpx_mock.add_response(url=URL_A, html=ARTICLE_HTML)
+    rc = cli.main(["open", URL_A, "--search", "rust\x00borrow", "--json"])
+    assert rc == 0
+    env = json.loads(capsys.readouterr().out)
+    assert env["ok"] is True
+    assert "page_search" in env["meta"]  # search ran (returned a result, possibly empty)
+
+
 def test_cli_open_index_mode_offloads_body(httpx_mock, capsys):
     httpx_mock.add_response(url=URL_A, html=ARTICLE_HTML)
     rc = cli.main(["open", URL_A, "--mode", "index", "--json"])

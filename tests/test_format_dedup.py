@@ -123,3 +123,17 @@ def test_empty_and_single_body_safe():
     one = _items(("https://a.test/1", "", None))
     clusters = dedup_items(one, method="both")
     assert len(clusters) == 1
+
+
+def test_distinct_empty_bodies_are_not_folded():
+    # Snippet-only or failed-extraction results all hash to the empty-string digest;
+    # they must NOT collapse into one canonical (would silently drop distinct URLs).
+    items = _items(
+        ("https://a.test/1", "", 0.9),
+        ("https://b.test/2", "   ", 0.5),
+        ("https://c.test/3", "", 0.1),
+    )
+    for method in ("exact", "both"):
+        clusters = dedup_items(items, method=method)
+        assert len(clusters) == 3, method
+        assert all(not c.duplicates for c in clusters)

@@ -216,6 +216,53 @@ def test_no_sidecar_when_disabled():
     assert data["markdown"]  # markdown still emitted
 
 
+def test_empty_body_results_are_not_folded():
+    # Two body-less results (e.g. blocked/JS-only pages) must both survive, not collapse.
+    _env, data = _run(
+        FormatRequest(
+            results=[
+                ResultInput(url="https://a.test/1", title="A", body_markdown=""),
+                ResultInput(url="https://b.test/2", title="B", body_markdown=""),
+            ]
+        )
+    )
+    assert data["sidecar"]["total_results"] == 2
+    assert data["sidecar"]["total_dropped_duplicates"] == 0
+
+
+def test_past_end_page_status_line_is_consistent():
+    results = [
+        ResultInput(
+            url=f"https://a.test/{i}",
+            title=f"r{i}",
+            score=1.0 - i / 100,
+            body_markdown=f"distinct body number {i}",  # distinct so dedup keeps all 12
+        )
+        for i in range(12)
+    ]
+    _env, data = _run(FormatRequest(results=results, page=5, page_size=5))  # total_pages=3
+    md = data["markdown"]
+    assert "page 6 of 3" not in md  # never current > total
+    assert "last page is 3" in md
+    assert any("past the last page" in w for w in data["warnings"])
+
+
+def test_dedup_shrink_into_past_end_page_status_line_is_consistent():
+    # 8 inputs, 6 exact dups -> 3 canonicals (total_pages=1); page=1 is now past end.
+    body = "the same shared body across these mirror pages, long enough to be a real doc"
+    results = [
+        ResultInput(url="https://a.test/uniq1", title="u1", score=0.9, body_markdown="alpha body"),
+        ResultInput(url="https://a.test/uniq2", title="u2", score=0.8, body_markdown="beta body"),
+    ]
+    results += [
+        ResultInput(url=f"https://a.test/dup{i}", title=f"d{i}", score=0.5, body_markdown=body)
+        for i in range(6)
+    ]
+    _env, data = _run(FormatRequest(results=results, page=1, page_size=5))
+    assert data["sidecar"]["total_results"] == 3
+    assert "page 2 of 1" not in data["markdown"]
+
+
 def test_derived_id_is_stable_and_site_extracted():
     _env, data = _run(
         FormatRequest(results=[ResultInput(url="https://www.example.com/path", body_markdown="x")])

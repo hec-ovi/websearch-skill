@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 
@@ -33,11 +34,17 @@ from ._common import prepare_doc
 _NAME = "memory-bm25"
 _K1 = 1.2
 _B = 0.75
-_TOKEN = re.compile(r"[a-z0-9]+")
+# Unicode word characters minus the connector underscore. Together with NFKD folding
+# this approximates FTS5's default unicode61 tokenizer (case-folded, diacritics removed,
+# Unicode letters tokenized), so accented and non-Latin queries match like the SQLite
+# adapter instead of silently returning nothing on a fallback-only machine.
+_TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 
 
 def _tokenize(text: str) -> list[str]:
-    return _TOKEN.findall(text.lower())
+    folded = unicodedata.normalize("NFKD", text.lower())
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    return _TOKEN.findall(folded)
 
 
 @dataclass
@@ -109,8 +116,12 @@ class MemoryBm25Index:
                     )
                 )
                 continue
-            if existing is not None:  # changed content: drop old passages
+            if existing is not None:  # changed content: drop old passages, move to end
                 self._passages = [p for p in self._passages if p.doc_id != prepared.id]
+                # SQLite reassigns a higher rowid on replace, so resolve_index lists the
+                # changed doc last; match that here for adapter-consistent ordering.
+                self._order.remove(prepared.id)
+                self._order.append(prepared.id)
             else:
                 self._order.append(prepared.id)
             self._docs[prepared.id] = _MemDoc(
@@ -157,8 +168,12 @@ class MemoryBm25Index:
         return AddResult(added=added)
 
     def _idf(self, term: str, n: int) -> float:
+        # Match FTS5's bm25 IDF exactly (ext/fts5/fts5_aux.c): the unclamped
+        # Robertson/Sparck-Jones log, then floor a non-positive value (a term in more
+        # than half the rows) to 1e-6 so common terms get near-zero weight as in FTS5.
         n_q = self._df.get(term, 0)
-        return math.log(1 + (n - n_q + 0.5) / (n_q + 0.5))
+        idf = math.log((n - n_q + 0.5) / (n_q + 0.5))
+        return 1e-6 if idf <= 0 else idf
 
     def _score(self, passage: _MemPassage, query_terms: list[str], n: int) -> float:
         if self._avgdl <= 0:

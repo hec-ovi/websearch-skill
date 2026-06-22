@@ -15,6 +15,12 @@ from ..ids import doc_id, passage_id
 from ..models import DEFAULT_CHARS_PER_TOKEN, PageInput, StoreConfig
 from ..tokens import estimate_tokens
 
+# Map C0 control characters and DEL to spaces before tokenizing. A NUL in particular is
+# fatal to FTS5 (its query parser treats it as a C-string terminator and raises
+# "unterminated string"); the rest are stripped for parity with the memory tokenizer.
+_CONTROL_TO_SPACE = {c: " " for c in range(0x20)}
+_CONTROL_TO_SPACE[0x7F] = " "
+
 
 @dataclass
 class PreparedPassage:
@@ -87,7 +93,7 @@ def escape_fts5_query(query: str) -> str | None:
     usable tokens (caller short-circuits to an empty result), since an empty MATCH
     string is itself a syntax error.
     """
-    tokens = query.split()
+    tokens = query.translate(_CONTROL_TO_SPACE).split()
     if not tokens:
         return None
     quoted = ['"' + tok.replace('"', '""') + '"' for tok in tokens]

@@ -57,6 +57,13 @@ class FormatPipeline:
         token_estimator: Estimator | None = None,
         trace_id: str | None = None,
     ) -> Envelope:
+        """Format ``request`` into an Envelope (meta.layer "format").
+
+        ``envelope.data`` is a JSON-serialized ``FormatPayload``: ``data["markdown"]`` is
+        the layout-stable document and ``data["sidecar"]`` is the lossless JSON view
+        (full bodies verbatim). Pass ``token_estimator`` to use a real tokenizer instead
+        of the character heuristic. Never raises on valid input.
+        """
         request_id = str(uuid.uuid4())
         cpt = request.chars_per_token
 

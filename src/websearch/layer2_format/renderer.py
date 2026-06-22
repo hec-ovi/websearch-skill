@@ -80,9 +80,14 @@ class MarkdownRenderer:
         heading = f"# Search results: {query}" if query else "# Search results"
         lines.append(heading)
         lines.append("")
+        if total_results == 0:
+            position = "no results"
+        elif not results:  # a page past the last one (e.g. dedup shrank the set)
+            position = f"page {page + 1} requested; last page is {total_pages}; none on this page"
+        else:
+            position = f"page {page + 1} of {total_pages}"
         status = (
-            f"> page {page + 1} of {max(total_pages, 1)} · "
-            f"{len(results)} of {total_results} result(s) · "
+            f"> {position} · {len(results)} of {total_results} result(s) · "
             f"mode {mode} · ~{page_token_estimate} tokens"
         )
         if total_dropped_duplicates:

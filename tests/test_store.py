@@ -169,6 +169,72 @@ def test_opt_in_adapter_raises_clear_error():
         build_page_index(StoreConfig(adapter="tantivy"))
 
 
+@pytest.mark.parametrize("adapter", ADAPTERS)
+def test_control_char_query_does_not_crash(adapter):
+    # A NUL byte is fatal to FTS5 (unterminated string) if not stripped; other control
+    # chars must also be neutralized. Both adapters must survive and stay consistent.
+    idx = _index(adapter)
+    idx.add(_pages())
+    for q in ["rust\x00borrowing", "a\x00b", "\x01\x07\x1b rust", "rust\x7f"]:
+        res = idx.search(SearchPageRequest(query=q))
+        assert res.backend in ("sqlite-fts5", "memory-bm25")
+        assert isinstance(res.total, int)
+
+
+def test_nul_query_same_shape_across_adapters():
+    sq, mem = _index("sqlite-fts5"), _index("memory")
+    sq.add(_pages())
+    mem.add(_pages())
+    rq = SearchPageRequest(query="rust\x00borrowing")
+    a, b = sq.search(rq), mem.search(rq)
+    # neither raised; both return the same passage URLs (control byte ignored)
+    assert {p.url for p in a.passages} == {p.url for p in b.passages}
+
+
+def test_unicode_and_diacritic_query_parity():
+    corpus = [PageInput(url="https://a.test/u", markdown="The café serves coffee. 日本語 λόγος.")]
+    sq, mem = _index("sqlite-fts5"), _index("memory")
+    sq.add(corpus)
+    mem.add(corpus)
+    for q in ["cafe", "café", "coffee", "日本語", "λόγος"]:
+        a = {p.url for p in sq.search(SearchPageRequest(query=q)).passages}
+        b = {p.url for p in mem.search(SearchPageRequest(query=q)).passages}
+        assert a == b == {"https://a.test/u"}, q
+
+
+def test_resolve_index_order_parity_after_content_change():
+    pages = [
+        PageInput(url=f"https://a.test/{n}", markdown=f"doc {n} about rust") for n in (1, 2, 3)
+    ]
+    changed = PageInput(url="https://a.test/1", markdown="doc 1 CHANGED about rust")
+    orders = {}
+    for adapter in ADAPTERS:
+        idx = _index(adapter)
+        idx.add(pages)
+        idx.add([changed])
+        orders[adapter] = [e.url for e in idx.resolve_index().docs]
+    assert orders["sqlite-fts5"] == orders["memory"]
+    assert orders["memory"][-1] == "https://a.test/1"  # changed doc moves last
+
+
+def test_common_term_ordering_parity():
+    # A term in every doc (idf floored) plus a discriminating term; both adapters must
+    # rank the same way even though absolute BM25 magnitudes differ.
+    pages = [
+        PageInput(url="https://a.test/1", markdown="rust rust rust ownership borrow checker"),
+        PageInput(url="https://a.test/2", markdown="rust appears here once only"),
+        PageInput(url="https://a.test/3", markdown="rust again just once here"),
+    ]
+    orders = {}
+    for adapter in ADAPTERS:
+        idx = _index(adapter)
+        idx.add(pages)
+        res = idx.search(SearchPageRequest(query="rust ownership", top_k=10))
+        orders[adapter] = [(p.url, p.ordinal) for p in res.passages]
+    assert orders["sqlite-fts5"] == orders["memory"]
+    assert orders["memory"][0][0] == "https://a.test/1"  # ownership match ranks first
+
+
 def test_persistence_round_trips(tmp_path):
     db = tmp_path / "index.db"
     idx = SqliteFts5Index(StoreConfig(persist_path=str(db)))

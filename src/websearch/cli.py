@@ -464,15 +464,22 @@ def _cmd_open(args: argparse.Namespace) -> int:
     payload = envelope.model_dump(mode="json")
     payload["data"]["warnings"] = (payload["data"].get("warnings") or []) + warnings
 
-    # Index the opened pages so resolve-by-id and --search work over this corpus.
-    store = build_page_index(StoreConfig(persist_path=args.persist_path))
-    store.add(pages)
+    # Index the opened pages so resolve-by-id and --search work over this corpus. The
+    # format document is already built, so any store/search failure degrades to a
+    # warning rather than discarding the work or leaking a traceback.
     search_result = None
-    if args.search:
-        search_result = store.search(
-            SearchPageRequest(query=args.search, top_k=args.top_k)
-        ).model_dump(mode="json")
-        payload["meta"]["page_search"] = search_result
+    try:
+        store = build_page_index(StoreConfig(persist_path=args.persist_path))
+        store.add(pages)
+        if args.search:
+            search_result = store.search(
+                SearchPageRequest(query=args.search, top_k=args.top_k)
+            ).model_dump(mode="json")
+            payload["meta"]["page_search"] = search_result
+    except Exception as exc:  # never lose the formatted document to an index error
+        payload["data"]["warnings"].append(
+            f"page index/search failed: {type(exc).__name__}: {exc}"
+        )
 
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))

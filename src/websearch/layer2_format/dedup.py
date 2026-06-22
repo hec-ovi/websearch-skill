@@ -165,7 +165,13 @@ def dedup_items(
     exact_groups: dict[str, list[DupItem]] = {}
     exact_order: list[str] = []
     for it in items:
-        key = it.content_hash if do_exact else f"__unique__{it.order}"
+        # An empty/whitespace body carries no distinguishing content, so body-less pages
+        # (snippet-only results, failed or blocked extraction) must never fold together;
+        # each survives as its own canonical, mirroring how MinHash already skips them.
+        if do_exact and normalize_body(it.body):
+            key = it.content_hash
+        else:
+            key = f"__unique__{it.order}"
         if key not in exact_groups:
             exact_groups[key] = []
             exact_order.append(key)
