@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json",
+  "title": "Envelope",
+  "description": "Cross-cutting wrapper for every inter-layer message, CLI --json output, and MCP structuredContent. contract_version is the semver of the producing layer's contract; additive fields are MINOR (consumers ignore unknown fields), removal/rename/type-change/meaning-change is MAJOR.",
+  "x-contract-version": "1.0.0",
+  "type": "object",
+  "required": ["contract_version", "ok", "data", "error", "meta"],
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Semver of the producing layer's contract (e.g. search@1.0.0 emits \"1.0.0\")."
+    },
+    "ok": {
+      "type": "boolean",
+      "description": "True on success; on false, data is null and error is populated."
+    },
+    "data": {
+      "description": "Layer-specific payload (object | array | null). Constrained per-layer."
+    },
+    "error": {
+      "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Error" }]
+    },
+    "meta": { "$ref": "#/$defs/Meta" }
+  },
+  "$defs": {
+    "Error": {
+      "type": "object",
+      "required": ["code", "message", "retriable"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "description": "Stable machine code, e.g. \"all_engines_failed\"." },
+        "message": { "type": "string" },
+        "retriable": { "type": "boolean" }
+      }
+    },
+    "Meta": {
+      "type": "object",
+      "description": "Free-form diagnostics; mirrors MCP _meta. Adding keys is never breaking.",
+      "required": ["layer", "backend", "elapsed_ms"],
+      "additionalProperties": true,
+      "properties": {
+        "layer": { "type": "string", "description": "\"search\" | \"extract\" | \"format\" | \"agent-io\"" },
+        "backend": {
+          "type": ["string", "null"],
+          "description": "Active adapter id(s), e.g. \"searxng+ddgs\"."
+        },
+        "elapsed_ms": { "type": "number", "minimum": 0 },
+        "trace_id": {
+          "type": ["string", "null"],
+          "description": "W3C traceparent-compatible id for cross-layer tracing."
+        }
+      }
+    }
+  }
+}

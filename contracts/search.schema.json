@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/search.schema.json",
+  "title": "Layer 1 - Search port contract",
+  "description": "Capability-named port for multi-engine search aggregation. Backends (SearXNG, ddgs, keyed APIs) map their native shapes onto this port; the SearXNG title/url/content/engine shape is one adapter's mapping, not the port itself.",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "SearchRequest": {
+      "type": "object",
+      "required": ["query"],
+      "additionalProperties": false,
+      "properties": {
+        "query": { "type": "string", "minLength": 1 },
+        "count": { "type": "integer", "minimum": 1, "default": 10, "description": "Desired results per engine; the router clamps per-engine caps." },
+        "offset": { "type": "integer", "minimum": 0, "default": 0, "description": "Results-based offset; mapped to page/start/offset per engine." },
+        "country": { "type": ["string", "null"], "default": null, "description": "ISO 3166-1 alpha-2." },
+        "language": { "type": ["string", "null"], "default": null, "description": "ISO 639-1." },
+        "safesearch": { "enum": ["off", "moderate", "strict"], "default": "moderate" },
+        "freshness": {
+          "default": "any",
+          "oneOf": [
+            { "enum": ["any", "day", "week", "month", "year"] },
+            {
+              "type": "object",
+              "required": ["start", "end"],
+              "additionalProperties": false,
+              "properties": {
+                "start": { "type": "string", "description": "ISO 8601 date." },
+                "end": { "type": "string", "description": "ISO 8601 date." }
+              }
+            }
+          ]
+        },
+        "include_sites": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "exclude_sites": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "result_type": { "enum": ["web", "news"], "default": "web" },
+        "engines": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "default": null,
+          "description": "null = router default set."
+        },
+        "max_total_results": { "type": "integer", "minimum": 1, "default": 20, "description": "Cap applied after fusion." },
+        "fusion": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": { "enum": ["rrf", "weighted_rrf", "score_convex"], "default": "weighted_rrf" },
+            "k": { "type": "integer", "minimum": 1, "default": 60 },
+            "weights": {
+              "type": ["object", "null"],
+              "additionalProperties": { "type": "number" },
+              "default": null,
+              "description": "engine -> weight."
+            },
+            "consensus_bonus": { "type": "boolean", "default": true }
+          }
+        },
+        "egress": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "default": null,
+          "description": "Proxy/VPN egress, isolated inside Layer 1; invisible to other layers. Never carries raw credentials.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "profile": { "type": ["string", "null"], "default": null },
+            "country": { "type": ["string", "null"], "default": null }
+          }
+        },
+        "engine_overrides": {
+          "type": "object",
+          "additionalProperties": { "type": "object" },
+          "default": {},
+          "description": "Per-engine passthrough params (e.g. brave goggles, exa type, tavily topic)."
+        },
+        "timeout_ms": { "type": "integer", "minimum": 1, "default": 8000 }
+      }
+    },
+
+    "SourceProvenance": {
+      "type": "object",
+      "required": ["engine", "rank"],
+      "additionalProperties": false,
+      "properties": {
+        "engine": { "type": "string" },
+        "rank": { "type": "integer", "minimum": 1, "description": "1-based rank on that engine." },
+        "raw_score": { "type": ["number", "null"], "default": null },
+        "native_id": { "type": ["string", "null"], "default": null }
+      }
+    },
+
+    "ResultItem": {
+      "type": "object",
+      "required": ["url", "title", "snippet", "fused_score", "sources"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string", "description": "Canonical, normalized; the dedup key and Layer-2 handoff token." },
+        "display_url": { "type": "string", "description": "Original first-seen url." },
+        "title": { "type": "string" },
+        "snippet": { "type": "string", "description": "Best snippet across engines. NOT page body." },
+        "snippets": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "published_date": { "type": ["string", "null"], "default": null, "description": "ISO 8601 if known." },
+        "fused_score": { "type": "number" },
+        "sources": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/SourceProvenance" } },
+        "result_type": { "enum": ["web", "news"], "default": "web" },
+        "language": { "type": ["string", "null"], "default": null },
+        "favicon": { "type": ["string", "null"], "default": null },
+        "thumbnail": { "type": ["string", "null"], "default": null }
+      }
+    },
+
+    "UnresponsiveEngine": {
+      "type": "object",
+      "required": ["engine", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "engine": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    },
+
+    "SearchPayload": {
+      "type": "object",
+      "description": "Envelope.data for a search response.",
+      "required": ["query", "request_id", "results", "engines_queried"],
+      "additionalProperties": false,
+      "properties": {
+        "query": { "type": "string" },
+        "request_id": { "type": "string", "description": "UUID for this request." },
+        "results": { "type": "array", "items": { "$ref": "#/$defs/ResultItem" } },
+        "answers": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Verbatim engine direct answers; NOT synthesized." },
+        "suggestions": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "corrections": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "engines_queried": { "type": "array", "items": { "type": "string" } },
+        "unresponsive_engines": { "type": "array", "items": { "$ref": "#/$defs/UnresponsiveEngine" }, "default": [] },
+        "timing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "total_ms": { "type": "integer", "minimum": 0 },
+            "per_engine_ms": { "type": "object", "additionalProperties": { "type": "integer" } }
+          }
+        },
+        "warnings": { "type": "array", "items": { "type": "string" }, "default": [] }
+      }
+    },
+
+    "SearchResponse": {
+      "description": "An Envelope whose meta.layer is \"search\" and whose data is a SearchPayload (or null on error).",
+      "allOf": [
+        { "$ref": "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json" },
+        {
+          "properties": {
+            "data": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/SearchPayload" }] },
+            "meta": {
+              "properties": { "layer": { "const": "search" } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
