@@ -34,6 +34,7 @@ class ArxivSearchRequest(BaseModel):
         # 0 = "no local cap": ask for the API's own per-request maximum. Values above
         # the old convenience cap (50) are also legal now, up to the API ceiling.
         return ARXIV_API_MAX_RESULTS if v == 0 else v
+
     sort_by: Literal["relevance", "lastUpdatedDate", "submittedDate"] = "relevance"
     sort_order: Literal["ascending", "descending"] = "descending"
 

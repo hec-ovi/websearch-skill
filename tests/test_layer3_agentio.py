@@ -100,9 +100,7 @@ def test_next_offset_is_null_honest(agent):
 
 
 def test_web_search_zero_max_results_returns_every_fused_hit():
-    rows = [
-        {"title": f"T{i}", "href": f"https://example.com/p{i}", "body": "b"} for i in range(30)
-    ]
+    rows = [{"title": f"T{i}", "href": f"https://example.com/p{i}", "body": "b"} for i in range(30)]
     agent = build_agent_io(
         enable_ddgs=True, ddgs_factory=ddgs_factory(rows), enable_curl_cffi=False
     )
