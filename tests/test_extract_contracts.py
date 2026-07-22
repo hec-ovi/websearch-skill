@@ -48,6 +48,15 @@ def test_fetch_request_has_default_transport_guard_and_allow_private():
     assert r.allow_private_hosts is False
 
 
+def test_fetch_request_zero_max_bytes_lifts_the_guard(assert_valid):
+    # 0 and null both mean "no transport byte guard"; 0 normalizes to None so the
+    # fetchers keep a single unbounded representation.
+    r = FetchRequest(url="https://x.test/", max_bytes=0)
+    assert r.max_bytes is None
+    assert_valid(_json(r), FETCH_REQUEST_REF)
+    assert FetchRequest(url="https://x.test/", max_bytes=None).max_bytes is None
+
+
 def test_fetch_request_rejects_non_http_scheme():
     import pytest
     from pydantic import ValidationError

@@ -212,7 +212,8 @@ class SearchRouter:
             )
 
         docs = self._filter_sites(dedupe(tagged), request)  # type: ignore[arg-type]
-        scored = fuse(docs, request.fusion)[: request.max_total_results]
+        # max_total_results=0 means uncapped: slice by None so every fused doc survives.
+        scored = fuse(docs, request.fusion)[: request.max_total_results or None]
 
         results = [
             ResultItem(

@@ -1,6 +1,6 @@
 """Pydantic models for the Layer-1 search port.
 
-These mirror ``contracts/search.schema.json`` (search@1.0.0). The field names are
+These mirror ``contracts/search.schema.json`` (search@1.1.0). The field names are
 capability-named (snippet, fused_score, sources); each backend adapter maps its
 native shape onto these models.
 """
@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SEARCH_CONTRACT_VERSION = "1.0.0"
+SEARCH_CONTRACT_VERSION = "1.1.0"
 
 SafeSearch = Literal["off", "moderate", "strict"]
 ResultType = Literal["web", "news"]
@@ -59,7 +59,7 @@ class SearchRequest(BaseModel):
     exclude_sites: list[str] = Field(default_factory=list)
     result_type: ResultType = "web"
     engines: list[str] | None = None
-    max_total_results: int = Field(default=20, ge=1)
+    max_total_results: int = Field(default=20, ge=0)  # 0 = no cap after fusion
     fusion: Fusion = Field(default_factory=Fusion)
     egress: Egress | None = None
     engine_overrides: dict[str, dict] = Field(default_factory=dict)

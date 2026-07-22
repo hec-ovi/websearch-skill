@@ -29,7 +29,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 def test_contract_version_matches_the_models():
     schema = json.loads((ROOT / "contracts" / "agent-io.schema.json").read_text())
-    assert schema["x-contract-version"] == AGENTIO_CONTRACT_VERSION == "1.0.0"
+    assert schema["x-contract-version"] == AGENTIO_CONTRACT_VERSION == "1.1.0"
 
 
 def test_search_request_validates(assert_valid):

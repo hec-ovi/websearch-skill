@@ -134,6 +134,14 @@ def test_request_contract_valid(assert_valid):
     assert_valid(req, ARXIV_SEARCH_REQUEST_REF)
 
 
+def test_zero_max_results_means_the_api_maximum(assert_valid):
+    req = ArxivSearchRequest(query="x", max_results=0)
+    assert req.max_results == 2000
+    assert_valid(req.model_dump(mode="json"), ARXIV_SEARCH_REQUEST_REF)
+    # Values above the old convenience cap (50) are legal now, up to the API ceiling.
+    assert ArxivSearchRequest(query="x", max_results=500).max_results == 500
+
+
 def test_429_retries_then_succeeds_honoring_retry_after():
     slept: list[float] = []
     responses = [_Resp("", 429, {"retry-after": "1"}), _Resp(ATOM, 200)]
@@ -215,7 +223,8 @@ def test_cli_arxiv_human(monkeypatch, capsys):
 
 
 def test_cli_arxiv_invalid_max_results(capsys):
-    rc = main(["arxiv", "x", "--max-results", "999", "--json"])
+    # Above the arXiv API's own 2000-per-request ceiling.
+    rc = main(["arxiv", "x", "--max-results", "9999", "--json"])
     assert rc == 1
     out = json.loads(capsys.readouterr().out)
     assert out["ok"] is False
@@ -246,7 +255,7 @@ def test_mcp_arxiv_search(monkeypatch):
     assert out["meta"]["layer"] == "arxiv"
     assert len(out["data"]["papers"]) == 2
 
-    bad = mcp_server.arxiv_search(query="x", max_results=999)
+    bad = mcp_server.arxiv_search(query="x", max_results=9999)
     assert bad["ok"] is False
     assert bad["error"]["code"] == errors.INVALID_REQUEST
 

@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-FETCH_CONTRACT_VERSION = "1.1.0"
+FETCH_CONTRACT_VERSION = "1.2.0"
 EXTRACT_CONTRACT_VERSION = "1.0.0"
 
 # Default transport guard: bound how much of a response we buffer/hand downstream.
@@ -77,7 +77,7 @@ class FetchRequest(BaseModel):
     proxy: Proxy | None = None
     user_agent: str | None = None
     screenshot: bool = False
-    max_bytes: int | None = Field(default=DEFAULT_MAX_BYTES, ge=1)
+    max_bytes: int | None = Field(default=DEFAULT_MAX_BYTES, ge=0)
     allow_private_hosts: bool = False
     politeness: Politeness = Field(default_factory=Politeness)
 
@@ -87,6 +87,13 @@ class FetchRequest(BaseModel):
         if urlsplit(v).scheme.lower() not in ("http", "https"):
             raise ValueError("url must be an absolute http(s) URL")
         return v
+
+    @field_validator("max_bytes")
+    @classmethod
+    def _zero_means_unbounded(cls, v: int | None) -> int | None:
+        # 0 and None both mean "no transport byte guard"; normalize to None so the
+        # fetchers keep a single unbounded representation.
+        return None if v == 0 else v
 
 
 class FetchResult(BaseModel):

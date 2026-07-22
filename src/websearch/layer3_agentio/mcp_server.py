@@ -170,7 +170,7 @@ def web_search(
     Args:
         query: The search query, e.g. "rust ownership model" or "site:nature.com crispr".
         max_results: How many results to return (default 8). Raise for research, lower
-            for a quick lookup.
+            for a quick lookup; 0 means no cap (everything the engines returned).
         detail: "concise" (default) omits per-result engines and score to save tokens;
             "detailed" includes them.
         country: ISO 3166-1 alpha-2 country code (e.g. "us"); omit for engine default.
@@ -230,7 +230,9 @@ def web_fetch(
     Args:
         url: An absolute http(s) URL.
         page: 1-based page over the token-budget pagination (default 1).
-        page_size_tokens: Soft per-page token budget (default 4000).
+        page_size_tokens: Soft per-page token budget (default 4000). 0 disables the
+            budget: the whole document comes back as one page (mind your harness's own
+            tool-output cap; the paged mode exists to stay under such caps losslessly).
         tier: Fetch tier: "auto" (default) escalates only on a detected anti-bot block.
         datamark: When true, interleave a marker between words inside the fence for
             higher prompt-injection resistance (default false).
@@ -279,7 +281,8 @@ def web_open(
     Args:
         handle: A handle from a prior result (``site~shorthash``) or the page URL.
         page: 1-based page to return (default 1).
-        page_size_tokens: Soft per-page token budget (default 4000).
+        page_size_tokens: Soft per-page token budget (default 4000). 0 disables the
+            budget: the whole stored document as one page.
         datamark: Interleave a marker between words inside the fence (default false).
 
     Returns:
@@ -325,7 +328,8 @@ def arxiv_search(
     Args:
         query: The search terms, e.g. "diffusion models for protein design".
         field: Which field to match: "all" (default), "title", "author", or "abstract".
-        max_results: How many papers to return, 1..50 (default 10).
+        max_results: How many papers to return, up to 2000 (default 10). 0 asks for
+            the arXiv API's own per-request maximum (2000).
         start: 0-based offset for paging through more results (default 0).
         sort_by: "relevance" (default), "lastUpdatedDate", or "submittedDate" (newest).
         sort_order: "descending" (default) or "ascending".
@@ -386,7 +390,8 @@ def github_search(
         language: Restrict to a language, e.g. "Rust" (appended as language:Rust).
         sort: "stars" (default), "forks", "updated", or "best-match" (GitHub relevance).
         order: "desc" (default) or "asc".
-        per_page: How many repos to return, 1..100 (default 10).
+        per_page: How many repos to return, 1..100 (default 10). 0 asks for GitHub's
+            own maximum page size (100).
 
     Returns:
         An Envelope whose data has ``query``, ``total_count``, ``incomplete_results``, and

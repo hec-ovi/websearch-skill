@@ -14,11 +14,13 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-AGENTIO_CONTRACT_VERSION = "1.0.0"
+AGENTIO_CONTRACT_VERSION = "1.1.0"
 
 # Engineering defaults (NOT documented platform constants). 8 results balances recall
 # against the per-call token budget; 4000-token pages stay well under the 25,000-token
-# tool-output cap some harnesses (e.g. Claude Code) impose.
+# tool-output cap some harnesses (e.g. Claude Code) impose. On both knobs, 0 means
+# "no limit": max_results=0 returns every fused hit, page_size_tokens=0 returns the
+# whole body as a single page.
 DEFAULT_MAX_RESULTS = 8
 DEFAULT_PAGE_SIZE_TOKENS = 4000
 DEFAULT_CHARS_PER_TOKEN = 4.0
@@ -36,7 +38,7 @@ class AgentSearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     query: str = Field(min_length=1)
-    max_results: int = Field(default=DEFAULT_MAX_RESULTS, ge=1)
+    max_results: int = Field(default=DEFAULT_MAX_RESULTS, ge=0)  # 0 = no cap
     offset: int = Field(default=0, ge=0)
     detail: Detail = "concise"
     engines: list[str] | None = None
@@ -87,7 +89,7 @@ class AgentFetchRequest(BaseModel):
 
     url: str = Field(min_length=1)
     page: int = Field(default=1, ge=1)
-    page_size_tokens: int = Field(default=DEFAULT_PAGE_SIZE_TOKENS, ge=1)
+    page_size_tokens: int = Field(default=DEFAULT_PAGE_SIZE_TOKENS, ge=0)  # 0 = one page
     tier: FetchTier = "auto"
     timeout_ms: int = Field(default=20000, ge=1)
     allow_private_hosts: bool = False
@@ -100,7 +102,7 @@ class AgentOpenRequest(BaseModel):
 
     handle: str = Field(min_length=1)
     page: int = Field(default=1, ge=1)
-    page_size_tokens: int = Field(default=DEFAULT_PAGE_SIZE_TOKENS, ge=1)
+    page_size_tokens: int = Field(default=DEFAULT_PAGE_SIZE_TOKENS, ge=0)  # 0 = one page
     datamark: bool = False
     chars_per_token: float = Field(default=DEFAULT_CHARS_PER_TOKEN, gt=0.0)
 

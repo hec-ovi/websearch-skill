@@ -18,6 +18,7 @@ from tests.conftest import (
     ARTICLE_HTML,
     DDGS_ROWS,
     FakeDDGS,
+    ddgs_factory,
 )
 from websearch.envelope import ok_envelope
 from websearch.layer2_format import StoreConfig, fts5_available
@@ -98,6 +99,19 @@ def test_next_offset_is_null_honest(agent):
     assert env.data["next_offset"] is None
 
 
+def test_web_search_zero_max_results_returns_every_fused_hit():
+    rows = [
+        {"title": f"T{i}", "href": f"https://example.com/p{i}", "body": "b"} for i in range(30)
+    ]
+    agent = build_agent_io(
+        enable_ddgs=True, ddgs_factory=ddgs_factory(rows), enable_curl_cffi=False
+    )
+    capped = agent.web_search(AgentSearchRequest(query="rust", max_results=5))
+    uncapped = agent.web_search(AgentSearchRequest(query="rust", max_results=0))
+    assert capped.data["total_returned"] == 5
+    assert uncapped.data["total_returned"] == 30
+
+
 def test_search_handle_equals_fetch_handle(agent, httpx_mock):
     httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
     fenv = agent.web_fetch(AgentFetchRequest(url=FETCH_URL))
@@ -130,6 +144,15 @@ def test_web_fetch_paginates_a_large_body(agent, httpx_mock):
     assert page["page"] == 1
 
 
+def test_web_fetch_zero_page_size_returns_the_whole_body_as_one_page(agent, httpx_mock):
+    httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
+    env = agent.web_fetch(AgentFetchRequest(url=FETCH_URL, page_size_tokens=0))
+    page = env.data["pages"][0]
+    assert page["total_pages"] == 1
+    assert page["has_more"] is False
+    assert "Ownership is the mechanism" in page["content"]
+
+
 def test_web_fetch_invalid_url_is_fetch_failed(agent):
     env = agent.web_fetch(AgentFetchRequest(url="ftp://nope"))
     assert not env.ok
@@ -149,6 +172,17 @@ def test_fetch_then_open_by_handle_uses_cache(agent, httpx_mock):
     page = oenv.data["pages"][0]
     assert page["source"] == "cache"
     assert page["page"] == 2
+
+
+def test_open_with_zero_page_size_returns_the_whole_cached_body(agent, httpx_mock):
+    httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
+    fenv = agent.web_fetch(AgentFetchRequest(url=FETCH_URL, page_size_tokens=20))
+    assert fenv.data["pages"][0]["total_pages"] > 1
+    oenv = agent.web_open(AgentOpenRequest(handle=FETCH_URL, page_size_tokens=0))
+    page = oenv.data["pages"][0]
+    assert page["source"] == "cache"
+    assert page["total_pages"] == 1
+    assert page["has_more"] is False
 
 
 def test_open_by_url_also_resolves(agent, httpx_mock):

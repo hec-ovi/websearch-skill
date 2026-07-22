@@ -58,9 +58,9 @@
         "screenshot": { "type": "boolean", "default": false, "description": "Capture a screenshot (browser tiers only)." },
         "max_bytes": {
           "type": ["integer", "null"],
-          "minimum": 1,
+          "minimum": 0,
           "default": 10000000,
-          "description": "Transport guard ONLY: stop downloading a response body past this many bytes (defends against multi-GB transfers); defaults to 10 MB. This is NOT an output/LLM length cap; extracted content is never truncated. null removes the guard."
+          "description": "Transport guard ONLY: stop downloading a response body past this many bytes (defends against multi-GB transfers); defaults to 10 MB. This is NOT an output/LLM length cap; extracted content is never truncated. 0 or null removes the guard."
         },
         "allow_private_hosts": {
           "type": "boolean",

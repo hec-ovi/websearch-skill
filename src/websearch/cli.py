@@ -69,7 +69,9 @@ def _add_search_command(sub: Any) -> None:
         default="any",
         help="Recency filter (best-effort; each engine honors it differently).",
     )
-    sp.add_argument("--max-results", type=int, default=20, help="Result cap after fusion.")
+    sp.add_argument(
+        "--max-results", type=int, default=20, help="Result cap after fusion; 0 = no cap."
+    )
     sp.add_argument("--include-site", action="append", default=[], metavar="DOMAIN")
     sp.add_argument("--exclude-site", action="append", default=[], metavar="DOMAIN")
     sp.add_argument(
@@ -180,7 +182,7 @@ def _add_fetch_command(sub: Any) -> None:
     fp.add_argument(
         "--max-bytes",
         type=int,
-        help="Transport guard only, not a content cap (default 10 MB).",
+        help="Transport guard only, not a content cap (default 10 MB); 0 = no guard.",
     )
     fp.add_argument(
         "--allow-private-hosts",
@@ -557,7 +559,7 @@ def _add_websearch_command(sub: Any) -> None:
         "agentio Envelope. `search` is the lower-level Layer-1 surface.",
     )
     wp.add_argument("query")
-    wp.add_argument("--max-results", type=int, default=8)
+    wp.add_argument("--max-results", type=int, default=8, help="0 = no cap.")
     wp.add_argument("--detail", choices=["concise", "detailed"], default="concise")
     wp.add_argument("--language", help="ISO 639-1, e.g. en.")
     wp.add_argument("--country", help="ISO 3166-1 alpha-2, e.g. us.")
@@ -638,7 +640,12 @@ def _add_webfetch_command(sub: Any) -> None:
     )
     fp.add_argument("urls", nargs="+", help="One or more http(s) URLs.")
     fp.add_argument("--page", type=int, default=1, help="1-based page over the token pagination.")
-    fp.add_argument("--page-size-tokens", type=int, default=4000)
+    fp.add_argument(
+        "--page-size-tokens",
+        type=int,
+        default=4000,
+        help="Per-page token budget; 0 = the whole document as one page.",
+    )
     fp.add_argument("--tier", choices=["auto", "http", "browser", "stealth"], default="auto")
     fp.add_argument(
         "--datamark", action="store_true", help="Interleave a marker between words in the fence."
@@ -664,7 +671,7 @@ def _cmd_webfetch(args: argparse.Namespace) -> int:
                 as_json=args.json,
             )
     # web-fetch is multi-URL so it calls web_fetch_many with raw kwargs; validate the shared
-    # paging params through the request model here (page>=1, page_size_tokens>=1, etc.) so a
+    # paging params through the request model here (page>=1, page_size_tokens>=0, etc.) so a
     # bad --page yields a clean invalid_request rather than crashing deep in the facade.
     try:
         AgentFetchRequest(
@@ -714,7 +721,12 @@ def _add_webopen_command(sub: Any) -> None:
     )
     op.add_argument("handle", help="A handle (site~shorthash) or the page URL.")
     op.add_argument("--page", type=int, default=1)
-    op.add_argument("--page-size-tokens", type=int, default=4000)
+    op.add_argument(
+        "--page-size-tokens",
+        type=int,
+        default=4000,
+        help="Per-page token budget; 0 = the whole document as one page.",
+    )
     op.add_argument("--datamark", action="store_true")
     op.add_argument("--persist-path", help="The page-index file written by web-fetch.")
     op.add_argument("--quiet", action="store_true", help="Print only the fenced content.")
@@ -803,7 +815,12 @@ def _add_arxiv_command(sub: Any) -> None:
         default="all",
         help="Which arXiv field to match.",
     )
-    ap.add_argument("--max-results", type=int, default=10, help="1..50.")
+    ap.add_argument(
+        "--max-results",
+        type=int,
+        default=10,
+        help="Up to 2000 (the arXiv API per-request max); 0 = that maximum.",
+    )
     ap.add_argument("--start", type=int, default=0, help="0-based offset for paging.")
     ap.add_argument(
         "--sort-by",
@@ -829,7 +846,7 @@ def _cmd_arxiv(args: argparse.Namespace) -> int:
         return _emit_error(
             ARXIV_CONTRACT_VERSION,
             code=errors.INVALID_REQUEST,
-            message="invalid arxiv request (check --max-results is 1..50).",
+            message="invalid arxiv request (check --max-results is 0..2000).",
             layer="arxiv",
             as_json=args.json,
         )
@@ -885,7 +902,9 @@ def _add_github_command(sub: Any) -> None:
         help="best-match uses GitHub's relevance ranking.",
     )
     gp.add_argument("--order", choices=["asc", "desc"], default="desc")
-    gp.add_argument("--per-page", type=int, default=10, help="1..100.")
+    gp.add_argument(
+        "--per-page", type=int, default=10, help="1..100 (GitHub's max); 0 = that maximum."
+    )
     _add_proxy_arg(gp)
     gp.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
 
@@ -903,7 +922,7 @@ def _cmd_github(args: argparse.Namespace) -> int:
         return _emit_error(
             GITHUB_CONTRACT_VERSION,
             code=errors.INVALID_REQUEST,
-            message="invalid github request (check --per-page is 1..100).",
+            message="invalid github request (check --per-page is 0..100).",
             layer="github",
             as_json=args.json,
         )

@@ -3,7 +3,7 @@
   "$id": "https://github.com/hec-ovi/websearch-skill/contracts/search.schema.json",
   "title": "Layer 1 - Search port contract",
   "description": "Capability-named port for multi-engine search aggregation. Backends (SearXNG, ddgs, keyed APIs) map their native shapes onto this port; the SearXNG title/url/content/engine shape is one adapter's mapping, not the port itself.",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "1.1.0",
   "$defs": {
     "SearchRequest": {
       "type": "object",
@@ -40,7 +40,7 @@
           "default": null,
           "description": "null = router default set."
         },
-        "max_total_results": { "type": "integer", "minimum": 1, "default": 20, "description": "Cap applied after fusion." },
+        "max_total_results": { "type": "integer", "minimum": 0, "default": 20, "description": "Cap applied after fusion; 0 = no cap." },
         "fusion": {
           "type": "object",
           "additionalProperties": false,

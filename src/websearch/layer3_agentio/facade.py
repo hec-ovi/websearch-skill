@@ -99,10 +99,13 @@ class AgentIO:
         # no_engines_enabled, so a misunderstanding never returns zero results.
         engines, engine_warning = self._resolve_engines(req.engines)
 
+        # max_results=0 lifts the post-fusion cap (max_total_results=0 in Layer 1). The
+        # per-engine ask still needs a concrete number; 50 is about what a keyless engine
+        # will hand over in one request, so "uncapped" means "everything the engines gave".
         try:
             search_req = SearchRequest(
                 query=query,
-                count=max(req.max_results, 10),
+                count=max(req.max_results, 10) if req.max_results else 50,
                 offset=req.offset,
                 country=req.country,
                 language=req.language,

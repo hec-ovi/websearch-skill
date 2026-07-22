@@ -6,6 +6,10 @@ single ``web_fetch`` response stays under a harness tool-output cap (Claude Code
 the split is LOSSLESS (the pages concatenate back to the exact original) and every page
 is reachable via ``web_open``. Splitting prefers line boundaries; a single line longer
 than the budget is hard-split so the guarantee holds for any input.
+
+``page_size_tokens=0`` disables the budget entirely: the whole body comes back as one
+page. That is for harnesses with no tool-output cap of their own; under a capped harness
+it trades the lossless split for a lossy harness-side truncation.
 """
 
 from __future__ import annotations
@@ -13,6 +17,8 @@ from __future__ import annotations
 
 def paginate(markdown: str, *, page_size_tokens: int, chars_per_token: float = 4.0) -> list[str]:
     """Split ``markdown`` into pages. ``"".join(paginate(md, ...)) == md`` always holds."""
+    if page_size_tokens <= 0:
+        return [markdown]
     budget = max(1, int(page_size_tokens * chars_per_token))
     if len(markdown) <= budget:
         return [markdown]

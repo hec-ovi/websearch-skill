@@ -50,3 +50,13 @@ def test_empty_document_is_a_single_empty_page():
 
 def test_small_document_is_a_single_page():
     assert paginate("short enough", page_size_tokens=100) == ["short enough"]
+
+
+@pytest.mark.parametrize("md", _CASES)
+def test_zero_budget_disables_pagination(md):
+    # 0 = no budget: the whole body as one page, still lossless by construction.
+    assert paginate(md, page_size_tokens=0) == [md]
+
+
+def test_zero_budget_on_an_empty_document_still_yields_one_page():
+    assert paginate("", page_size_tokens=0) == [""]

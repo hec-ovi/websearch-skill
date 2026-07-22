@@ -50,7 +50,7 @@ There are no engine-selection flags here: `web-search` is plug-and-play and just
 keyless default. Use `--site HOST` to restrict to one host (the only keyless way to find
 Reddit or X content: `--site reddit.com`, `--site x.com`). This returns one ranked page;
 the keyless backends do not page results reliably, so to get different results refine the
-query.
+query. `--max-results 0` lifts the cap and returns everything the engines gave.
 
 ### web-fetch: read a URL
 
@@ -68,7 +68,10 @@ Fetches each URL, extracts clean Markdown, and returns ONE token-budget page per
 wrapped in an untrusted-content fence (see Security). Long pages are split losslessly:
 the response reports `total_pages` and `has_more`, and the returned `handle` lets you read
 the rest with `web-open`. No content is dropped. Pass `--persist-path FILE` (the same file
-to a later `web-open`) so a separate process can page through it.
+to a later `web-open`) so a separate process can page through it. `--page-size-tokens 0`
+disables the paging budget and returns the whole document as one page; only do that when
+your harness has no tool-output cap of its own, since the paged mode exists to stay under
+such caps losslessly.
 
 ### web-open: page through a fetched document
 
@@ -80,7 +83,7 @@ websearch web-open "<handle-or-url>" [--page 2] [--page-size-tokens 4000]
 Returns another page of a document you already fetched, from the cache, without touching
 the network. Pass the `handle` (or URL) from a prior `web-search`/`web-fetch` result. If
 the page was not fetched first, it returns a `not_opened` error telling you to `web-fetch`
-the URL.
+the URL. `--page-size-tokens 0` returns the whole stored document as one page.
 
 ### arxiv: search academic papers
 
@@ -93,7 +96,8 @@ websearch arxiv "<query>" [--field all|title|author|abstract] [--max-results 10]
 Keyless arXiv search. Returns structured papers: title, authors, abstract, categories,
 published and updated dates, and abstract and PDF links. Use it for academic papers or
 preprints, or when the user mentions arXiv. `--field author "Vaswani"` targets one field;
-`--sort-by submittedDate` gets the newest.
+`--sort-by submittedDate` gets the newest. `--max-results` goes up to 2000 (the arXiv
+API per-request maximum); 0 requests that maximum.
 
 ### github: search code repositories
 
@@ -106,7 +110,8 @@ Keyless GitHub repository search. Returns typed fields you can sort on: full nam
 forks, language, topics, and update date. Use it to find libraries, tools, or projects.
 `--language Rust` filters by language. Unauthenticated search is about 10 requests per
 minute; on a rate limit it returns a `rate_limited` error (wait and retry, do not loop).
-Repository search only; code search is not available keyless.
+Repository search only; code search is not available keyless. `--per-page 0` requests
+GitHub's own maximum page size (100).
 
 ## When to use which
 

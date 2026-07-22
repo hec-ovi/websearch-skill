@@ -1,4 +1,4 @@
-"""Pydantic mirrors of contracts/github.schema.json (github@1.0.0)."""
+"""Pydantic mirrors of contracts/github.schema.json (github@1.1.0)."""
 
 from __future__ import annotations
 
@@ -6,8 +6,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-GITHUB_CONTRACT_VERSION = "1.0.0"
+GITHUB_CONTRACT_VERSION = "1.1.0"
 DEFAULT_PER_PAGE = 10
+# GitHub's own search-API ceiling ("The number of results per page (max 100)").
+# per_page=0 asks for that maximum; nothing above it exists on the API side.
 MAX_PER_PAGE = 100
 
 
@@ -18,7 +20,12 @@ class GithubSearchRequest(BaseModel):
     language: str | None = None
     sort: Literal["best-match", "stars", "forks", "updated"] = "stars"
     order: Literal["asc", "desc"] = "desc"
-    per_page: int = Field(default=DEFAULT_PER_PAGE, ge=1, le=MAX_PER_PAGE)
+    per_page: int = Field(default=DEFAULT_PER_PAGE, ge=0, le=MAX_PER_PAGE)
+
+    @field_validator("per_page")
+    @classmethod
+    def _zero_means_api_max(cls, v: int) -> int:
+        return MAX_PER_PAGE if v == 0 else v
 
     @field_validator("query")
     @classmethod

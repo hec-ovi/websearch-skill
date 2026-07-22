@@ -71,7 +71,7 @@ Two decoupled sub-ports, each independently swappable.
 
 Neural extract engines (`crawl4ai`, `jina_readerlm`, and others) are named in the contract enum but stay opt-in. The default dependency closure is permissive: Apache-2.0 (trafilatura) plus MIT/BSD/MPL deps.
 
-There is **no output-length cap anywhere**. `content_markdown` is never truncated; `--max-bytes` is a transport guard only, not a content cap.
+There is **no output-length cap anywhere**. `content_markdown` is never truncated; `--max-bytes` is a transport guard only, not a content cap, and `--max-bytes 0` lifts even that. The same convention runs through every knob: `--max-results 0`, `--page-size-tokens 0`, and `--per-page 0` mean "no limit" (or the provider's own maximum where one exists, like GitHub's 100 per page and arXiv's 2000 per request).
 
 ## Layer 2B: Format + Store
 

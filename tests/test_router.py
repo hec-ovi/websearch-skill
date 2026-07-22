@@ -163,6 +163,13 @@ def test_max_total_results_caps_output():
     assert len(env.data["results"]) == 3
 
 
+def test_max_total_results_zero_means_no_cap():
+    results = [raw(f"https://x/{i}", i) for i in range(1, 31)]
+    router = SearchRouter([FakeAdapter("a", results)])
+    env = router.search(SearchRequest(query="q", max_total_results=0))
+    assert len(env.data["results"]) == 30
+
+
 def test_responded_with_no_results_is_ok_and_empty():
     router = SearchRouter([FakeAdapter("a", [])])
     env = router.search(SearchRequest(query="q"))

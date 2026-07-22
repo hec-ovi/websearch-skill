@@ -129,6 +129,12 @@ def test_request_contract_valid(assert_valid):
     assert_valid(req, GITHUB_SEARCH_REQUEST_REF)
 
 
+def test_zero_per_page_means_the_api_maximum(assert_valid):
+    req = GithubSearchRequest(query="x", per_page=0)
+    assert req.per_page == 100
+    assert_valid(req.model_dump(mode="json"), GITHUB_SEARCH_REQUEST_REF)
+
+
 def test_403_rate_limit_with_reset():
     reset = str(int(time.time()) + 42)
     env = build_github_tool(

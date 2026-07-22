@@ -3,7 +3,7 @@
   "$id": "https://github.com/hec-ovi/websearch-skill/contracts/github.schema.json",
   "title": "Extra tool - GitHub repository search contract",
   "description": "Keyless GitHub repository search over the official unauthenticated REST search API (api.github.com/search/repositories). Repo search only; code search requires auth and is out of scope. Emits the same Envelope as every other layer.",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "1.1.0",
   "$defs": {
     "GithubSearchRequest": {
       "type": "object",
@@ -18,7 +18,7 @@
           "description": "best-match omits the sort param (GitHub relevance)."
         },
         "order": { "enum": ["asc", "desc"], "default": "desc" },
-        "per_page": { "type": "integer", "minimum": 1, "maximum": 100, "default": 10 }
+        "per_page": { "type": "integer", "minimum": 0, "maximum": 100, "default": 10, "description": "1..100 (the GitHub search API max); 0 = that maximum." }
       }
     },
 
