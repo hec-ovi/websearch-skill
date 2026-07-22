@@ -40,6 +40,22 @@ def _httpx_get(url: str, *, params: dict, headers: dict, timeout_s: float) -> An
     return httpx.get(url, params=params, headers=headers, timeout=timeout_s, follow_redirects=True)
 
 
+def _proxied_httpx_get(proxy: str) -> HttpGet:
+    def get(url: str, *, params: dict, headers: dict, timeout_s: float) -> Any:
+        import httpx
+
+        return httpx.get(
+            url,
+            params=params,
+            headers=headers,
+            timeout=timeout_s,
+            follow_redirects=True,
+            proxy=proxy,
+        )
+
+    return get
+
+
 def _header(resp: Any, name: str) -> str | None:
     headers = getattr(resp, "headers", {}) or {}
     try:
@@ -261,5 +277,10 @@ class GithubTool:
         )
 
 
-def build_github_tool(*, http_get: HttpGet | None = None, timeout_s: float = 15.0) -> GithubTool:
+def build_github_tool(
+    *, http_get: HttpGet | None = None, timeout_s: float = 15.0, proxy: str | None = None
+) -> GithubTool:
+    # An injected http_get owns its transport; proxy applies to the default only.
+    if http_get is None and proxy:
+        http_get = _proxied_httpx_get(proxy)
     return GithubTool(http_get=http_get or _httpx_get, timeout_s=timeout_s)

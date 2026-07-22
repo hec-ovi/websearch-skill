@@ -28,6 +28,7 @@ from fastmcp import FastMCP
 from .. import errors
 from ..envelope import Envelope, error_envelope
 from ..layer2_format import StoreConfig
+from ..proxy import ProxyConfigError, resolve_proxy
 from ..tool_arxiv import ARXIV_CONTRACT_VERSION, ArxivSearchRequest, ArxivTool, build_arxiv_tool
 from ..tool_github import (
     GITHUB_CONTRACT_VERSION,
@@ -77,7 +78,7 @@ def _arxiv() -> ArxivTool:
     if _ARXIV is None:
         with _LOCK:
             if _ARXIV is None:
-                _ARXIV = build_arxiv_tool()
+                _ARXIV = build_arxiv_tool(proxy=resolve_proxy())
     return _ARXIV
 
 
@@ -86,7 +87,7 @@ def _github() -> GithubTool:
     if _GITHUB is None:
         with _LOCK:
             if _GITHUB is None:
-                _GITHUB = build_github_tool()
+                _GITHUB = build_github_tool(proxy=resolve_proxy())
     return _GITHUB
 
 
@@ -100,6 +101,7 @@ def _agent() -> AgentIO:
                 _AGENT = build_agent_io(
                     searxng_url=os.environ.get("WEBSEARCH_SEARXNG_URL"),
                     store_config=StoreConfig(persist_path=os.environ.get("WEBSEARCH_PERSIST_PATH")),
+                    proxy=resolve_proxy(),
                 )
     return _AGENT
 
@@ -124,6 +126,16 @@ def _safe(call: Callable[[], Envelope], *, contract: str, layer: str, backend: s
     """
     try:
         return call().model_dump(mode="json")
+    except ProxyConfigError as exc:
+        # A misconfigured WEBSEARCH_PROXY is the caller's environment, not a server bug.
+        return error_envelope(
+            contract,
+            code=errors.INVALID_REQUEST,
+            message=str(exc),
+            retriable=False,
+            layer=layer,
+            backend=backend,
+        ).model_dump(mode="json")
     except Exception as exc:
         return error_envelope(
             contract,

@@ -46,11 +46,13 @@ class SearxngAdapter(EngineAdapter):
         engines: list[str] | None = None,
         client: httpx.Client | None = None,
         timeout_s: float = 8.0,
+        proxy: str | None = None,
     ):
         self.base_url = (base_url or "").rstrip("/")
         self._engines = engines
         self._client = client
         self._timeout_s = timeout_s
+        self._proxy = proxy
 
     def enabled(self) -> bool:
         return bool(self.base_url)
@@ -109,7 +111,10 @@ class SearxngAdapter(EngineAdapter):
         # Honor the request's per-engine timeout when we own the client.
         timeout_s = request.timeout_ms / 1000.0 if self._client is None else self._timeout_s
         client = self._client or httpx.Client(
-            timeout=timeout_s, follow_redirects=True, headers={"User-Agent": _USER_AGENT}
+            timeout=timeout_s,
+            follow_redirects=True,
+            headers={"User-Agent": _USER_AGENT},
+            proxy=self._proxy,
         )
         owns_client = self._client is None
         try:

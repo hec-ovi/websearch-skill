@@ -6,6 +6,19 @@ semantic versioning once it reaches a tagged release.
 
 ## [Unreleased]
 
+### Added
+
+- Optional egress proxy for every network path (search engines, both fetch tiers,
+  arxiv, github, and the MCP tools). `WEBSEARCH_PROXY` takes a proxy URL
+  (`socks5h://`, `socks5://`, `http://`, `https://`), the shorthand `nordvpn`
+  (expands to NordVPN SOCKS5 from the `NORDVPN_USER` / `NORDVPN_PASS` service
+  credentials, with `NORDVPN_HOST` to pick a server), or `off`. Each network command
+  also takes `--proxy <url|nordvpn|off>` to override the variable per run; the
+  existing per-request `fetch --proxy` keeps precedence over the process-wide
+  default. Off by default; a misconfigured proxy surfaces as a clean
+  `invalid_request` envelope. httpx now installs with the `[socks]` extra so SOCKS5
+  URLs work out of the box.
+
 ### Changed
 
 - fastmcp is now a base dependency, not the optional `mcp` extra, so `websearch mcp`,

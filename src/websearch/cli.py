@@ -37,8 +37,18 @@ from .layer3_agentio import (
     AgentSearchRequest,
     build_agent_io,
 )
+from .proxy import ProxyConfigError, as_fetch_proxy, resolve_proxy
 from .tool_arxiv import ARXIV_CONTRACT_VERSION, ArxivSearchRequest, build_arxiv_tool
 from .tool_github import GITHUB_CONTRACT_VERSION, GithubSearchRequest, build_github_tool
+
+
+def _add_proxy_arg(p: Any) -> None:
+    p.add_argument(
+        "--proxy",
+        help="Egress proxy: a URL (socks5h://user:pass@host:1080, http://...), "
+        "'nordvpn' (SOCKS5 from NORDVPN_USER/NORDVPN_PASS service credentials), or "
+        "'off'. Default: the WEBSEARCH_PROXY environment variable.",
+    )
 
 
 def _add_search_command(sub: Any) -> None:
@@ -68,6 +78,7 @@ def _add_search_command(sub: Any) -> None:
         help="SearXNG base URL (or set WEBSEARCH_SEARXNG_URL).",
     )
     sp.add_argument("--no-ddgs", action="store_true", help="Disable the ddgs fallback engine.")
+    _add_proxy_arg(sp)
     sp.add_argument(
         "--ddgs-backends",
         help="Which keyless engines ddgs queries, comma-separated (default auto = all). "
@@ -112,6 +123,7 @@ def _cmd_search(args: argparse.Namespace) -> int:
         searxng_url=args.searxng_url,
         enable_ddgs=not args.no_ddgs,
         ddgs_backend=args.ddgs_backends or "auto",
+        proxy=resolve_proxy(args.proxy),
     )
     envelope = router.search(request)
     payload = envelope.model_dump(mode="json")
@@ -164,7 +176,7 @@ def _add_fetch_command(sub: Any) -> None:
     )
     fp.add_argument("--timeout-ms", type=int, default=20000)
     fp.add_argument("--user-agent", help="Override the request User-Agent.")
-    fp.add_argument("--proxy", help="Egress proxy URL (e.g. socks5h://127.0.0.1:1080).")
+    _add_proxy_arg(fp)
     fp.add_argument(
         "--max-bytes",
         type=int,
@@ -223,10 +235,7 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
             as_json=args.json,
         )
 
-    proxy = None
-    if args.proxy:
-        ptype = "socks5" if args.proxy.lower().startswith("socks") else "http"
-        proxy = {"url": args.proxy, "type": ptype}
+    proxy = as_fetch_proxy(resolve_proxy(args.proxy))
 
     fetch_kwargs: dict[str, Any] = dict(
         url=args.url,
@@ -391,6 +400,7 @@ def _add_open_command(sub: Any) -> None:
         action="store_true",
         help="Permit private/loopback/metadata addresses (SSRF guard off).",
     )
+    _add_proxy_arg(op)
     op.add_argument("--quiet", action="store_true", help="Print only the Markdown document.")
     op.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
 
@@ -424,7 +434,7 @@ def _cmd_open(args: argparse.Namespace) -> int:
                 as_json=args.json,
             )
 
-    pipeline = build_pipeline()
+    pipeline = build_pipeline(proxy=resolve_proxy(args.proxy))
     results: list[ResultInput] = []
     pages: list[PageInput] = []
     warnings: list[str] = []
@@ -559,6 +569,7 @@ def _add_websearch_command(sub: Any) -> None:
     # zero-config default and needs no engine flags. Engine/backend selection lives on the
     # lower-level `search` command for debugging, not on this plug-and-play agent surface.
     wp.add_argument("--searxng-url", default=os.environ.get("WEBSEARCH_SEARXNG_URL"))
+    _add_proxy_arg(wp)
     wp.add_argument("--json", action="store_true", help="Emit the raw agentio Envelope.")
 
 
@@ -583,7 +594,7 @@ def _cmd_websearch(args: argparse.Namespace) -> int:
             layer="agentio",
             as_json=args.json,
         )
-    aio = build_agent_io(searxng_url=args.searxng_url)
+    aio = build_agent_io(searxng_url=args.searxng_url, proxy=resolve_proxy(args.proxy))
     env = aio.web_search(req)
     payload = env.model_dump(mode="json")
     if args.json:
@@ -637,6 +648,7 @@ def _add_webfetch_command(sub: Any) -> None:
     fp.add_argument(
         "--persist-path", help="Persist the page index so web-open resolves handles across runs."
     )
+    _add_proxy_arg(fp)
     fp.add_argument("--quiet", action="store_true", help="Print only the fenced content.")
     fp.add_argument("--json", action="store_true", help="Emit the raw agentio Envelope.")
 
@@ -673,7 +685,9 @@ def _cmd_webfetch(args: argparse.Namespace) -> int:
             as_json=args.json,
         )
     aio = build_agent_io(
-        enable_ddgs=False, store_config=StoreConfig(persist_path=args.persist_path)
+        enable_ddgs=False,
+        store_config=StoreConfig(persist_path=args.persist_path),
+        proxy=resolve_proxy(args.proxy),
     )
     env = aio.web_fetch_many(
         args.urls,
@@ -797,6 +811,7 @@ def _add_arxiv_command(sub: Any) -> None:
         default="relevance",
     )
     ap.add_argument("--sort-order", choices=["ascending", "descending"], default="descending")
+    _add_proxy_arg(ap)
     ap.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
 
 
@@ -818,7 +833,7 @@ def _cmd_arxiv(args: argparse.Namespace) -> int:
             layer="arxiv",
             as_json=args.json,
         )
-    env = build_arxiv_tool().search(req)
+    env = build_arxiv_tool(proxy=resolve_proxy(args.proxy)).search(req)
     payload = env.model_dump(mode="json")
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -871,6 +886,7 @@ def _add_github_command(sub: Any) -> None:
     )
     gp.add_argument("--order", choices=["asc", "desc"], default="desc")
     gp.add_argument("--per-page", type=int, default=10, help="1..100.")
+    _add_proxy_arg(gp)
     gp.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
 
 
@@ -891,7 +907,7 @@ def _cmd_github(args: argparse.Namespace) -> int:
             layer="github",
             as_json=args.json,
         )
-    env = build_github_tool().search(req)
+    env = build_github_tool(proxy=resolve_proxy(args.proxy)).search(req)
     payload = env.model_dump(mode="json")
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -1001,6 +1017,16 @@ def main(argv: list[str] | None = None) -> int:
         return 2  # unreachable; argparse.error exits
     try:
         return handler(args)
+    except ProxyConfigError as exc:
+        # A misconfigured proxy (e.g. 'nordvpn' without service credentials) is caller
+        # configuration, not an internal failure.
+        return _emit_error(
+            AGENTIO_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=str(exc),
+            layer="cli",
+            as_json=getattr(args, "json", False),
+        )
     except Exception as exc:
         # Final backstop: a command must never surface a raw traceback to the user. Any
         # unexpected error becomes a clean internal_error (honoring --json when present).

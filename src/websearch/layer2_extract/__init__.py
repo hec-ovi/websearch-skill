@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from ..proxy import as_fetch_proxy
 from .exceptions import DependencyMissing
 from .extractors.trafilatura_extractor import TrafilaturaExtractor
 from .fetch_router import FetchRouter
@@ -77,11 +78,17 @@ def build_pipeline(
     impersonate: str = "chrome",
     extractor: ExtractAdapter | None = None,
     extra_fetchers: list[FetchAdapter] | None = None,
+    proxy: str | None = None,
 ) -> FetchExtractPipeline:
+    """``proxy`` is a process-wide egress default: any FetchRequest that does not carry
+    its own ``proxy`` is fetched through this URL (both tiers honor it)."""
     router = build_fetch_router(
         enable_curl_cffi=enable_curl_cffi,
         curl_cffi_getter=curl_cffi_getter,
         impersonate=impersonate,
         extra_fetchers=extra_fetchers,
     )
-    return FetchExtractPipeline(router, extractor or TrafilaturaExtractor())
+    default_proxy = Proxy(**as_fetch_proxy(proxy)) if proxy else None
+    return FetchExtractPipeline(
+        router, extractor or TrafilaturaExtractor(), default_proxy=default_proxy
+    )

@@ -509,20 +509,24 @@ def build_agent_io(
     chars_per_token: float = DEFAULT_CHARS_PER_TOKEN,
     router=None,
     pipeline=None,
+    proxy: str | None = None,
 ) -> AgentIO:
     """Wire an AgentIO with the default Layer-1 router and Layer-2A pipeline.
 
     Tests inject ``router``/``pipeline`` (or the ``*_factory``/``*_getter`` boundary
     fakes) to stand in for the network; production passes deployment config (searxng_url).
     ``ddgs_backend`` selects which keyless engines ddgs queries (e.g. "google,brave").
+    ``proxy`` routes search and fetch egress through one proxy URL; an injected
+    ``router``/``pipeline`` owns its own transport and is unaffected.
     """
     router = router or build_router(
         searxng_url=searxng_url,
         enable_ddgs=enable_ddgs,
         ddgs_factory=ddgs_factory,
         ddgs_backend=ddgs_backend,
+        proxy=proxy,
     )
     pipeline = pipeline or build_pipeline(
-        enable_curl_cffi=enable_curl_cffi, curl_cffi_getter=curl_cffi_getter
+        enable_curl_cffi=enable_curl_cffi, curl_cffi_getter=curl_cffi_getter, proxy=proxy
     )
     return AgentIO(router, pipeline, store_config=store_config, chars_per_token=chars_per_token)

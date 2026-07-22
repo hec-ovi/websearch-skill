@@ -22,17 +22,24 @@ class DdgsAdapter(EngineAdapter):
     name = "ddgs"
     correlation_group = GENERAL_AGGREGATOR
 
-    def __init__(self, ddgs_factory: Callable[[], Any] | None = None, *, backend: str = "auto"):
+    def __init__(
+        self,
+        ddgs_factory: Callable[[], Any] | None = None,
+        *,
+        backend: str = "auto",
+        proxy: str | None = None,
+    ):
         # ddgs_factory lets tests inject a fake DDGS (the external service boundary).
         self._factory = ddgs_factory
         self._backend = backend
+        self._proxy = proxy
 
     def _make_client(self) -> Any:
         if self._factory is not None:
             return self._factory()
         from ddgs import DDGS
 
-        return DDGS()
+        return DDGS(proxy=self._proxy) if self._proxy else DDGS()
 
     def _region(self, request: SearchRequest) -> str | None:
         if request.country:

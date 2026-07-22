@@ -2137,7 +2137,7 @@ dependencies = [
     { name = "curl-cffi" },
     { name = "ddgs" },
     { name = "fastmcp" },
-    { name = "httpx" },
+    { name = "httpx", extra = ["socks"] },
     { name = "pydantic" },
     { name = "trafilatura" },
 ]
@@ -2164,7 +2164,7 @@ requires-dist = [
     { name = "ddgs", specifier = ">=9.0" },
     { name = "fastmcp", specifier = ">=3.4,<4" },
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=3.4,<4" },
-    { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx", extras = ["socks"], specifier = ">=0.27" },
     { name = "jsonschema", marker = "extra == 'schema'", specifier = ">=4.21" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "trafilatura", specifier = ">=2.1" },

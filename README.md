@@ -269,6 +269,20 @@ uv run websearch web-search "your query"      # now fuses SearXNG + ddgs
 
 The config in [`docker/searxng/`](docker/searxng/) is one container with the JSON API enabled and the bot limiter off (it is private and only your tool queries it), so no Valkey/Redis is needed. That folder's README has the details and a checklist for before you expose it beyond localhost.
 
+## Egress proxy (optional)
+
+Off by default. One switch, `WEBSEARCH_PROXY`, routes every network path (search engines, fetch tiers, arxiv, github, and the MCP tools) through a proxy:
+
+```bash
+export WEBSEARCH_PROXY=socks5h://user:pass@host:1080   # any proxy URL (http:// works too)
+export WEBSEARCH_PROXY=nordvpn                         # NordVPN shorthand, see below
+export WEBSEARCH_PROXY=off                             # or unset it: direct connection
+```
+
+The `nordvpn` shorthand builds the SOCKS5 URL for you from `NORDVPN_USER` and `NORDVPN_PASS`. These are the service credentials shown in the Nord Account dashboard under "Set up NordVPN manually", not your account login. `NORDVPN_HOST` picks a specific server (default `nl.socks.nordhold.net`; any of the official `*.socks.nordhold.net` hosts on port 1080 works).
+
+Every network command also takes `--proxy <url|nordvpn|off>`, which overrides the variable for that run, so `--proxy off` gets you a direct connection without unsetting anything. Prefer `socks5h://` over `socks5://`: it resolves DNS through the proxy, so hostnames never hit your local resolver. A per-request `fetch --proxy` still wins over the process-wide default.
+
 ## Security
 
 A fetch tool an agent can point anywhere is an SSRF and prompt-injection surface, so:

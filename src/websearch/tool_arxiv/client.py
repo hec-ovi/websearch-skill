@@ -41,6 +41,22 @@ def _httpx_get(url: str, *, params: dict, headers: dict, timeout_s: float) -> An
     return httpx.get(url, params=params, headers=headers, timeout=timeout_s, follow_redirects=True)
 
 
+def _proxied_httpx_get(proxy: str) -> HttpGet:
+    def get(url: str, *, params: dict, headers: dict, timeout_s: float) -> Any:
+        import httpx
+
+        return httpx.get(
+            url,
+            params=params,
+            headers=headers,
+            timeout=timeout_s,
+            follow_redirects=True,
+            proxy=proxy,
+        )
+
+    return get
+
+
 def _header(resp: Any, name: str) -> str | None:
     """Case-insensitive header read that tolerates dict or httpx.Headers."""
     headers = getattr(resp, "headers", {}) or {}
@@ -290,7 +306,11 @@ def build_arxiv_tool(
     max_retries: int = 3,
     base_backoff_s: float = 3.0,
     timeout_s: float = 20.0,
+    proxy: str | None = None,
 ) -> ArxivTool:
+    # An injected http_get owns its transport; proxy applies to the default only.
+    if http_get is None and proxy:
+        http_get = _proxied_httpx_get(proxy)
     return ArxivTool(
         http_get=http_get or _httpx_get,
         sleep=sleep or time.sleep,

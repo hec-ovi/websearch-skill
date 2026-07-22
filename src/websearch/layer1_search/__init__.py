@@ -32,6 +32,7 @@ def build_router(
     ddgs_factory: Callable[[], Any] | None = None,
     ddgs_backend: str = "auto",
     extra_adapters: list[EngineAdapter] | None = None,
+    proxy: str | None = None,
 ) -> SearchRouter:
     """Assemble a SearchRouter from the available backends.
 
@@ -39,13 +40,14 @@ def build_router(
     ``ddgs_backend`` selects which underlying keyless engines ddgs queries (a
     comma-separated list like "google,brave,mojeek", or "auto" for all). Unknown names
     are ignored by ddgs. ``extra_adapters`` lets a caller plug in keyed/decorrelated
-    engines.
+    engines. ``proxy`` routes both built-in engines' egress through one proxy URL
+    (extra adapters own their transport and are unaffected).
     """
     adapters: list[EngineAdapter] = []
     if searxng_url:
-        adapters.append(SearxngAdapter(searxng_url, engines=searxng_engines))
+        adapters.append(SearxngAdapter(searxng_url, engines=searxng_engines, proxy=proxy))
     if enable_ddgs:
-        adapters.append(DdgsAdapter(ddgs_factory=ddgs_factory, backend=ddgs_backend))
+        adapters.append(DdgsAdapter(ddgs_factory=ddgs_factory, backend=ddgs_backend, proxy=proxy))
     if extra_adapters:
         adapters.extend(extra_adapters)
     return SearchRouter(adapters)

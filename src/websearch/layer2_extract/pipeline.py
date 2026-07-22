@@ -26,6 +26,7 @@ from .models import (
     ExtractSource,
     ExtractTiming,
     FetchRequest,
+    Proxy,
 )
 from .ports import ExtractAdapter
 
@@ -41,9 +42,16 @@ def _is_extractable(content_type: str | None) -> bool:
 
 
 class FetchExtractPipeline:
-    def __init__(self, fetch_router: FetchRouter, extractor: ExtractAdapter):
+    def __init__(
+        self,
+        fetch_router: FetchRouter,
+        extractor: ExtractAdapter,
+        *,
+        default_proxy: Proxy | None = None,
+    ):
         self._fetch_router = fetch_router
         self._extractor = extractor
+        self._default_proxy = default_proxy
 
     def run(
         self,
@@ -51,6 +59,8 @@ class FetchExtractPipeline:
         *,
         extract_overrides: dict | None = None,
     ) -> Envelope:
+        if fetch_request.proxy is None and self._default_proxy is not None:
+            fetch_request = fetch_request.model_copy(update={"proxy": self._default_proxy})
         t0 = time.perf_counter()
         trace_id = uuid.uuid4().hex
         request_id = str(uuid.uuid4())
