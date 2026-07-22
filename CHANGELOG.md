@@ -4,6 +4,13 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and releases follow
 semantic versioning.
 
+## [0.2.1] - 2026-07-21
+
+### Fixed
+
+- The Claude plugin and MCP registry manifests (`.claude-plugin/`, `server.json`) now
+  carry the same version as the package.
+
 ## [0.2.0] - 2026-07-21
 
 ### Added

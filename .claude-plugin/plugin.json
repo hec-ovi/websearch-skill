@@ -1,7 +1,7 @@
 {
   "name": "web-search",
   "displayName": "Web Search",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "Keyless multi-engine web search, clean-Markdown fetch, and paginated read for AI agents, plus arxiv and github lookup. Bundles a portable SKILL and a FastMCP stdio server (web_search, web_fetch, web_open, arxiv_search, github_search). Needs internet; no API keys.",
   "author": {
     "name": "Hector Oviedo",
