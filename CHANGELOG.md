@@ -1,10 +1,10 @@
 # Changelog
 
 Notable changes to this project. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project will follow
-semantic versioning once it reaches a tagged release.
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and releases follow
+semantic versioning.
 
-## [Unreleased]
+## [0.2.0] - 2026-07-21
 
 ### Added
 
@@ -18,6 +18,10 @@ semantic versioning once it reaches a tagged release.
   default. Off by default; a misconfigured proxy surfaces as a clean
   `invalid_request` envelope. httpx now installs with the `[socks]` extra so SOCKS5
   URLs work out of the box.
+
+## [0.1.0] - 2026-06-22
+
+First tagged release, published to PyPI.
 
 ### Changed
 
