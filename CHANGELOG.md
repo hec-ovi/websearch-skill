@@ -4,6 +4,24 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and releases follow
 semantic versioning.
 
+## [0.2.2] - 2026-07-22
+
+### Added
+
+- 0 now means "no limit" on every capping knob, at every layer: `--max-results 0`
+  (web-search and Layer 1 `max_total_results`) returns everything the engines gave,
+  `--page-size-tokens 0` (web-fetch, web-open, and the MCP tools) returns the whole
+  document as one page, and `--max-bytes 0` lifts the transport guard like `null`
+  does. Where a provider enforces its own ceiling, 0 requests that maximum: 2000 per
+  request for arxiv, 100 per page for github. The arxiv `--max-results` upper bound
+  is now the API's real 2000 instead of the old convenience cap of 50.
+
+### Fixed
+
+- `FETCH_CONTRACT_VERSION` said 1.1.0 while `contracts/fetch.schema.json` declared
+  1.2.0; the constant now matches, and a new lockstep test asserts every schema's
+  `x-contract-version` against its Python constant so the pair cannot drift again.
+
 ## [0.2.1] - 2026-07-21
 
 ### Fixed
