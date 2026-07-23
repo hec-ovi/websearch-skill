@@ -311,6 +311,11 @@ def test_multiword_query_is_quoted_but_single_word_and_operators_are_not():
     assert ArxivSearchRequest(query="transformers").search_query() == "all:transformers"
     # explicit boolean operator -> passed through unchanged
     assert ArxivSearchRequest(query="ti:foo AND bar").search_query() == "all:ti:foo AND bar"
+    # arXiv operators are uppercase; a natural-language lowercase "and" is still a phrase
+    assert (
+        ArxivSearchRequest(query="salt and pepper noise").search_query()
+        == 'all:"salt and pepper noise"'
+    )
 
 
 def test_whitespace_only_query_is_rejected():
@@ -351,3 +356,12 @@ def test_429_http_date_retry_after_is_honored_and_clamped():
     assert env.ok
     assert len(slept) == 1
     assert 0.0 <= slept[0] <= 60.0  # far-future HTTP-date clamped to 60s
+
+
+def test_429_numeric_retry_after_is_clamped_too():
+    slept: list[float] = []
+    responses = [_Resp("", 429, {"retry-after": "86400"}), _Resp(ATOM, 200)]
+    tool = build_arxiv_tool(http_get=_sequence_get(responses), sleep=slept.append)
+    env = tool.search(ArxivSearchRequest(query="x"))
+    assert env.ok
+    assert slept == [60.0]  # a day-long Retry-After must not stall the call

@@ -11,6 +11,7 @@ auth-only and intentionally not offered here. The HTTP boundary is injectable fo
 from __future__ import annotations
 
 import json
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -34,24 +35,34 @@ _BACKEND = "github-api"
 HttpGet = Callable[..., Any]
 
 
+_client_lock = threading.Lock()
+_client: Any = None
+
+
 def _httpx_get(url: str, *, params: dict, headers: dict, timeout_s: float) -> Any:
+    # One cached client per process so repeated calls (MCP server, retries) reuse
+    # the TCP+TLS connection instead of handshaking every time.
+    global _client
     import httpx
 
-    return httpx.get(url, params=params, headers=headers, timeout=timeout_s, follow_redirects=True)
+    with _client_lock:
+        if _client is None:
+            _client = httpx.Client(follow_redirects=True)
+    return _client.get(url, params=params, headers=headers, timeout=timeout_s)
 
 
 def _proxied_httpx_get(proxy: str) -> HttpGet:
+    lock = threading.Lock()
+    client: Any = None
+
     def get(url: str, *, params: dict, headers: dict, timeout_s: float) -> Any:
+        nonlocal client
         import httpx
 
-        return httpx.get(
-            url,
-            params=params,
-            headers=headers,
-            timeout=timeout_s,
-            follow_redirects=True,
-            proxy=proxy,
-        )
+        with lock:
+            if client is None:
+                client = httpx.Client(follow_redirects=True, proxy=proxy)
+        return client.get(url, params=params, headers=headers, timeout=timeout_s)
 
     return get
 
@@ -84,7 +95,8 @@ def _forbidden_message(resp: Any) -> str:
     try:
         body = json.loads(getattr(resp, "text", "") or "{}")
         if isinstance(body, dict):
-            body_msg = body.get("message") or ""
+            msg = body.get("message")
+            body_msg = msg if isinstance(msg, str) else ""
     except json.JSONDecodeError:
         pass
     return f"GitHub returned HTTP 403 (not a rate limit){': ' + body_msg if body_msg else '.'}"
@@ -97,7 +109,8 @@ def _parse_item(it: Any) -> GithubRepo | None:
     html_url = it.get("html_url")
     if not (full_name and html_url):
         return None
-    owner = (it.get("owner") or {}).get("login")
+    owner_obj = it.get("owner")
+    owner = owner_obj.get("login") if isinstance(owner_obj, dict) else None
     lic = it.get("license") or {}
     license_id = lic.get("spdx_id") if isinstance(lic, dict) else None
     if license_id in (None, "NOASSERTION"):
@@ -228,7 +241,7 @@ class GithubTool:
                 repos=repos,
                 warnings=warnings,
             )
-        except (ValidationError, TypeError, ValueError) as exc:
+        except (ValidationError, TypeError, ValueError, AttributeError) as exc:
             return self._error(
                 code=UPSTREAM_ERROR,
                 message=f"GitHub response had an unexpected shape: {type(exc).__name__}: {exc}",

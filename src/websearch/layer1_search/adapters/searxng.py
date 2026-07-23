@@ -1,6 +1,6 @@
 """SearXNG adapter.
 
-SearXNG is the keyless default backbone: a private metasearch instance with JSON
+SearXNG is the optional self-hosted engine: a private metasearch instance with JSON
 output enabled. This adapter is near-passthrough because the port's optional fields
 align with the SearXNG result shape; it maps content -> snippet, score -> raw_score,
 and so on. Point it at any instance via the base URL.
@@ -45,13 +45,12 @@ class SearxngAdapter(EngineAdapter):
         *,
         engines: list[str] | None = None,
         client: httpx.Client | None = None,
-        timeout_s: float = 8.0,
         proxy: str | None = None,
     ):
         self.base_url = (base_url or "").rstrip("/")
         self._engines = engines
         self._client = client
-        self._timeout_s = timeout_s
+        self._owned_client: httpx.Client | None = None
         self._proxy = proxy
 
     def enabled(self) -> bool:
@@ -71,7 +70,8 @@ class SearxngAdapter(EngineAdapter):
         if request.result_type == "news":
             params["categories"] = "news"
         override = request.engine_overrides.get("searxng", {}) or {}
-        engines = self._engines or override.get("engines")
+        # A request-scoped override wins over the adapter's static engine list.
+        engines = override.get("engines") or self._engines
         if engines:
             params["engines"] = ",".join(engines) if isinstance(engines, list) else str(engines)
         return params
@@ -99,26 +99,36 @@ class SearxngAdapter(EngineAdapter):
                     raw_score=float(score) if isinstance(score, (int, float)) else None,
                     published_date=str(published) if published is not None else None,
                     result_type="news" if is_news else "web",
-                    thumbnail=item.get("thumbnail") or item.get("img_src"),
+                    thumbnail=item.get("thumbnail") or item.get("img_src") or None,
                 )
             )
         return results
+
+    def _get_client(self) -> httpx.Client:
+        if self._client is not None:
+            return self._client
+        # Cache the owned client so a long-lived adapter (MCP server) reuses connections
+        # instead of paying a TCP+TLS handshake per search.
+        if self._owned_client is None:
+            self._owned_client = httpx.Client(
+                follow_redirects=True,
+                headers={"User-Agent": _USER_AGENT},
+                proxy=self._proxy,
+            )
+        return self._owned_client
 
     def search(self, request: SearchRequest) -> EngineOutput:
         if not self.enabled():
             return EngineOutput(engine=self.name, error="searxng base_url not configured")
 
-        # Honor the request's per-engine timeout when we own the client.
-        timeout_s = request.timeout_ms / 1000.0 if self._client is None else self._timeout_s
-        client = self._client or httpx.Client(
-            timeout=timeout_s,
-            follow_redirects=True,
-            headers={"User-Agent": _USER_AGENT},
-            proxy=self._proxy,
-        )
-        owns_client = self._client is None
+        client = self._get_client()
         try:
-            resp = client.get(f"{self.base_url}/search", params=self._params(request))
+            # Honor the request's per-engine timeout when we own the client; an injected
+            # client owns its transport and keeps its own timeout.
+            kwargs: dict[str, Any] = {"params": self._params(request)}
+            if self._client is None:
+                kwargs["timeout"] = request.timeout_ms / 1000.0
+            resp = client.get(f"{self.base_url}/search", **kwargs)
             resp.raise_for_status()
             payload = resp.json()
             if not isinstance(payload, dict):
@@ -132,6 +142,3 @@ class SearxngAdapter(EngineAdapter):
             )
         except Exception as exc:
             return EngineOutput(engine=self.name, error=f"{type(exc).__name__}: {exc}")
-        finally:
-            if owns_client:
-                client.close()

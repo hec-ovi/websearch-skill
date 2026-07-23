@@ -50,6 +50,42 @@ def test_searxng_pageno_from_offset(httpx_mock):
     assert _sent_params(httpx_mock)["pageno"] == "3"  # (20 // 10) + 1
 
 
+def test_searxng_request_override_beats_static_engine_list(httpx_mock):
+    httpx_mock.add_response(json={"results": []})
+    SearxngAdapter(SEARXNG_URL, engines=["google"]).search(
+        SearchRequest(query="q", engine_overrides={"searxng": {"engines": ["mojeek"]}})
+    )
+    assert _sent_params(httpx_mock)["engines"] == "mojeek"
+
+
+def test_searxng_empty_thumbnail_becomes_none(httpx_mock):
+    httpx_mock.add_response(
+        json={"results": [{"url": "https://x.test/a", "thumbnail": "", "img_src": ""}]}
+    )
+    out = SearxngAdapter(SEARXNG_URL).search(SearchRequest(query="q"))
+    assert out.results[0].thumbnail is None
+
+
+def test_searxng_reuses_owned_client(httpx_mock, monkeypatch):
+    import httpx
+
+    httpx_mock.add_response(json={"results": []})
+    httpx_mock.add_response(json={"results": []})
+    constructed: list[int] = []
+    real_client = httpx.Client
+
+    class CountingClient(real_client):
+        def __init__(self, *args, **kwargs):
+            constructed.append(1)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("websearch.layer1_search.adapters.searxng.httpx.Client", CountingClient)
+    adapter = SearxngAdapter(SEARXNG_URL)
+    adapter.search(SearchRequest(query="a"))
+    adapter.search(SearchRequest(query="b"))
+    assert len(constructed) == 1  # one owned client, reused across searches
+
+
 def test_searxng_non_object_json_is_error_not_crash(httpx_mock):
     httpx_mock.add_response(json=["not", "an", "object"])
     out = SearxngAdapter(SEARXNG_URL).search(SearchRequest(query="q"))
@@ -143,3 +179,40 @@ def test_ddgs_library_failure_becomes_error_output():
     out = DdgsAdapter(ddgs_factory=lambda: _Boom()).search(SearchRequest(query="q"))
     assert out.error is not None
     assert "ddgs down" in out.error
+
+
+def test_ddgs_news_requests_the_news_index():
+    sink: dict = {}
+
+    class _NewsRecorder:
+        def text(self, query, **kwargs):
+            raise AssertionError("text index must not be queried for a news request")
+
+        def news(self, query, **kwargs):
+            sink["query"] = query
+            return [{"url": "https://n.test/a", "title": "t", "body": "b"}]
+
+    out = DdgsAdapter(ddgs_factory=lambda: _NewsRecorder()).search(
+        SearchRequest(query="q", result_type="news")
+    )
+    assert sink["query"] == "q"
+    assert out.results[0].result_type == "news"
+
+
+def test_ddgs_timeout_reaches_client_and_client_is_reused(monkeypatch):
+    captured: list[dict] = []
+
+    class FakeDDGS:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+
+        def text(self, query, **kwargs):
+            return []
+
+    import ddgs
+
+    monkeypatch.setattr(ddgs, "DDGS", FakeDDGS)
+    adapter = DdgsAdapter()
+    adapter.search(SearchRequest(query="q", timeout_ms=30000))
+    adapter.search(SearchRequest(query="q", timeout_ms=30000))
+    assert captured == [{"timeout": 30}]  # request timeout honored; one client built

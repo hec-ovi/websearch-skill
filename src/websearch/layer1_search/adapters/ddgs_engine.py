@@ -33,13 +33,23 @@ class DdgsAdapter(EngineAdapter):
         self._factory = ddgs_factory
         self._backend = backend
         self._proxy = proxy
+        self._client: Any = None
+        self._client_timeout_s: int | None = None
 
-    def _make_client(self) -> Any:
+    def _make_client(self, timeout_s: int) -> Any:
         if self._factory is not None:
             return self._factory()
-        from ddgs import DDGS
+        # Cache the DDGS instance (keyed on timeout, which is per-instance in ddgs) so a
+        # long-lived adapter reuses ddgs's internal HTTP client and engine cache.
+        if self._client is None or self._client_timeout_s != timeout_s:
+            from ddgs import DDGS
 
-        return DDGS(proxy=self._proxy) if self._proxy else DDGS()
+            kwargs: dict[str, Any] = {"timeout": timeout_s}
+            if self._proxy:
+                kwargs["proxy"] = self._proxy
+            self._client = DDGS(**kwargs)
+            self._client_timeout_s = timeout_s
+        return self._client
 
     def _region(self, request: SearchRequest) -> str | None:
         if request.country:
@@ -67,8 +77,10 @@ class DdgsAdapter(EngineAdapter):
             kwargs["page"] = (request.offset // max(request.count, 1)) + 1
 
         try:
-            client = self._make_client()
-            rows = client.text(request.query, **kwargs)
+            client = self._make_client(max(1, round(request.timeout_ms / 1000)))
+            # News requests go to ddgs's news index; everything else to the text index.
+            method = client.news if request.result_type == "news" else client.text
+            rows = method(request.query, **kwargs)
         except Exception as exc:
             return EngineOutput(engine=self.name, error=f"{type(exc).__name__}: {exc}")
 

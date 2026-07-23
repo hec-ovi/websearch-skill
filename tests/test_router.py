@@ -11,7 +11,7 @@ import time
 
 from tests.conftest import SEARCH_RESPONSE_REF
 from websearch.layer1_search.capability import GENERAL_AGGREGATOR, NEURAL_INDEX
-from websearch.layer1_search.models import Fusion, SearchRequest
+from websearch.layer1_search.models import FreshnessRange, Fusion, SearchRequest
 from websearch.layer1_search.port import EngineAdapter, EngineOutput, RawResult
 from websearch.layer1_search.router import SearchRouter
 
@@ -68,11 +68,37 @@ def test_no_engines_enabled(assert_valid):
     assert payload["error"]["retriable"] is False
 
 
-def test_unknown_requested_engine_yields_no_engines_enabled():
+def test_duplicate_engine_names_query_once():
+    calls: list[str] = []
+
+    class Counting(FakeAdapter):
+        def search(self, request):
+            calls.append(self.name)
+            return super().search(request)
+
+    router = SearchRouter([Counting("a", [raw("https://x/1", 1)])])
+    env = router.search(SearchRequest(query="q", engines=["a", "a"]))
+    assert calls == ["a"]  # not double-queried
+    assert env.data["engines_queried"] == ["a"]
+    assert [s["engine"] for s in env.data["results"][0]["sources"]] == ["a"]
+
+
+def test_requested_but_disabled_engine_warns():
+    router = SearchRouter(
+        [FakeAdapter("a", [raw("https://x/1", 1)]), FakeAdapter("b", enabled=False)]
+    )
+    env = router.search(SearchRequest(query="q", engines=["a", "b"]))
+    assert env.ok is True
+    assert any("disabled" in w and "b" in w for w in env.data["warnings"])
+
+
+def test_freshness_range_emits_unsupported_warning():
     router = SearchRouter([FakeAdapter("a", [raw("https://x/1", 1)])])
-    env = router.search(SearchRequest(query="q", engines=["does-not-exist"]))
-    assert env.ok is False
-    assert env.error.code == "no_engines_enabled"
+    env = router.search(
+        SearchRequest(query="q", freshness=FreshnessRange(start="2026-01-01", end="2026-02-01"))
+    )
+    assert env.ok is True
+    assert any("date range" in w for w in env.data["warnings"])
 
 
 def test_partial_failure_records_unresponsive_and_keeps_results(assert_valid):
@@ -191,4 +217,8 @@ def test_slow_engine_times_out_without_blocking_the_request():
     assert elapsed < 0.35  # returned before the slow engine finished
     assert env.ok is True
     assert [r["url"] for r in env.data["results"]] == ["https://fast/1"]
-    assert any(u["engine"] == "slow" for u in env.data["unresponsive_engines"])
+    # The timed-out engine is named with a real reason, not an empty stringified error.
+    assert any(
+        u["engine"] == "slow" and u["reason"].startswith("timeout:")
+        for u in env.data["unresponsive_engines"]
+    )

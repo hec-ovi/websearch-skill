@@ -1,4 +1,4 @@
-"""Keyless GitHub repository search tool (github@1.0.0).
+"""Keyless GitHub repository search tool (github@1.1.0).
 
 A standalone extra tool over the official unauthenticated GitHub REST search API.
 Emits the cross-cutting Envelope (meta.layer "github").

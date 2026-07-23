@@ -8,6 +8,7 @@ than hitting the network, mirroring the ddgs/curl_cffi fakes elsewhere.
 
 from __future__ import annotations
 
+import threading
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
@@ -35,24 +36,34 @@ _NS = {
 HttpGet = Callable[..., Any]
 
 
+_client_lock = threading.Lock()
+_client: Any = None
+
+
 def _httpx_get(url: str, *, params: dict, headers: dict, timeout_s: float) -> Any:
+    # One cached client per process so repeated calls (MCP server, 429 retries) reuse
+    # the TCP+TLS connection instead of handshaking every time.
+    global _client
     import httpx
 
-    return httpx.get(url, params=params, headers=headers, timeout=timeout_s, follow_redirects=True)
+    with _client_lock:
+        if _client is None:
+            _client = httpx.Client(follow_redirects=True)
+    return _client.get(url, params=params, headers=headers, timeout=timeout_s)
 
 
 def _proxied_httpx_get(proxy: str) -> HttpGet:
+    lock = threading.Lock()
+    client: Any = None
+
     def get(url: str, *, params: dict, headers: dict, timeout_s: float) -> Any:
+        nonlocal client
         import httpx
 
-        return httpx.get(
-            url,
-            params=params,
-            headers=headers,
-            timeout=timeout_s,
-            follow_redirects=True,
-            proxy=proxy,
-        )
+        with lock:
+            if client is None:
+                client = httpx.Client(follow_redirects=True, proxy=proxy)
+        return client.get(url, params=params, headers=headers, timeout=timeout_s)
 
     return get
 
@@ -289,10 +300,10 @@ class ArxivTool:
         ra = _header(resp, "retry-after")
         if ra:
             ra = ra.strip()
+            # Clamp both Retry-After forms so a hostile or buggy header cannot stall
+            # the call (a bare "86400" would otherwise sleep a day per attempt).
             if ra.isdigit():
-                return float(ra)
-            # RFC 7231 also permits an HTTP-date; honor it, clamped so a far-future
-            # date cannot stall the call.
+                return min(float(ra), 60.0)
             secs = _http_date_seconds(ra)
             if secs is not None:
                 return min(secs, 60.0)

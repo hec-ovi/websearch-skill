@@ -19,6 +19,7 @@ from .dedup import DedupedDoc, dedupe
 from .fusion import fuse
 from .models import (
     SEARCH_CONTRACT_VERSION,
+    FreshnessRange,
     ResultItem,
     SearchPayload,
     SearchRequest,
@@ -62,15 +63,13 @@ class SearchRouter:
     def __init__(self, adapters: list[EngineAdapter]):
         self._adapters = list(adapters)
 
-    @property
-    def adapters(self) -> list[EngineAdapter]:
-        return list(self._adapters)
-
     def _select(self, request: SearchRequest) -> list[EngineAdapter]:
         enabled = [a for a in self._adapters if a.enabled()]
         if request.engines is None:
             return enabled
-        wanted = list(request.engines)
+        # Dedupe the requested set: a repeated name must not double-query the engine
+        # and double-count its provenance in fusion.
+        wanted = _dedup_keep_order(list(request.engines))
         by_name = {a.name: a for a in enabled}
         # Preserve the caller's requested order, skipping unknown/disabled engines.
         return [by_name[n] for n in wanted if n in by_name]
@@ -166,6 +165,14 @@ class SearchRouter:
                 remaining = max(0.0, deadline - time.perf_counter())
                 try:
                     outputs[adapter.name] = fut.result(timeout=remaining)
+                except TimeoutError:
+                    # concurrent.futures.TimeoutError stringifies to "", so name it and
+                    # record the time actually spent waiting.
+                    outputs[adapter.name] = EngineOutput(
+                        engine=adapter.name,
+                        error=f"timeout: no response within {request.timeout_ms}ms",
+                        elapsed_ms=int((time.perf_counter() - t0) * 1000),
+                    )
                 except Exception as exc:
                     outputs[adapter.name] = EngineOutput(
                         engine=adapter.name, error=f"timeout_or_error: {exc}"
@@ -242,6 +249,21 @@ class SearchRouter:
         if unknown_requested:
             warnings.append(
                 f"Unknown engine(s) ignored: {sorted(unknown_requested)}; available: {known_names}."
+            )
+        disabled_requested = (
+            sorted(e for e in set(request.engines) if e in known_names and e not in enabled_names)
+            if request.engines is not None
+            else []
+        )
+        if disabled_requested:
+            warnings.append(
+                f"Requested engine(s) {disabled_requested} are configured but disabled "
+                f"(missing URL or key); they were skipped."
+            )
+        if isinstance(request.freshness, FreshnessRange):
+            warnings.append(
+                "freshness date ranges are not supported by the current engines; "
+                "results were not date-filtered."
             )
         if request.fusion.method == "score_convex":
             warnings.append(

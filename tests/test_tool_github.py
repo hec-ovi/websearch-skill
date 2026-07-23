@@ -269,6 +269,27 @@ def test_403_secondary_limit_with_retry_after_is_rate_limited():
     assert env.error.code == errors.RATE_LIMITED  # secondary limit still recognized
 
 
+def test_non_dict_owner_does_not_crash():
+    body = json.dumps(
+        {
+            "total_count": 1,
+            "items": [{"full_name": "a/b", "html_url": "u", "owner": "tiangolo"}],
+        }
+    )
+    env = build_github_tool(http_get=_static_get(body, 200)).search(GithubSearchRequest(query="x"))
+    assert env.ok  # a string owner is dropped, not a raw AttributeError out of search()
+    assert env.data["repos"][0]["owner"] is None
+
+
+def test_non_string_403_message_does_not_crash():
+    body = json.dumps({"message": {"detail": "blocked"}})
+    env = build_github_tool(
+        http_get=_static_get(body, 403, {"x-ratelimit-remaining": "57"})
+    ).search(GithubSearchRequest(query="x"))
+    assert not env.ok  # a clean error Envelope, not a TypeError from concatenation
+    assert env.error.code == errors.UPSTREAM_ERROR
+
+
 def test_malformed_star_count_does_not_crash():
     body = json.dumps(
         {

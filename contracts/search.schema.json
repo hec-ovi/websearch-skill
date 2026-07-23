@@ -11,7 +11,7 @@
       "additionalProperties": false,
       "properties": {
         "query": { "type": "string", "minLength": 1 },
-        "count": { "type": "integer", "minimum": 1, "default": 10, "description": "Desired results per engine; the router clamps per-engine caps." },
+        "count": { "type": "integer", "minimum": 1, "default": 10, "description": "Desired results per engine." },
         "offset": { "type": "integer", "minimum": 0, "default": 0, "description": "Results-based offset; mapped to page/start/offset per engine." },
         "country": { "type": ["string", "null"], "default": null, "description": "ISO 3166-1 alpha-2." },
         "language": { "type": ["string", "null"], "default": null, "description": "ISO 639-1." },
@@ -60,7 +60,7 @@
           "type": ["object", "null"],
           "additionalProperties": false,
           "default": null,
-          "description": "Proxy/VPN egress, isolated inside Layer 1; invisible to other layers. Never carries raw credentials.",
+          "description": "Reserved: accepted but not applied yet; configure egress via WEBSEARCH_PROXY / --proxy instead. Never carries raw credentials.",
           "properties": {
             "enabled": { "type": "boolean", "default": false },
             "profile": { "type": ["string", "null"], "default": null },

@@ -119,7 +119,7 @@ def test_ddgs_client_gets_proxy(monkeypatch):
     captured = {}
 
     class FakeDDGS:
-        def __init__(self, proxy=None):
+        def __init__(self, proxy=None, timeout=None):
             captured["proxy"] = proxy
 
         def text(self, query, **kwargs):
@@ -190,18 +190,31 @@ class _Resp:
         self.text = text
 
 
+class _FakeClientBase:
+    """Stands in for httpx.Client: records constructor kwargs, serves a canned body."""
+
+    body = ""
+    sink: dict = {}
+
+    def __init__(self, **kwargs):
+        type(self).sink.update(kwargs)
+
+    def get(self, url, *, params=None, headers=None, timeout=None):
+        return _Resp(type(self).body)
+
+
 def test_arxiv_default_transport_uses_proxy(monkeypatch):
     from websearch.tool_arxiv import ArxivSearchRequest, build_arxiv_tool
 
-    captured = {}
+    captured: dict = {}
 
-    def fake_get(url, **kwargs):
-        captured.update(kwargs)
-        return _Resp(_EMPTY_FEED)
+    class FakeClient(_FakeClientBase):
+        body = _EMPTY_FEED
+        sink = captured
 
     import httpx
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "Client", FakeClient)
     env = build_arxiv_tool(proxy=SOCKS).search(ArxivSearchRequest(query="q"))
     assert env.ok
     assert captured["proxy"] == SOCKS
@@ -210,15 +223,15 @@ def test_arxiv_default_transport_uses_proxy(monkeypatch):
 def test_github_default_transport_uses_proxy(monkeypatch):
     from websearch.tool_github import GithubSearchRequest, build_github_tool
 
-    captured = {}
+    captured: dict = {}
 
-    def fake_get(url, **kwargs):
-        captured.update(kwargs)
-        return _Resp('{"total_count": 0, "incomplete_results": false, "items": []}')
+    class FakeClient(_FakeClientBase):
+        body = '{"total_count": 0, "incomplete_results": false, "items": []}'
+        sink = captured
 
     import httpx
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "Client", FakeClient)
     build_github_tool(proxy=SOCKS).search(GithubSearchRequest(query="q"))
     assert captured["proxy"] == SOCKS
 

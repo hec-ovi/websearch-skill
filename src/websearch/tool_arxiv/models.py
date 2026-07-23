@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 ARXIV_CONTRACT_VERSION = "1.1.0"
 DEFAULT_MAX_RESULTS = 10
-MAX_MAX_RESULTS = 50
 # arXiv's own per-request ceiling: "slices of at most 2000 at a time" (API user manual).
 # max_results=0 asks for the biggest slice the API allows, not more.
 ARXIV_API_MAX_RESULTS = 2000
@@ -56,8 +55,9 @@ class ArxivSearchRequest(BaseModel):
         is passed through unchanged so power users keep full control.
         """
         q = self.query
-        ql = q.lower()
-        has_ops = '"' in q or " and " in ql or " or " in ql or " andnot " in ql
+        # arXiv's boolean operators are uppercase (AND/OR/ANDNOT); matching them
+        # case-sensitively keeps natural-language "salt and pepper" phrase-quoted.
+        has_ops = '"' in q or " AND " in q or " OR " in q or " ANDNOT " in q
         if " " in q and not has_ops:
             q = f'"{q}"'
         return f"{_FIELD_PREFIX[self.field]}:{q}"
