@@ -6,7 +6,7 @@ Open-source multi-engine web search and content extraction for AI agents, built 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-423%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-528%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
 > **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). The keyless search, the clean-Markdown reader, the five agent tools, and the opt-in egress proxy work today and are covered by the test suite. The hard anti-bot tiers and local rerank are not built yet (see Roadmap). Pin a version and try it in a sandbox before wiring it into anything sensitive.
@@ -329,7 +329,7 @@ Planned, not built yet:
 
 ```bash
 uv sync          # install deps (including the dev group)
-uv run pytest    # 423 tests
+uv run pytest    # 528 tests
 uv run ruff check .
 ```
 

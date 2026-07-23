@@ -4,6 +4,43 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and releases follow
 semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+
+- Fetch security: the curl_cffi tier now streams with a capped read, so `--max-bytes`
+  stops the download instead of truncating after buffering the whole body; redirects to
+  a different host drop the `Authorization` header and caller cookies (`Cookie.domain`
+  scopes a cookie to matching hosts); the SSRF guard fails closed when every resolved
+  address is unparseable.
+- `web_fetch`/`web_open` errors carry the underlying layer's error code and
+  retriability instead of a blanket retriable `fetch_failed`, and CLI error envelopes
+  carry the active command's contract version.
+- GitHub tool: a non-dict `owner` or a non-string 403 message no longer escapes
+  `search()` as a raw exception.
+- ddgs adapter: news requests query the news index, and the request timeout reaches
+  the client.
+- arXiv tool: a numeric `Retry-After` is clamped like the HTTP-date form, and boolean
+  operators match case-sensitively so natural-language queries stay phrase-quoted.
+- Router: repeated engine names are queried once; timed-out engines report a named
+  reason; requested-but-disabled engines and unsupported freshness date ranges warn.
+- The `web-open` hint printed after a fetch keeps a non-default `--page-size-tokens`,
+  so the copy-paste command preserves pagination geometry.
+- The error-title veto no longer flags short benign titles ("Forbidden City").
+- `body_char_budget=0` and `inline_token_budget=0` now mean no limit, matching the
+  convention everywhere else.
+- `websearch.__version__` derives from the installed package metadata and is covered
+  by the manifest-lockstep test.
+
+### Changed
+
+- Connection reuse on every network path (search adapters, fetch tiers, arxiv, github),
+  and per-command lazy imports that roughly halve CLI startup for `arxiv`/`github`.
+- `politeness`, `wait_for`, `cache_ttl_seconds`, and the search `egress` block are
+  marked reserved in the contracts; setting the fetch knobs emits a warning.
+- Removed dead code paths (capability map, unused store/extractor `available()`,
+  unused setters and parameters) and tightened `SKILL.md`.
+
 ## [0.2.2] - 2026-07-22
 
 ### Added
