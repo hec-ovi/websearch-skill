@@ -10,9 +10,9 @@ Two facts that recur:
 - **Distribution name** is `websearch-skill`; the **command** is `websearch`. The package
   also installs a second console script named `websearch-skill`, so `uvx websearch-skill
   <cmd>` resolves with no `--from`.
-- **Before the PyPI release**, swap any `uvx websearch-skill ...` for the git form
-  `uvx --from git+https://github.com/hec-ovi/websearch-skill websearch ...`. It clones and
-  builds on each run (slower), but needs no PyPI.
+- The package is on [PyPI](https://pypi.org/project/websearch-skill/), so `uvx
+  websearch-skill ...` works as-is. To run a specific commit instead, use the git form
+  `uvx --from git+https://github.com/hec-ovi/websearch-skill@<ref> websearch ...`.
 
 The MCP server's logical name is `web-search` and it exposes five tools: `web_search`,
 `web_fetch`, `web_open`, `arxiv_search`, `github_search`. fastmcp ships in the base install,
@@ -31,13 +31,12 @@ so `uvx websearch-skill mcp` starts the stdio server with no extra.
 ## CLI, no install (uvx)
 
 ```bash
-# once on PyPI:
 uvx websearch-skill web-search "open source vector database 2026"
 uvx websearch-skill web-fetch "https://example.com"
 uvx websearch-skill arxiv "diffusion models" --max-results 5
 uvx websearch-skill github "fastmcp" --language Python --sort stars
 
-# straight from git, today (no PyPI):
+# or straight from git, for an unreleased commit:
 uvx --from git+https://github.com/hec-ovi/websearch-skill websearch web-search "..."
 ```
 
@@ -94,7 +93,7 @@ config:
 }
 ```
 
-Git fallback (pre-PyPI): set `"args": ["--from", "git+https://github.com/hec-ovi/websearch-skill", "websearch", "mcp"]`.
+Git form (unreleased commit): set `"args": ["--from", "git+https://github.com/hec-ovi/websearch-skill", "websearch", "mcp"]`.
 
 ## Codex CLI
 
@@ -169,24 +168,15 @@ Both are MCP clients on the Agent Skills standard.
   and `openclaw skills install git:hec-ovi/websearch-skill@main`. Pin a ref rather than
   pulling latest, and keep any future keys in env.
 
-## Publishing to PyPI (maintainer, one time)
+## Publishing to PyPI (maintainer)
 
-Releases use PyPI Trusted Publishing (OIDC). No API token is created, pasted, or stored. The
-workflow is `.github/workflows/release.yml`.
+Releases use PyPI Trusted Publishing (OIDC); no API token is created, pasted, or stored. The
+workflow is `.github/workflows/release.yml`, bound to the GitHub environment `pypi` and the
+trusted publisher configured on the PyPI project.
 
-1. On PyPI, open `https://pypi.org/manage/account/publishing/` and add a **pending
-   publisher** (the project does not exist yet): Provider GitHub, PyPI Project Name
-   `websearch-skill`, Owner `hec-ovi`, Repository `websearch-skill`, Workflow `release.yml`,
-   Environment `pypi`.
-2. On GitHub, create an environment named `pypi` (Settings, Environments). Optionally add
-   required reviewers to gate releases.
-3. Set the version in `pyproject.toml`, commit, then tag and push:
-   `git tag v0.1.0 && git push origin v0.1.0`. The tag must start with `v`.
-4. The workflow builds with `uv build` and publishes via OIDC. The first publish claims the
-   `websearch-skill` name. Verify at `https://pypi.org/project/websearch-skill/`, then
-   `uvx websearch-skill --help`.
-
-Subsequent releases: bump the version, push a new `v*` tag. No PyPI reconfiguration needed.
+To release: set the version in `pyproject.toml` (and `server.json`), commit, then tag and
+push a `v*` tag (`git tag v0.2.3 && git push origin v0.2.3`). The workflow builds with
+`uv build` and publishes via OIDC. Verify at `https://pypi.org/project/websearch-skill/`.
 
 ## In the MCP Registry
 

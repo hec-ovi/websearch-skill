@@ -5,7 +5,7 @@ Claude Code (a hosted, paid, US-only search the assistant calls as a native tool
 is a good yardstick because it is what an agent reaches for when it has no other search.
 
 This is not a formal benchmark suite. It is a same-query, same-moment spot check run on
-2026-06-22, recorded so the comparison is reproducible rather than asserted. Search
+2026-06-22, recorded with the exact commands so you can rerun it. Search
 results drift day to day and engines vary moment to moment, so treat the specifics as a
 snapshot, not a leaderboard. For rigorous numbers, measure the retriever in isolation
 (see the 7-axis scorecard in the README), not a downstream model's answer.
@@ -56,9 +56,8 @@ writes a summary in the same call. This tool wins on cost, privacy, control, ful
 extraction (`web-fetch`), multi-engine recall with de-correlated fusion, and the niche
 tools (`arxiv`, `github`) that general web search does not cover.
 
-The takeaway: this is a Pareto win rather than a clean sweep. Use the tool when cost,
-privacy, self-hosting, configurability, or clean extraction matter; the gap on raw
-"find me a relevant page" is small.
+Use the tool when cost, privacy, self-hosting, configurability, or clean extraction
+matter; the gap on raw "find me a relevant page" is small.
 
 ## Reproduce it
 

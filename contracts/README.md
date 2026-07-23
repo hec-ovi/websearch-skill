@@ -10,14 +10,14 @@ of language or process boundary.
 | File | Port | Version | Status |
 |---|---|---|---|
 | `envelope.schema.json` | Cross-cutting wrapper (`contract_version`, `ok`, `data`, `error`, `meta`) | 1.0.0 | frozen |
-| `search.schema.json` | Layer 1 search (`SearchRequest`, `SearchPayload`, `ResultItem`, `SourceProvenance`) | 1.0.0 | frozen |
-| `fetch.schema.json` | Layer 2A fetch sub-port (`FetchRequest`, `FetchResult`) | 1.1.0 | frozen |
+| `search.schema.json` | Layer 1 search (`SearchRequest`, `SearchPayload`, `ResultItem`, `SourceProvenance`) | 1.1.0 | frozen |
+| `fetch.schema.json` | Layer 2A fetch sub-port (`FetchRequest`, `FetchResult`) | 1.2.0 | frozen |
 | `extract.schema.json` | Layer 2A extract sub-port + agent-facing response (`ExtractRequest`, `ExtractResult`, `ExtractSource`, `ExtractPayload`) | 1.0.0 | frozen |
 | `format.schema.json` | Layer 2B format sub-port (`ResultInput`, `FormatRequest`, `FormatPayload`, `FormatSidecar`, `AnthropicSearchResultBlock`) | 1.0.0 | frozen |
 | `store.schema.json` | Layer 2B store/page-index sub-port (`PageInput`, `Passage`, `SearchPageRequest`, `SearchPageResult`, `PageDocument`, `ResolveIndex`, `StoreConfig`) | 1.0.0 | frozen |
-| `agent-io.schema.json` | Layer 3 agent I/O (`AgentSearchRequest`/`Payload`, `AgentFetchRequest`/`AgentOpenRequest`/`AgentPage`/`AgentFetchPayload`, `FenceInfo`) | 1.0.0 | frozen |
-| `arxiv.schema.json` | Extra tool: keyless arXiv search (`ArxivSearchRequest`, `ArxivPaper`, `ArxivSearchPayload`) | 1.0.0 | frozen |
-| `github.schema.json` | Extra tool: keyless GitHub repo search (`GithubSearchRequest`, `GithubRepo`, `GithubSearchPayload`) | 1.0.0 | frozen |
+| `agent-io.schema.json` | Layer 3 agent I/O (`AgentSearchRequest`/`Payload`, `AgentFetchRequest`/`AgentOpenRequest`/`AgentPage`/`AgentFetchPayload`, `FenceInfo`) | 1.1.0 | frozen |
+| `arxiv.schema.json` | Extra tool: keyless arXiv search (`ArxivSearchRequest`, `ArxivPaper`, `ArxivSearchPayload`) | 1.1.0 | frozen |
+| `github.schema.json` | Extra tool: keyless GitHub repo search (`GithubSearchRequest`, `GithubRepo`, `GithubSearchPayload`) | 1.1.0 | frozen |
 
 Layer 2A is two decoupled sub-ports: `fetch` (URL in, raw HTML out) and `extract`
 (HTML in, clean Markdown + metadata out). Layer 2B is likewise two decoupled

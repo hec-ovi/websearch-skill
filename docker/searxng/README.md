@@ -5,10 +5,10 @@ metasearch library: Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek,
 Wikipedia). You do not need this.
 
 Run your own SearXNG when you want the reliable, broad path: hundreds of engines
-across categories (including specialized sources), your own server so there is no
-public rate-limit roulette, and no API keys. Public SearXNG instances are not a
-good fit for automated use (most disable the JSON API and actively throttle bots),
-which is exactly why this config self-hosts a private one.
+across categories (including specialized sources), no public rate limits, and no
+API keys. Public SearXNG instances are not a good fit for automated use (most
+disable the JSON API and actively throttle bots), which is exactly why this config
+self-hosts a private one.
 
 ## Start it
 
@@ -37,7 +37,9 @@ Stop it with `docker compose -f docker/searxng/docker-compose.yml down`.
 - `core-config/settings.yml`: minimal overrides on top of SearXNG's defaults:
   `search.formats: [html, json]` (the JSON API the tool reads, off by default
   upstream), `server.limiter: false`, and `server.public_instance: false`.
-- `.env`: version pin, bind address, and port.
+- Optional `.env` next to the compose file to override `SEARXNG_VERSION`,
+  `SEARXNG_HOST`, and `SEARXNG_PORT`; without one the compose file's inline
+  defaults (`latest`, `127.0.0.1`, `8080`) apply.
 
 ## Before exposing it
 

@@ -122,7 +122,7 @@ First tagged release, published to PyPI.
 - `docker/searxng/`: a lean one-container SearXNG self-host config (JSON API enabled, bot
   limiter off, no Valkey needed) with its own README and a before-you-expose-it checklist.
 - `docs/BENCHMARK.md`: a reproducible, same-query head-to-head against the web search
-  built into Claude Code, with the honest verdict (comparable on retrieval; this tool
+  built into Claude Code, with the recorded verdict (comparable on retrieval; this tool
   wins on cost, privacy, control, and extraction).
 - Frozen contracts as JSON Schema 2020-12: `envelope@1.0.0` (the cross-cutting wrapper
   for every inter-layer message and CLI `--json` output) and `search@1.0.0` (the
@@ -208,7 +208,7 @@ First tagged release, published to PyPI.
   marker), a data-only directive, and neutralization of any in-body copy of the marker,
   with optional datamarking (`--datamark`). Documented as reducing, not eliminating,
   indirect prompt injection (it prevents the boundary breakout, not persuasion).
-- Optional FastMCP stdio server (`websearch mcp`, the `mcp` extra) exposing
+- FastMCP stdio server (`websearch mcp`) exposing
   `web_search`/`web_fetch`/`web_open`; the tool returns the same Envelope JSON the CLI
   emits. New CLI commands `web-search`/`web-fetch`/`web-open`/`mcp`; the lower-level
   `search`/`fetch`/`open` commands stay as the per-layer surfaces.

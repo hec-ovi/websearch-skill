@@ -1,7 +1,7 @@
 # Architecture
 
 The capability is built as a set of isolated layers connected only by versioned JSON
-contracts, packaged as one tool (and, later, one Agent-Skills `SKILL.md`). The default
+contracts, packaged as one tool plus one Agent-Skills `SKILL.md`. The default
 deployment runs the layers in-process for speed. Layers are coupled only through their
 versioned contracts, so a layer is swappable as long as it keeps emitting and accepting
 its contract, regardless of language or process.
@@ -9,15 +9,15 @@ its contract, regardless of language or process.
 ## Layers
 
 ```
-        Layer 3  AGENT I/O   CLI-first core (+ optional MCP stdio adapter)
+        Layer 3  AGENT I/O   CLI-first core (+ bundled MCP stdio adapter)
                    |   web_search / web_fetch / web_open(resolve)
                    |   doc_handle is the only cross-layer key
        +-----------+------------------------+
        |                                    |
   Layer 1  SEARCH                      Layer 2  READ
   thin engine router                   2A fetch + extract
-  - SearXNG (keyless backbone)          - tiered fetch (curl_cffi -> browser tiers)
-  - ddgs (zero-config fallback)         - Trafilatura extraction
+  - ddgs (keyless default)              - tiered fetch (httpx -> curl_cffi)
+  - SearXNG (optional self-hosted)      - Trafilatura extraction
   - optional keyed adapters             - emit markdown + json_ld + quality_score
   - provenance-aware RRF (k=60)        2B format
   - de-correlate engines                - paginated markdown + JSON sidecar
@@ -29,8 +29,9 @@ its contract, regardless of language or process.
 
 Status: Layers 1 (search), 2A (fetch + extract), 2B (format + store), and 3 (agent I/O,
 including the untrusted-content fence, the FastMCP server, and `SKILL.md`) are implemented,
-plus two standalone keyless tools (`arxiv`, `github`). Harness packaging and the
-multi-manifest distribution are designed but not built yet.
+plus two standalone keyless tools (`arxiv`, `github`). Harness packaging is also built:
+the `skills/` directory, the Claude Code plugin manifests, the MCP registry `server.json`,
+and the PyPI release workflow all ship in this repo (see `docs/INSTALL.md`).
 
 ## Ports and adapters
 
@@ -199,11 +200,10 @@ engines; shipping them as keyless built-ins means you get that coverage without 
 SearXNG. Reddit and X have no keyless, terms-clean search path in 2026, so there is no
 tool for them; use the general web search with a `--site` filter.
 
-## Honest scope: a Pareto win
+## Scope
 
-This is not a clean sweep over the cloud leaders. Among 2026 agentic-search APIs the top
-tier is statistically tied on result quality, so the real differentiators are latency and
-cost. Anti-bot success on protected sites is low even for paid leaders, and higher
+Among 2026 agentic-search APIs the top tier is statistically tied on result quality, so
+the real differentiators are latency and cost. Anti-bot success on protected sites is low even for paid leaders, and higher
 success is bought with paid residential/mobile proxies plus captcha solving, for which
 there is no reliable free or local solver.
 
@@ -225,7 +225,7 @@ The scorecard decomposes "outperform" into seven measurable axes:
 1. retrieval quality (mean-relevant x authoritativeness)
 2. freshness (force-livecrawl option)
 3. extraction recall and noise ratio
-4. anti-bot success (be honest: good without paid proxies, near-cloud with a plugged-in
+4. anti-bot success (good without paid proxies, near-cloud with a plugged-in
    residential adapter)
 5. end-to-end latency (the unprotected common case, where leaders actually differ)
 6. cost (about zero at the software layer; infra documented)

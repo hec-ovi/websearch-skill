@@ -9,7 +9,7 @@ Open-source multi-engine web search and content extraction for AI agents, built 
 [![tests](https://img.shields.io/badge/tests-423%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
-> **Status: early.** This is `v0.1.0`, the first public release (2026-06-22). The keyless search, the clean-Markdown reader, and the five agent tools work today and are covered by the test suite and a live in-harness check. The hard anti-bot tiers, the opt-in proxy egress, and local rerank are not built yet (see Roadmap). It is new, so pin a version and try it in a sandbox before wiring it into anything sensitive.
+> **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). The keyless search, the clean-Markdown reader, the five agent tools, and the opt-in egress proxy work today and are covered by the test suite. The hard anti-bot tiers and local rerank are not built yet (see Roadmap). Pin a version and try it in a sandbox before wiring it into anything sensitive.
 
 ## What it is
 
@@ -32,9 +32,9 @@ Search works the moment you install it. The default engine is the keyless [`ddgs
 
 For broader and more reliable search you can run your own SearXNG (hundreds of engines, your own server, still no keys), and the router fuses it with `ddgs` and de-correlates the engines they share. A one-command Docker setup is in [`docker/searxng/`](docker/searxng/); see Self-hosting SearXNG below. Public SearXNG instances are deliberately not a default: most disable the JSON API and rate-limit automated clients, so depending on them would break on a fresh install.
 
-It is MIT-licensed and open source, and the keyless default is just the floor. You can stack a self-hosted SearXNG, keyed engines (Brave, Exa, Tavily), or a paid egress adapter on top, all behind the same contracts, none of them required.
+It is MIT-licensed and open source. On top of the keyless default you can add a self-hosted SearXNG, keyed engines (Brave, Exa, Tavily), or a paid egress adapter, all behind the same contracts, none of them required.
 
-The scope is a Pareto trade rather than a clean sweep. Among 2026 agentic-search APIs the top tier is statistically tied on result quality, so cost and latency are the real differentiators; the scorecard below is how I measure that, axis by axis. Where this helps is cost (about zero at the software layer), privacy and self-hosting, multi-engine recall plus dedup, clean extraction, and the unprotected majority of the web. Hard anti-bot at scale is out of scope: it stays a swappable paid egress adapter, because residential proxies and captcha solving have no reliable free equivalent.
+Among 2026 agentic-search APIs the top tier is statistically tied on result quality, so cost and latency are the real differentiators; the scorecard below is how I measure that, axis by axis. Where this helps is cost (about zero at the software layer), privacy and self-hosting, multi-engine recall plus dedup, clean extraction, and the unprotected majority of the web. Hard anti-bot at scale is out of scope: it stays a swappable paid egress adapter, because residential proxies and captcha solving have no reliable free equivalent.
 
 ## Layer status
 
@@ -46,7 +46,7 @@ The scope is a Pareto trade rather than a clean sweep. Among 2026 agentic-search
 | Layer 3: Agent I/O | Consolidated `web_search`/`web_fetch`/`web_open`, untrusted-content fence, optional MCP stdio server, `SKILL.md` | Built |
 | Extra tools | Keyless `arxiv` (paper search) and `github` (repo search), standalone over the same Envelope | Built |
 
-Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.0.0`, `fetch@1.1.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.0.0`, `arxiv@1.0.0`, `github@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
+Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.1.0`, `fetch@1.2.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.1.0`, `arxiv@1.1.0`, `github@1.1.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
 
 ## Layer 1: Search
 
@@ -122,10 +122,9 @@ Pick the route that matches how you use it. Everything is keyless and needs inte
 **As a CLI tool, no install** (`uvx` builds an ephemeral env and runs it):
 
 ```bash
-# straight from git today (no PyPI needed):
-uvx --from git+https://github.com/hec-ovi/websearch-skill websearch web-search "your query"
-# once published to PyPI, the short form:
 uvx websearch-skill web-search "your query"
+# or straight from git, for an unreleased commit:
+uvx --from git+https://github.com/hec-ovi/websearch-skill websearch web-search "your query"
 ```
 
 **As an agent skill** across 40+ agents via the [`skills`](https://www.npmjs.com/package/skills) CLI (it installs the `skills/web-search/` directory into each detected agent):
@@ -308,7 +307,7 @@ Rather than a single claim that it is better, here is how I measure it, axis by 
 | Cost | About zero at the software layer | infra documented separately |
 | Citation accuracy | Source-anchored, deduped results | no fabricated URLs |
 
-Honest scope: top agentic-search APIs are tied on quality, and hard anti-bot at scale is irreducibly paid (even Firecrawl scores about 34% on independently tested protected sites). This project concedes the protected long tail to a swappable paid egress adapter and does not claim to beat everything. The egress adapter, when added, is scoped to search geo-targeting and rate-limit rotation, not anti-bot for page fetches (commercial VPNs use datacenter IPs that anti-bot systems flag).
+Top agentic-search APIs are tied on quality, and hard anti-bot at scale is irreducibly paid (even Firecrawl scores about 34% on independently tested protected sites). This project concedes the protected long tail to a swappable paid egress adapter and does not claim to beat everything. The built-in proxy egress is scoped to search geo-targeting and rate-limit rotation, not anti-bot for page fetches (commercial VPNs use datacenter IPs that anti-bot systems flag); the paid residential adapter for the long tail is the planned piece.
 
 ## Benchmark
 
@@ -318,9 +317,11 @@ A same-query, same-moment head-to-head against the web search built into Claude 
 
 Built: harness packaging ships the `SKILL.md` plus the bundled tool via `npx skills add`, a Claude Code plugin and marketplace, the MCP registry (`server.json`), and PyPI/uvx, with per-harness MCP registration documented in [`docs/INSTALL.md`](docs/INSTALL.md).
 
+Also built: the opt-in egress proxy (`WEBSEARCH_PROXY`, `--proxy`, NordVPN shorthand) covering every network path.
+
 Planned, not built yet:
 
-- **Opt-in egress:** gluetun / wg-netns proxy or VPN scoped to search geo and rate limits (not anti-bot), plus a paid residential-proxy adapter for the protected long tail.
+- **Paid egress adapter:** a residential-proxy adapter for the protected long tail, plus optional gluetun / wg-netns network-namespace isolation.
 - **Local rerank:** a cross-encoder pass to turn multi-engine recall into precision.
 - **More engines:** keyed adapters (Brave, Exa, Tavily) behind the existing `EngineAdapter` port; an optional neural index.
 
