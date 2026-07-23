@@ -4,7 +4,7 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and releases follow
 semantic versioning.
 
-## [Unreleased]
+## [0.2.3] - 2026-07-23
 
 ### Fixed
 
@@ -34,6 +34,9 @@ semantic versioning.
 
 ### Changed
 
+- The release workflow now publishes to the official MCP Registry (GitHub OIDC) right
+  after the PyPI publish, so one `v*` tag updates both and the registry listing can no
+  longer lag PyPI.
 - Connection reuse on every network path (search adapters, fetch tiers, arxiv, github),
   and per-command lazy imports that roughly halve CLI startup for `arxiv`/`github`.
 - `politeness`, `wait_for`, `cache_ttl_seconds`, and the search `egress` block are

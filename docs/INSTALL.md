@@ -190,14 +190,14 @@ curl 'https://registry.modelcontextprotocol.io/v0/servers?search=io.github.hec-o
 
 ### Publishing a new version (maintainer)
 
-The registry proves PyPI ownership through the `mcp-name: io.github.hec-ovi/web-search`
-marker in the published README (it must match `server.json`'s `name`; it ships in the PyPI
-long description because `readme = "README.md"`). To publish a new version after it is on
-PyPI:
+Automated: the release workflow publishes `server.json` to the registry right after the
+PyPI publish on every `v*` tag, authenticating with GitHub OIDC (`id-token: write`; the
+runner's identity covers the `io.github.hec-ovi/*` namespace, no secret involved). The
+registry proves PyPI ownership through the `mcp-name: io.github.hec-ovi/web-search`
+marker in the published README (it must match `server.json`'s `name`; it ships in the
+PyPI long description because `readme = "README.md"`). Keep `server.json`'s `version`
+in lockstep with `pyproject.toml`; the test suite enforces it.
 
-1. Bump the `version` in `server.json` (keep it in lockstep with `pyproject.toml`).
-2. Install the publisher CLI: `mcp-publisher` is a single Go binary from the verified
-   `modelcontextprotocol/registry` GitHub releases (sha256-verify the tarball, drop the
-   binary in `~/.local/bin`). It is not an apt package.
-3. `mcp-publisher login github` (browser OAuth as the repo owner; grants the
-   `io.github.hec-ovi/*` namespace), then `mcp-publisher publish` from the repo root.
+Manual fallback: install `mcp-publisher` (a single Go binary from the
+`modelcontextprotocol/registry` GitHub releases), `mcp-publisher login github` (browser
+OAuth as the repo owner), then `mcp-publisher publish` from the repo root.
