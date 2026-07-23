@@ -63,6 +63,12 @@ class SearchRouter:
     def __init__(self, adapters: list[EngineAdapter]):
         self._adapters = list(adapters)
 
+    @property
+    def adapters(self) -> list[EngineAdapter]:
+        # Read dynamically by Layer 3 (getattr(router, "adapters", []) in the facade's
+        # engine validation), so a plain grep for ".adapters" misses the usage.
+        return list(self._adapters)
+
     def _select(self, request: SearchRequest) -> list[EngineAdapter]:
         enabled = [a for a in self._adapters if a.enabled()]
         if request.engines is None:
