@@ -61,18 +61,6 @@ def set_agent(agent: AgentIO) -> None:
     _AGENT = agent
 
 
-def set_arxiv_tool(tool: ArxivTool) -> None:
-    """Inject the arXiv tool (tests stand in for the network)."""
-    global _ARXIV
-    _ARXIV = tool
-
-
-def set_github_tool(tool: GithubTool) -> None:
-    """Inject the GitHub tool (tests stand in for the network)."""
-    global _GITHUB
-    _GITHUB = tool
-
-
 def _arxiv() -> ArxivTool:
     global _ARXIV
     if _ARXIV is None:

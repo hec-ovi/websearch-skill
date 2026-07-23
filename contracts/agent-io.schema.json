@@ -15,7 +15,7 @@
         "max_results": { "type": "integer", "minimum": 0, "default": 8, "description": "Result cap after fusion; 0 = no cap (everything the engines returned). 8 is an engineering default (not a documented platform constant); raise for research, lower for a quick lookup." },
         "offset": { "type": "integer", "minimum": 0, "default": 0 },
         "detail": { "enum": ["concise", "detailed"], "default": "concise", "description": "concise omits per-result engines + score to save tokens; detailed includes them. Neither truncates the snippet." },
-        "engines": { "type": ["array", "null"], "items": { "type": "string" }, "default": null, "description": "Engine names to query; null = all configured." },
+        "engines": { "type": ["array", "null"], "items": { "type": "string" }, "default": null, "description": "Layer-1 adapter names to query (ddgs/searxng); null = all configured. Library-only knob, not exposed on the CLI web-search or MCP faces. Unknown names are dropped with a warning, never a hard failure." },
         "country": { "type": ["string", "null"], "default": null, "description": "ISO 3166-1 alpha-2." },
         "language": { "type": ["string", "null"], "default": null, "description": "ISO 639-1." },
         "freshness": { "enum": ["any", "day", "week", "month", "year"], "default": "any" },
@@ -50,7 +50,7 @@
         "query": { "type": "string" },
         "results": { "type": "array", "items": { "$ref": "#/$defs/AgentSearchHit" } },
         "total_returned": { "type": "integer", "minimum": 0, "default": 0 },
-        "next_offset": { "type": ["integer", "null"], "minimum": 0, "default": null, "description": "Offset for the next page of results, or null when the engines returned no more." },
+        "next_offset": { "type": ["integer", "null"], "minimum": 0, "default": null, "description": "Cursor for the next page of results. The keyless engines advertise no reliable cross-engine cursor, so this is currently always null; deliberate paging remains available via the offset input." },
         "warnings": { "type": "array", "items": { "type": "string" }, "default": [] }
       }
     },
@@ -68,7 +68,7 @@
         "timeout_ms": { "type": "integer", "minimum": 1, "default": 20000 },
         "allow_private_hosts": { "type": "boolean", "default": false, "description": "Disable the SSRF egress guard (permit private/loopback/metadata addresses)." },
         "datamark": { "type": "boolean", "default": false, "description": "Interleave a Private-Use marker between words inside the fence (Microsoft Spotlighting). Higher injection resistance; off by default." },
-        "chars_per_token": { "type": "number", "exclusiveMinimum": 0, "default": 4 }
+        "chars_per_token": { "type": "number", "exclusiveMinimum": 0, "default": 4, "description": "Characters-per-token heuristic for the token estimates and pagination. Library-only knob, not exposed on the CLI or MCP faces." }
       }
     },
 
@@ -82,7 +82,7 @@
         "page": { "type": "integer", "minimum": 1, "default": 1 },
         "page_size_tokens": { "type": "integer", "minimum": 0, "default": 4000, "description": "Soft per-page token budget; 0 = the whole stored body as one page." },
         "datamark": { "type": "boolean", "default": false },
-        "chars_per_token": { "type": "number", "exclusiveMinimum": 0, "default": 4 }
+        "chars_per_token": { "type": "number", "exclusiveMinimum": 0, "default": 4, "description": "Characters-per-token heuristic for the token estimates and pagination. Library-only knob, not exposed on the CLI or MCP faces." }
       }
     },
 
@@ -128,7 +128,7 @@
       "type": "object",
       "required": ["pages"],
       "additionalProperties": false,
-      "description": "Envelope.data for web_fetch and web_open. One AgentPage per fetched/opened URL (web_fetch may take several URLs).",
+      "description": "Envelope.data for web_fetch and web_open. web_fetch and web_open take exactly one URL/handle, so pages holds one AgentPage; the CLI web-fetch command accepts several URLs (the library's web_fetch_many) and returns one AgentPage per URL.",
       "properties": {
         "pages": { "type": "array", "items": { "$ref": "#/$defs/AgentPage" } },
         "query": { "type": ["string", "null"], "default": null },

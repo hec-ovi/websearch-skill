@@ -42,7 +42,7 @@
       "required": ["layer", "backend", "elapsed_ms"],
       "additionalProperties": true,
       "properties": {
-        "layer": { "type": "string", "description": "\"search\" | \"extract\" | \"format\" | \"agentio\"" },
+        "layer": { "type": "string", "description": "\"search\" | \"extract\" | \"format\" | \"agentio\" | \"arxiv\" | \"github\" | \"cli\" (cross-layer CLI errors)" },
         "backend": {
           "type": ["string", "null"],
           "description": "Active adapter id(s), e.g. \"searxng+ddgs\"."

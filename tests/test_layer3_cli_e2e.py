@@ -110,6 +110,68 @@ def test_cli_web_open_unknown_handle_is_error(capsys):
     assert env["error"]["code"] == "not_opened"
 
 
+def test_cli_more_hint_carries_a_nondefault_page_size(httpx_mock, capsys):
+    # The suggested next-page command must reproduce the same pagination geometry, or it
+    # would silently skip content fetched with a non-default page size.
+    httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
+    rc = cli.main(["web-fetch", FETCH_URL, "--page-size-tokens", "20"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert f'(more: web-fetch "{FETCH_URL}" --page 2 --page-size-tokens 20)' in out
+
+
+def test_cli_more_hint_with_persist_path_carries_a_nondefault_page_size(
+    httpx_mock, tmp_path, capsys
+):
+    db = str(tmp_path / "idx.sqlite")
+    httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
+    rc = cli.main(["web-fetch", FETCH_URL, "--page-size-tokens", "20", "--persist-path", db])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "(more: web-open " in out
+    assert f"--page 2 --page-size-tokens 20 --persist-path {db})" in out
+
+
+def test_more_hint_omits_the_default_page_size():
+    hint = cli._more_hint({"page": 1, "handle": "h~x", "url": "https://u.test/"}, None)
+    assert "--page-size-tokens" not in hint
+    assert "--page 2" in hint
+
+
+def test_cli_default_page_size_matches_the_layer3_default():
+    from websearch.layer3_agentio import DEFAULT_PAGE_SIZE_TOKENS
+
+    # cli mirrors the constant without importing the layer at startup; keep them in lockstep.
+    assert cli._DEFAULT_PAGE_SIZE_TOKENS == DEFAULT_PAGE_SIZE_TOKENS
+
+
+def test_cli_backstop_error_carries_the_commands_contract_version(monkeypatch, capsys):
+    from websearch.tool_github import GITHUB_CONTRACT_VERSION
+
+    def boom(args):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(cli, "_cmd_github", boom)
+    rc = cli.main(["github", "x", "--json"])
+    assert rc == 1
+    env = json.loads(capsys.readouterr().out)
+    assert env["error"]["code"] == "internal_error"
+    assert env["contract_version"] == GITHUB_CONTRACT_VERSION  # not agent-io's
+    assert env["meta"]["layer"] == "cli"
+
+
+def test_cli_proxy_config_error_carries_the_commands_contract_version(monkeypatch, capsys):
+    from websearch.tool_arxiv import ARXIV_CONTRACT_VERSION
+
+    monkeypatch.delenv("NORDVPN_USER", raising=False)
+    monkeypatch.delenv("NORDVPN_PASS", raising=False)
+    rc = cli.main(["arxiv", "x", "--proxy", "nordvpn", "--json"])
+    assert rc == 1
+    env = json.loads(capsys.readouterr().out)
+    assert env["error"]["code"] == "invalid_request"
+    assert env["contract_version"] == ARXIV_CONTRACT_VERSION
+
+
 def test_cli_mcp_command_without_fastmcp_is_actionable(monkeypatch, capsys):
     # Simulate the optional dependency being absent: the import helper raises ImportError,
     # and the command must surface an actionable error, not a traceback or a blocking run.

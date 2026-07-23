@@ -9,6 +9,8 @@ tool registration + dispatch.
 from __future__ import annotations
 
 import asyncio
+import threading
+from datetime import datetime
 
 import pytest
 
@@ -151,10 +153,103 @@ def test_web_fetch_zero_page_size_returns_the_whole_body_as_one_page(agent, http
     assert "Ownership is the mechanism" in page["content"]
 
 
-def test_web_fetch_invalid_url_is_fetch_failed(agent):
+def test_web_fetch_invalid_url_is_invalid_request_not_retriable(agent):
+    # A caller error (non-http scheme) propagates as invalid_request, retriable false;
+    # it must not collapse into a retriable fetch_failed.
     env = agent.web_fetch(AgentFetchRequest(url="ftp://nope"))
     assert not env.ok
+    assert env.error.code == "invalid_request"
+    assert env.error.retriable is False
+
+
+def test_web_fetch_ssrf_refusal_is_permanent(agent):
+    # An egress-refused address is a permanent failure: the code stays fetch_failed but
+    # retriable must propagate as false from Layer 2, not be rewritten to true.
+    env = agent.web_fetch(AgentFetchRequest(url="http://100.64.0.1/x"))
+    assert not env.ok
     assert env.error.code == "fetch_failed"
+    assert env.error.retriable is False
+
+
+def test_web_fetch_transient_failure_stays_retriable(agent, httpx_mock):
+    import httpx
+
+    httpx_mock.add_exception(httpx.ConnectError("refused"), url="https://down.test/x")
+    env = agent.web_fetch(AgentFetchRequest(url="https://down.test/x"))
+    assert not env.ok
+    assert env.error.code == "fetch_failed"
+    assert env.error.retriable is True
+
+
+def test_fetch_many_propagates_shared_code_and_retriability(agent):
+    env = agent.web_fetch_many(["ftp://a", "ftp://b"])
+    assert not env.ok
+    assert env.error.code == "invalid_request"
+    assert env.error.retriable is False
+
+
+def test_fetch_many_permanent_failures_not_retriable(agent):
+    env = agent.web_fetch_many(["http://100.64.0.1/x"])
+    assert not env.ok
+    assert env.error.code == "fetch_failed"
+    assert env.error.retriable is False
+
+
+def test_fetch_many_zero_chars_per_token_is_clamped(agent, httpx_mock):
+    # chars_per_token=0 used to divide by zero in the token estimate; it clamps to the
+    # default instead.
+    httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
+    env = agent.web_fetch_many([FETCH_URL], chars_per_token=0)
+    assert env.ok
+    assert env.data["pages"][0]["page_tokens"] > 0
+
+
+def test_fetched_at_is_stamped_and_survives_web_open(agent, httpx_mock):
+    httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
+    fenv = agent.web_fetch(AgentFetchRequest(url=FETCH_URL))
+    fetched_at = fenv.data["pages"][0]["fetched_at"]
+    assert fetched_at is not None
+    datetime.fromisoformat(fetched_at)  # parseable ISO 8601
+    oenv = agent.web_open(AgentOpenRequest(handle=fenv.data["pages"][0]["handle"]))
+    assert oenv.data["pages"][0]["fetched_at"] == fetched_at
+
+
+def test_lazy_store_build_is_race_free(monkeypatch):
+    import websearch.layer3_agentio.facade as fac
+
+    aio = build_agent_io(enable_ddgs=False, enable_curl_cffi=False)
+    real_build = fac.build_page_index
+    calls: list[int] = []
+    barrier = threading.Barrier(2)
+
+    def slow_build(config):
+        calls.append(1)
+        import time
+
+        time.sleep(0.05)  # widen the race window
+        return real_build(config)
+
+    monkeypatch.setattr(fac, "build_page_index", slow_build)
+    stores: list[object] = []
+
+    def grab():
+        barrier.wait()
+        stores.append(aio.store)
+
+    threads = [threading.Thread(target=grab) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1  # built exactly once
+    assert stores[0] is stores[1]
+
+
+def test_partial_engine_match_warns_about_dropped_names(agent):
+    env = agent.web_search(AgentSearchRequest(query="rust", engines=["ddgs", "goggle"]))
+    assert env.ok
+    assert env.data["results"]  # the valid subset still searched
+    assert any("goggle" in w for w in env.data["warnings"])
 
 
 # --- web_open ----------------------------------------------------------------------
@@ -188,6 +283,20 @@ def test_open_by_url_also_resolves(agent, httpx_mock):
     agent.web_fetch(AgentFetchRequest(url=FETCH_URL))
     oenv = agent.web_open(AgentOpenRequest(handle=FETCH_URL))
     assert oenv.ok and oenv.data["pages"][0]["source"] == "cache"
+
+
+def test_open_by_handle_uses_the_index_fast_path(agent, httpx_mock, monkeypatch):
+    # A handle fetched by this instance resolves from the handle index without rescanning
+    # (and re-hashing) every stored URL; the full scan is only the persisted-store fallback.
+    httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
+    handle = agent.web_fetch(AgentFetchRequest(url=FETCH_URL)).data["pages"][0]["handle"]
+
+    def boom():
+        raise AssertionError("resolve_index scanned despite an indexed handle")
+
+    monkeypatch.setattr(agent.store, "resolve_index", boom)
+    env = agent.web_open(AgentOpenRequest(handle=handle))
+    assert env.ok and env.data["pages"][0]["source"] == "cache"
 
 
 def test_open_unknown_handle_is_not_opened(agent):
@@ -265,11 +374,21 @@ def test_fetch_many_all_fail_preserves_the_cause(agent, httpx_mock):
 # --- MCP server --------------------------------------------------------------------
 
 
-def test_mcp_server_registers_and_dispatches(httpx_mock, agent):
+@pytest.fixture
+def mcp_with_agent(agent):
+    """Injects the faked AgentIO into the MCP module and restores the previous singleton,
+    so no test leaks a module-global _AGENT into the rest of the session."""
     pytest.importorskip("fastmcp")
     from websearch.layer3_agentio import mcp_server
 
+    prev = mcp_server._AGENT
     mcp_server.set_agent(agent)
+    yield mcp_server
+    mcp_server._AGENT = prev
+
+
+def test_mcp_server_registers_and_dispatches(httpx_mock, mcp_with_agent):
+    mcp_server = mcp_with_agent
     httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
 
     async def check():
@@ -285,11 +404,7 @@ def test_mcp_server_registers_and_dispatches(httpx_mock, agent):
     asyncio.run(check())
 
 
-def test_mcp_tool_invalid_argument_returns_error_envelope(agent):
-    pytest.importorskip("fastmcp")
-    from websearch.layer3_agentio import mcp_server
-
-    mcp_server.set_agent(agent)
-    out = mcp_server.web_search(query="x", detail="not-a-mode")
+def test_mcp_tool_invalid_argument_returns_error_envelope(mcp_with_agent):
+    out = mcp_with_agent.web_search(query="x", detail="not-a-mode")
     assert out["ok"] is False
     assert out["error"]["code"] == "invalid_request"

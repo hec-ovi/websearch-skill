@@ -15,12 +15,14 @@ accumulates the pages it fetched and can open any of them.
 from __future__ import annotations
 
 import hashlib
+import threading
 import time
+from datetime import UTC, datetime
 
 from pydantic import ValidationError
 
 from .. import errors
-from ..envelope import Envelope, error_envelope, ok_envelope
+from ..envelope import Envelope, EnvelopeError, error_envelope, ok_envelope
 from ..layer1_search import SearchRequest, build_router
 from ..layer2_extract import FetchRequest, build_pipeline
 from ..layer2_format import PageInput, StoreConfig, build_page_index
@@ -63,18 +65,24 @@ class AgentIO:
         pipeline,
         *,
         store_config: StoreConfig | None = None,
-        chars_per_token: float = DEFAULT_CHARS_PER_TOKEN,
     ):
         self._router = router
         self._pipeline = pipeline
         self._store_config = store_config or StoreConfig()
-        self._chars_per_token = chars_per_token
         self._store = None  # lazily built so a search-only run never touches the store
+        self._store_lock = threading.Lock()
+        # handle -> the URLs this instance indexed under it, so web_open resolves without
+        # recomputing make_handle over the whole store on every call.
+        self._handles: dict[str, set[str]] = {}
 
     @property
     def store(self):
+        # Double-checked: FastMCP runs sync tools on a worker pool, so two first fetches
+        # can race here; without the lock one of the two stores would be orphaned.
         if self._store is None:
-            self._store = build_page_index(self._store_config)
+            with self._store_lock:
+                if self._store is None:
+                    self._store = build_page_index(self._store_config)
         return self._store
 
     # --- web_search ----------------------------------------------------------------
@@ -192,13 +200,20 @@ class AgentIO:
                 f"requested engine(s) {sorted(set(requested))} are not available "
                 f"(adapters: {sorted(known)}); searched all available engines instead."
             )
+        dropped = sorted(set(requested) - known)
+        if dropped:
+            # A partial match must not silently narrow the search: name what was dropped.
+            return valid, (
+                f"requested engine(s) {dropped} are not available "
+                f"(adapters: {sorted(known)}); searched {sorted(set(valid))} only."
+            )
         return valid, None
 
     # --- web_fetch -----------------------------------------------------------------
 
     def web_fetch(self, req: AgentFetchRequest) -> Envelope:
         t0 = time.perf_counter()
-        page, req_warnings = self._fetch_one(
+        page, req_warnings, err = self._fetch_one(
             req.url,
             page=req.page,
             page_size_tokens=req.page_size_tokens,
@@ -209,11 +224,13 @@ class AgentIO:
             chars_per_token=req.chars_per_token,
         )
         if page is None:
+            # Propagate the underlying layer's code and retriability: an SSRF refusal or a
+            # bad scheme is permanent and must not be advertised as a retriable fetch_failed.
             return error_envelope(
                 AGENTIO_CONTRACT_VERSION,
-                code=errors.FETCH_FAILED,
+                code=err.code if err else errors.FETCH_FAILED,
                 message=req_warnings[0] if req_warnings else f"{req.url}: fetch failed.",
-                retriable=True,
+                retriable=err.retriable if err else True,
                 layer="agentio",
                 backend="fetch",
                 elapsed_ms=(time.perf_counter() - t0) * 1000,
@@ -238,13 +255,17 @@ class AgentIO:
         allow_private_hosts: bool = False,
         datamark: bool = False,
         chars_per_token: float = DEFAULT_CHARS_PER_TOKEN,
-        query: str | None = None,
     ) -> Envelope:
         t0 = time.perf_counter()
+        # Raw kwargs bypass AgentFetchRequest's gt=0, and chars_per_token<=0 would divide
+        # by zero in the token estimate; clamp to the default instead of crashing.
+        if chars_per_token <= 0:
+            chars_per_token = DEFAULT_CHARS_PER_TOKEN
         pages: list[AgentPage] = []
         warnings: list[str] = []
+        failures: list[EnvelopeError] = []
         for url in urls:
-            page_obj, req_warnings = self._fetch_one(
+            page_obj, req_warnings, err = self._fetch_one(
                 url,
                 page=page,
                 page_size_tokens=page_size_tokens,
@@ -257,21 +278,26 @@ class AgentIO:
             warnings.extend(req_warnings)
             if page_obj is not None:
                 pages.append(page_obj)
+            elif err is not None:
+                failures.append(err)
         if not pages:
             # Carry the per-URL reasons into the message so the cause is not lost (a single
             # failed URL then reads as "<url>: <code>: <detail>", which points at the fix,
-            # e.g. a private host needing --allow-private-hosts).
+            # e.g. a private host needing --allow-private-hosts). Code and retriability
+            # propagate from the underlying failures: one shared code survives as-is, mixed
+            # codes collapse to fetch_failed, and retriable only if retrying could help.
             detail = "; ".join(warnings) if warnings else f"all {len(urls)} url(s) failed to fetch"
+            codes = {f.code for f in failures}
             return error_envelope(
                 AGENTIO_CONTRACT_VERSION,
-                code=errors.FETCH_FAILED,
+                code=codes.pop() if len(codes) == 1 else errors.FETCH_FAILED,
                 message=f"{detail}; nothing to return.",
-                retriable=True,
+                retriable=any(f.retriable for f in failures),
                 layer="agentio",
                 backend="fetch",
                 elapsed_ms=(time.perf_counter() - t0) * 1000,
             )
-        payload = AgentFetchPayload(pages=pages, query=query, warnings=warnings)
+        payload = AgentFetchPayload(pages=pages, warnings=warnings)
         return ok_envelope(
             AGENTIO_CONTRACT_VERSION,
             payload.model_dump(mode="json"),
@@ -291,7 +317,10 @@ class AgentIO:
         allow_private_hosts: bool,
         datamark: bool,
         chars_per_token: float,
-    ) -> tuple[AgentPage | None, list[str]]:
+    ) -> tuple[AgentPage | None, list[str], EnvelopeError | None]:
+        """Fetch one URL. Returns ``(page, warnings, error)``; on failure ``page`` is None
+        and ``error`` carries the underlying layer's code and retriability so the caller's
+        envelope never misreports a permanent refusal as retriable."""
         try:
             freq = FetchRequest(
                 url=url,
@@ -300,13 +329,22 @@ class AgentIO:
                 allow_private_hosts=allow_private_hosts,
             )
         except ValidationError as exc:
-            return None, [f"{url}: invalid fetch request ({exc}); skipped."]
+            msg = f"{url}: invalid fetch request ({exc}); skipped."
+            return (
+                None,
+                [msg],
+                EnvelopeError(code=errors.INVALID_REQUEST, message=msg, retriable=False),
+            )
 
         env = self._pipeline.run(freq)
         if not env.ok:
             err = env.error
             msg = f"{url}: {err.code}: {err.message}" if err else f"{url}: fetch failed."
-            return None, [msg]
+            return (
+                None,
+                [msg],
+                err or EnvelopeError(code=errors.FETCH_FAILED, message=msg, retriable=True),
+            )
 
         data = env.data or {}
         src = data.get("source") or {}
@@ -329,13 +367,16 @@ class AgentIO:
             page_warnings.append(f"redirected to {final_url}")
         # Index the FULL body so web_open can paginate it later without re-fetching. A
         # store failure must not lose the fetched content, so it degrades to a warning.
+        fetched_at = datetime.now(UTC).isoformat()
         try:
             self.store.add(
                 [
-                    PageInput(url=u, markdown=markdown, title=title, fetched_at=None)
+                    PageInput(url=u, markdown=markdown, title=title, fetched_at=fetched_at)
                     for u in index_urls
                 ]
             )
+            for u in index_urls:
+                self._handles.setdefault(make_handle(u), set()).add(u)
         except Exception as exc:
             page_warnings.append(f"page index failed: {type(exc).__name__}: {exc}")
 
@@ -350,10 +391,10 @@ class AgentIO:
             source="live",
             blocked=bool(src.get("blocked")),
             block_reason=src.get("block_reason"),
-            fetched_at=None,
+            fetched_at=fetched_at,
             warnings=page_warnings,
         )
-        return page_obj, []
+        return page_obj, [], None
 
     # --- web_open ------------------------------------------------------------------
 
@@ -419,11 +460,16 @@ class AgentIO:
         """
         if handle.startswith(("http://", "https://")):
             return self.store.get(handle)
-        matches = {
-            entry.url
-            for entry in self.store.resolve_index().docs
-            if make_handle(entry.url) == handle
-        }
+        # Fast path: the handles this instance indexed. The full scan (recomputing the
+        # sha1 handle over every stored URL) only runs for a persisted store written by
+        # another process, whose entries this instance never saw.
+        matches = self._handles.get(handle)
+        if matches is None:
+            matches = {
+                entry.url
+                for entry in self.store.resolve_index().docs
+                if make_handle(entry.url) == handle
+            }
         if len(matches) != 1:
             return None
         return self.store.get(next(iter(matches)))
@@ -509,7 +555,6 @@ def build_agent_io(
     enable_curl_cffi: bool = True,
     curl_cffi_getter=None,
     store_config: StoreConfig | None = None,
-    chars_per_token: float = DEFAULT_CHARS_PER_TOKEN,
     router=None,
     pipeline=None,
     proxy: str | None = None,
@@ -532,4 +577,4 @@ def build_agent_io(
     pipeline = pipeline or build_pipeline(
         enable_curl_cffi=enable_curl_cffi, curl_cffi_getter=curl_cffi_getter, proxy=proxy
     )
-    return AgentIO(router, pipeline, store_config=store_config, chars_per_token=chars_per_token)
+    return AgentIO(router, pipeline, store_config=store_config)

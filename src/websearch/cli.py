@@ -1,9 +1,11 @@
-"""Layer-3 CLI: the primary agent-facing entry point.
+"""The websearch CLI: every layer's commands behind one entry point.
 
-It exposes ``websearch search`` (Layer 1) and ``websearch fetch`` (Layer 2A). The
-optional MCP adapter and the open/resolve subcommand arrive with their layers, over
-the same Envelope payloads. ``--json`` emits the raw Envelope (the contract surface);
-the default is a compact human view. Exit code is 0 on success, 1 on an error Envelope.
+Per-layer commands (``search``, ``fetch``, ``open``), the consolidated Layer-3 agent
+face (``web-search``, ``web-fetch``, ``web-open``), the keyless ``arxiv``/``github``
+tools, and ``mcp`` (the FastMCP stdio server). ``--json`` emits the raw Envelope (the
+contract surface); the default is a compact human view. Exit code is 0 on success, 1 on
+an error Envelope. Each command imports its own layer inside its handler, so ``arxiv``
+or ``github`` never pays the search/fetch stack's import cost.
 """
 
 from __future__ import annotations
@@ -17,29 +19,36 @@ from typing import Any
 from pydantic import ValidationError
 
 from . import errors
-from .envelope import error_envelope
-from .layer1_search import SEARCH_CONTRACT_VERSION, SearchRequest, build_router
-from .layer2_extract import EXTRACT_CONTRACT_VERSION, FetchRequest, build_pipeline
-from .layer2_format import (
-    FORMAT_CONTRACT_VERSION,
-    FormatRequest,
-    PageInput,
-    ResultInput,
-    SearchPageRequest,
-    StoreConfig,
-    build_format_pipeline,
-    build_page_index,
-)
-from .layer3_agentio import (
-    AGENTIO_CONTRACT_VERSION,
-    AgentFetchRequest,
-    AgentOpenRequest,
-    AgentSearchRequest,
-    build_agent_io,
-)
+from .envelope import ENVELOPE_CONTRACT_VERSION, error_envelope
 from .proxy import ProxyConfigError, as_fetch_proxy, resolve_proxy
-from .tool_arxiv import ARXIV_CONTRACT_VERSION, ArxivSearchRequest, build_arxiv_tool
-from .tool_github import GITHUB_CONTRACT_VERSION, GithubSearchRequest, build_github_tool
+
+# Mirrors layer3_agentio.DEFAULT_PAGE_SIZE_TOKENS without importing the layer at module
+# import time (tests pin the two in lockstep).
+_DEFAULT_PAGE_SIZE_TOKENS = 4000
+
+# The per-layer builders are lazy module attributes (PEP 562): each command imports only
+# its own layer at dispatch time, while tests keep monkeypatching e.g. ``cli.build_router``
+# to inject a fake.
+_LAZY_BUILDERS = {
+    "build_router": ".layer1_search",
+    "build_agent_io": ".layer3_agentio",
+    "build_arxiv_tool": ".tool_arxiv",
+    "build_github_tool": ".tool_github",
+}
+
+
+def __getattr__(name: str):
+    layer = _LAZY_BUILDERS.get(name)
+    if layer is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+
+    return getattr(import_module(layer, __package__), name)
+
+
+def _builder(name: str):
+    """The active builder: a monkeypatched module attribute wins over the lazy import."""
+    return globals().get(name) or __getattr__(name)
 
 
 def _add_proxy_arg(p: Any) -> None:
@@ -92,6 +101,8 @@ def _add_search_command(sub: Any) -> None:
 
 
 def _cmd_search(args: argparse.Namespace) -> int:
+    from .layer1_search import SEARCH_CONTRACT_VERSION, SearchRequest
+
     engines = [e.strip() for e in args.engines.split(",") if e.strip()] if args.engines else None
     try:
         request = SearchRequest(
@@ -121,7 +132,7 @@ def _cmd_search(args: argparse.Namespace) -> int:
             print(f"error: {errors.INVALID_REQUEST}: invalid search request", file=sys.stderr)
         return 1
 
-    router = build_router(
+    router = _builder("build_router")(
         searxng_url=args.searxng_url,
         enable_ddgs=not args.no_ddgs,
         ddgs_backend=args.ddgs_backends or "auto",
@@ -228,6 +239,8 @@ def _add_fetch_command(sub: Any) -> None:
 
 
 def _cmd_fetch(args: argparse.Namespace) -> int:
+    from .layer2_extract import EXTRACT_CONTRACT_VERSION, FetchRequest, build_pipeline
+
     if not args.url.startswith(("http://", "https://")):
         return _emit_error(
             EXTRACT_CONTRACT_VERSION,
@@ -407,8 +420,10 @@ def _add_open_command(sub: Any) -> None:
     op.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
 
 
-def _extract_to_result_input(payload: dict) -> ResultInput:
+def _extract_to_result_input(payload: dict):
     """Map a Layer 2A ExtractPayload onto a vendor-neutral Layer 2B ResultInput."""
+    from .layer2_format import ResultInput
+
     src = payload.get("source") or {}
     res = payload.get("result") or {}
     return ResultInput(
@@ -426,6 +441,18 @@ def _extract_to_result_input(payload: dict) -> ResultInput:
 
 
 def _cmd_open(args: argparse.Namespace) -> int:
+    from .layer2_extract import FetchRequest, build_pipeline
+    from .layer2_format import (
+        FORMAT_CONTRACT_VERSION,
+        FormatRequest,
+        PageInput,
+        ResultInput,
+        SearchPageRequest,
+        StoreConfig,
+        build_format_pipeline,
+        build_page_index,
+    )
+
     for u in args.urls:
         if not u.startswith(("http://", "https://")):
             return _emit_error(
@@ -576,6 +603,8 @@ def _add_websearch_command(sub: Any) -> None:
 
 
 def _cmd_websearch(args: argparse.Namespace) -> int:
+    from .layer3_agentio import AGENTIO_CONTRACT_VERSION, AgentSearchRequest
+
     try:
         req = AgentSearchRequest(
             query=args.query,
@@ -596,7 +625,7 @@ def _cmd_websearch(args: argparse.Namespace) -> int:
             layer="agentio",
             as_json=args.json,
         )
-    aio = build_agent_io(searxng_url=args.searxng_url, proxy=resolve_proxy(args.proxy))
+    aio = _builder("build_agent_io")(searxng_url=args.searxng_url, proxy=resolve_proxy(args.proxy))
     env = aio.web_search(req)
     payload = env.model_dump(mode="json")
     if args.json:
@@ -643,7 +672,7 @@ def _add_webfetch_command(sub: Any) -> None:
     fp.add_argument(
         "--page-size-tokens",
         type=int,
-        default=4000,
+        default=_DEFAULT_PAGE_SIZE_TOKENS,
         help="Per-page token budget; 0 = the whole document as one page.",
     )
     fp.add_argument("--tier", choices=["auto", "http", "browser", "stealth"], default="auto")
@@ -661,6 +690,9 @@ def _add_webfetch_command(sub: Any) -> None:
 
 
 def _cmd_webfetch(args: argparse.Namespace) -> int:
+    from .layer2_format import StoreConfig
+    from .layer3_agentio import AGENTIO_CONTRACT_VERSION, AgentFetchRequest
+
     for u in args.urls:
         if not u.startswith(("http://", "https://")):
             return _emit_error(
@@ -691,7 +723,7 @@ def _cmd_webfetch(args: argparse.Namespace) -> int:
             layer="agentio",
             as_json=args.json,
         )
-    aio = build_agent_io(
+    aio = _builder("build_agent_io")(
         enable_ddgs=False,
         store_config=StoreConfig(persist_path=args.persist_path),
         proxy=resolve_proxy(args.proxy),
@@ -709,7 +741,12 @@ def _cmd_webfetch(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        _print_agent_pages_human(payload, quiet=args.quiet, persist_path=args.persist_path)
+        _print_agent_pages_human(
+            payload,
+            quiet=args.quiet,
+            persist_path=args.persist_path,
+            page_size_tokens=args.page_size_tokens,
+        )
     return 0 if env.ok else 1
 
 
@@ -724,7 +761,7 @@ def _add_webopen_command(sub: Any) -> None:
     op.add_argument(
         "--page-size-tokens",
         type=int,
-        default=4000,
+        default=_DEFAULT_PAGE_SIZE_TOKENS,
         help="Per-page token budget; 0 = the whole document as one page.",
     )
     op.add_argument("--datamark", action="store_true")
@@ -734,6 +771,9 @@ def _add_webopen_command(sub: Any) -> None:
 
 
 def _cmd_webopen(args: argparse.Namespace) -> int:
+    from .layer2_format import StoreConfig
+    from .layer3_agentio import AGENTIO_CONTRACT_VERSION, AgentOpenRequest
+
     try:
         req = AgentOpenRequest(
             handle=args.handle,
@@ -749,7 +789,7 @@ def _cmd_webopen(args: argparse.Namespace) -> int:
             layer="agentio",
             as_json=args.json,
         )
-    aio = build_agent_io(
+    aio = _builder("build_agent_io")(
         enable_ddgs=False, store_config=StoreConfig(persist_path=args.persist_path)
     )
     env = aio.web_open(req)
@@ -757,22 +797,40 @@ def _cmd_webopen(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        _print_agent_pages_human(payload, quiet=args.quiet, persist_path=args.persist_path)
+        _print_agent_pages_human(
+            payload,
+            quiet=args.quiet,
+            persist_path=args.persist_path,
+            page_size_tokens=args.page_size_tokens,
+        )
     return 0 if env.ok else 1
 
 
-def _more_hint(p: dict, persist_path: str | None) -> str:
+def _more_hint(
+    p: dict, persist_path: str | None, page_size_tokens: int = _DEFAULT_PAGE_SIZE_TOKENS
+) -> str:
     """The copy-paste-correct next-page command. web-open resolves a handle only against a
     shared store, so it is suggested only with the --persist-path the user already passed;
-    otherwise suggest re-running web-fetch on the URL (always works, re-fetches)."""
+    otherwise suggest re-running web-fetch on the URL (always works, re-fetches). A
+    non-default page size is carried over, else the suggested command would re-paginate
+    with different geometry and silently skip content."""
     nxt = (p.get("page") or 1) + 1
+    size = ""
+    if page_size_tokens != _DEFAULT_PAGE_SIZE_TOKENS:
+        size = f" --page-size-tokens {page_size_tokens}"
     if persist_path:
-        return f"   (more: web-open {p.get('handle')} --page {nxt} --persist-path {persist_path})"
-    return f'   (more: web-fetch "{p.get("url")}" --page {nxt})'
+        return (
+            f"   (more: web-open {p.get('handle')} --page {nxt}{size}"
+            f" --persist-path {persist_path})"
+        )
+    return f'   (more: web-fetch "{p.get("url")}" --page {nxt}{size})'
 
 
 def _print_agent_pages_human(
-    env: dict, quiet: bool = False, persist_path: str | None = None
+    env: dict,
+    quiet: bool = False,
+    persist_path: str | None = None,
+    page_size_tokens: int = _DEFAULT_PAGE_SIZE_TOKENS,
 ) -> None:
     if not env.get("ok"):
         err = env.get("error") or {}
@@ -787,7 +845,7 @@ def _print_agent_pages_human(
             print(f"# {p.get('title') or '(untitled)'}")
             print(f"url:    {p.get('url')}")
             location = f"page {p.get('page')} of {p.get('total_pages')}"
-            more = _more_hint(p, persist_path) if p.get("has_more") else ""
+            more = _more_hint(p, persist_path, page_size_tokens) if p.get("has_more") else ""
             print(f"handle: {p.get('handle')}   {location}   source={p.get('source')}{more}")
             if p.get("blocked"):
                 print(f"[blocked] {p.get('block_reason')}", file=sys.stderr)
@@ -833,6 +891,8 @@ def _add_arxiv_command(sub: Any) -> None:
 
 
 def _cmd_arxiv(args: argparse.Namespace) -> int:
+    from .tool_arxiv import ARXIV_CONTRACT_VERSION, ArxivSearchRequest
+
     try:
         req = ArxivSearchRequest(
             query=args.query,
@@ -850,7 +910,7 @@ def _cmd_arxiv(args: argparse.Namespace) -> int:
             layer="arxiv",
             as_json=args.json,
         )
-    env = build_arxiv_tool(proxy=resolve_proxy(args.proxy)).search(req)
+    env = _builder("build_arxiv_tool")(proxy=resolve_proxy(args.proxy)).search(req)
     payload = env.model_dump(mode="json")
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -910,6 +970,8 @@ def _add_github_command(sub: Any) -> None:
 
 
 def _cmd_github(args: argparse.Namespace) -> int:
+    from .tool_github import GITHUB_CONTRACT_VERSION, GithubSearchRequest
+
     try:
         req = GithubSearchRequest(
             query=args.query,
@@ -926,7 +988,7 @@ def _cmd_github(args: argparse.Namespace) -> int:
             layer="github",
             as_json=args.json,
         )
-    env = build_github_tool(proxy=resolve_proxy(args.proxy)).search(req)
+    env = _builder("build_github_tool")(proxy=resolve_proxy(args.proxy)).search(req)
     payload = env.model_dump(mode="json")
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -995,6 +1057,38 @@ def _cmd_mcp(args: argparse.Namespace) -> int:
     return 0
 
 
+def _contract_version_for(command: str) -> str:
+    """The contract version stamped on a cross-layer 'cli' error envelope: the active
+    command's own contract, so a `websearch github` failure carries github@x.y.z rather
+    than agent-io's version. Imported lazily to keep the startup cost per-command."""
+    if command == "search":
+        from .layer1_search import SEARCH_CONTRACT_VERSION
+
+        return SEARCH_CONTRACT_VERSION
+    if command == "fetch":
+        from .layer2_extract import EXTRACT_CONTRACT_VERSION
+
+        return EXTRACT_CONTRACT_VERSION
+    if command == "open":
+        from .layer2_format import FORMAT_CONTRACT_VERSION
+
+        return FORMAT_CONTRACT_VERSION
+    if command in ("web-search", "web-fetch", "web-open"):
+        from .layer3_agentio import AGENTIO_CONTRACT_VERSION
+
+        return AGENTIO_CONTRACT_VERSION
+    if command == "arxiv":
+        from .tool_arxiv import ARXIV_CONTRACT_VERSION
+
+        return ARXIV_CONTRACT_VERSION
+    if command == "github":
+        from .tool_github import GITHUB_CONTRACT_VERSION
+
+        return GITHUB_CONTRACT_VERSION
+    # mcp (serves several contracts) or an unknown command: the cross-cutting envelope.
+    return ENVELOPE_CONTRACT_VERSION
+
+
 def main(argv: list[str] | None = None) -> int:
     # Fetched/extracted content is frequently non-ASCII; under a C/POSIX locale a bare
     # print() would die with UnicodeEncodeError, so pin the output streams to UTF-8.
@@ -1040,7 +1134,7 @@ def main(argv: list[str] | None = None) -> int:
         # A misconfigured proxy (e.g. 'nordvpn' without service credentials) is caller
         # configuration, not an internal failure.
         return _emit_error(
-            AGENTIO_CONTRACT_VERSION,
+            _contract_version_for(args.command),
             code=errors.INVALID_REQUEST,
             message=str(exc),
             layer="cli",
@@ -1051,7 +1145,7 @@ def main(argv: list[str] | None = None) -> int:
         # unexpected error becomes a clean internal_error (honoring --json when present).
         # SystemExit / KeyboardInterrupt are BaseExceptions and intentionally propagate.
         return _emit_error(
-            AGENTIO_CONTRACT_VERSION,
+            _contract_version_for(args.command),
             code=errors.INTERNAL_ERROR,
             message=f"{args.command} failed unexpectedly: {type(exc).__name__}: {exc}",
             layer="cli",

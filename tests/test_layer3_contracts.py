@@ -1,14 +1,11 @@
 """Consumer-driven conformance for the agent-io (Layer 3) contract.
 
-Validates the request models and the AgentPage shape against the frozen schema, and pins
-the contract version to the models, so a producer change that breaks the recorded shape
-fails CI.
+Validates the request models and the AgentPage shape against the frozen schema, so a
+producer change that breaks the recorded shape fails CI. The schema/constant version
+lockstep lives in test_contract_version_lockstep.py.
 """
 
 from __future__ import annotations
-
-import json
-import pathlib
 
 from tests.conftest import (
     AGENTIO_FETCH_REQUEST_REF,
@@ -17,19 +14,12 @@ from tests.conftest import (
     AGENTIO_SEARCH_REQUEST_REF,
     schema_errors,
 )
-from websearch.layer3_agentio import AGENTIO_CONTRACT_VERSION, fence_untrusted
+from websearch.layer3_agentio import fence_untrusted
 from websearch.layer3_agentio.models import (
     AgentFetchRequest,
     AgentOpenRequest,
     AgentSearchRequest,
 )
-
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-
-
-def test_contract_version_matches_the_models():
-    schema = json.loads((ROOT / "contracts" / "agent-io.schema.json").read_text())
-    assert schema["x-contract-version"] == AGENTIO_CONTRACT_VERSION == "1.1.0"
 
 
 def test_search_request_validates(assert_valid):

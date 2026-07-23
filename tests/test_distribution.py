@@ -134,6 +134,8 @@ def test_server_json_keys_are_camelcase_not_snake_case():
 
 
 def test_all_manifest_versions_match_pyproject():
+    import websearch
+
     v = _version()
     plugin = _json(".claude-plugin/plugin.json")
     mkt = _json(".claude-plugin/marketplace.json")
@@ -143,6 +145,10 @@ def test_all_manifest_versions_match_pyproject():
     assert mkt["plugins"][0]["version"] == v
     assert srv["version"] == v
     assert srv["packages"][0]["version"] == v
+    # __version__ is derived from the installed distribution metadata; if it reports a
+    # different version than pyproject, the environment is stale (re-sync) or the
+    # derivation broke. It must never be a hardcoded string again.
+    assert websearch.__version__ == v
 
 
 # --- MCP registry PyPI-ownership marker ------------------------------------------------
