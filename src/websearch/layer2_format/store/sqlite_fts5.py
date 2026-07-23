@@ -63,10 +63,15 @@ class SqliteFts5Index:
         # concurrency-safe, so every public method serializes on this lock; it is an
         # RLock so a method may call another (and to tolerate future re-entrancy).
         self._lock = threading.RLock()
-        if self._config.persist_path:
-            self._con.execute("PRAGMA journal_mode=WAL")
-            self._con.execute("PRAGMA synchronous=NORMAL")
-        self._create_schema()
+        try:
+            if self._config.persist_path:
+                self._con.execute("PRAGMA journal_mode=WAL")
+                self._con.execute("PRAGMA synchronous=NORMAL")
+            self._create_schema()
+        except Exception:
+            # A failed init must not leak the open connection (and its file handle).
+            self._con.close()
+            raise
 
     def _create_schema(self) -> None:
         self._con.executescript(
@@ -93,9 +98,6 @@ class SqliteFts5Index:
             """
         )
         self._con.commit()
-
-    def available(self) -> bool:
-        return True
 
     def add(self, pages: list[PageInput]) -> AddResult:
         added: list[StoredDoc] = []

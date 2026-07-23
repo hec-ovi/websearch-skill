@@ -87,4 +87,7 @@ class FetchRouter:
             ok=False,
             fetched_via=_TIER_VIA[request.tier_hint],
             error=reason,
+            # No adapter can appear by retrying; classify as a missing dependency so the
+            # pipeline marks the failure non-retriable.
+            failure_kind="dependency_missing",
         )

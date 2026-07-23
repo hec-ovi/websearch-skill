@@ -189,9 +189,25 @@ def dedup_items(
     # Stage 2: MinHash near-duplicate clustering over the exact-survivors.
     if do_minhash and len(reps) > 1:
         perms = make_permutations(num_perm)
+        # Length-band prefilter: Jaccard >= 0.9 forces the two shingle sets (and hence
+        # the normalized lengths) into a ratio of ~[0.9, 1.11]; [0.8, 1.25] adds margin.
+        # A doc with no band neighbor cannot cluster, so its signature is never computed.
+        # The band is derived for thresholds >= the 0.9 default; a looser threshold
+        # admits wider length ratios, so the prefilter is skipped there.
+        lengths = [len(normalize_body(r.body)) for r in reps]
+
+        def _has_band_neighbor(i: int) -> bool:
+            li = lengths[i]
+            if li == 0:
+                return False
+            return any(j != i and 0.8 * li <= lj <= 1.25 * li for j, lj in enumerate(lengths))
+
+        prefilter = jaccard_threshold >= 0.9
         sigs = [
             minhash_signature(r.body, num_perm=num_perm, shingle_size=shingle_size, perms=perms)
-            for r in reps
+            if (not prefilter or _has_band_neighbor(i))
+            else None
+            for i, r in enumerate(reps)
         ]
         dsu = _DSU(len(reps))
         sims: dict[tuple[int, int], float] = {}

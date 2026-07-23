@@ -98,13 +98,16 @@ def test_cli_open_anthropic_blocks(httpx_mock, capsys):
 def test_cli_open_partial_failure_warns(httpx_mock, monkeypatch, capsys):
     import httpx
 
+    from tests.test_layer2_extract_e2e import fake_session_factory
+
     httpx_mock.add_response(url=URL_A, html=ARTICLE_HTML)
     httpx_mock.add_exception(httpx.ConnectError("refused"), url=URL_B)
 
     def boom(url, **kwargs):
         raise RuntimeError("curl down")
 
-    monkeypatch.setattr("curl_cffi.get", boom)  # block escalation to the real network
+    # Block escalation at the Session boundary the curl_cffi fetcher actually uses.
+    monkeypatch.setattr("curl_cffi.Session", fake_session_factory(boom))
     rc = cli.main(["open", URL_A, URL_B, "--json"])
     assert rc == 0  # one succeeded
     env = json.loads(capsys.readouterr().out)
@@ -115,12 +118,14 @@ def test_cli_open_partial_failure_warns(httpx_mock, monkeypatch, capsys):
 def test_cli_open_all_fail_is_error(httpx_mock, monkeypatch, capsys):
     import httpx
 
+    from tests.test_layer2_extract_e2e import fake_session_factory
+
     httpx_mock.add_exception(httpx.ConnectError("refused"))
 
     def boom(url, **kwargs):
         raise RuntimeError("curl down")
 
-    monkeypatch.setattr("curl_cffi.get", boom)
+    monkeypatch.setattr("curl_cffi.Session", fake_session_factory(boom))
     rc = cli.main(["open", URL_A, "--json"])
     assert rc == 1
     env = json.loads(capsys.readouterr().out)

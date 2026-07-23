@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 FORMAT_CONTRACT_VERSION = "1.0.0"
 STORE_CONTRACT_VERSION = "1.0.0"
@@ -92,6 +92,7 @@ class FormatRequest(BaseModel):
     page_size: int = Field(default=5, ge=1)
     mode: Literal["auto", "index", "full"] = "auto"
     body: Literal["highlights", "summary", "text"] = "highlights"
+    # 0 means no limit (repo-wide capping-knob convention): auto always renders full.
     inline_token_budget: int = Field(default=6000, ge=0)
     body_char_budget: int | None = Field(default=4000, ge=0)
     dedup: DedupParams = Field(default_factory=DedupParams)
@@ -99,6 +100,13 @@ class FormatRequest(BaseModel):
     include_anthropic_blocks: bool = False
     anthropic_citations: bool = True
     chars_per_token: float = Field(default=DEFAULT_CHARS_PER_TOKEN, gt=0.0)
+
+    @field_validator("body_char_budget")
+    @classmethod
+    def _zero_means_no_offload(cls, v: int | None) -> int | None:
+        # 0 and None both mean "no offload budget"; normalize to None so the renderer
+        # keeps a single unbounded representation.
+        return None if v == 0 else v
 
 
 class DroppedDuplicate(BaseModel):
@@ -204,10 +212,25 @@ class StoreConfig(BaseModel):
 
     adapter: Literal["sqlite-fts5", "memory", "sqlite-vec", "tantivy"] = "sqlite-fts5"
     persist_path: str | None = None
-    cache_ttl_seconds: int | None = Field(default=None, ge=0)
+    cache_ttl_seconds: int | None = Field(
+        default=None,
+        ge=0,
+        description="Reserved: accepted but not implemented yet (no adapter reads it).",
+    )
     chunk_strategy: Literal["heading", "fixed"] = "heading"
     chunk_max_chars: int = Field(default=1200, ge=1)
     chunk_overlap: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _overlap_below_max_chars(self) -> StoreConfig:
+        # An overlap at or past chunk_max_chars would degenerate fixed chunking to a
+        # window per character (step=1); reject it at the boundary.
+        if self.chunk_overlap >= self.chunk_max_chars:
+            raise ValueError(
+                f"chunk_overlap ({self.chunk_overlap}) must be smaller than "
+                f"chunk_max_chars ({self.chunk_max_chars})"
+            )
+        return self
 
 
 class PageInput(BaseModel):

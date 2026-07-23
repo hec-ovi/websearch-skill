@@ -44,6 +44,3 @@ class ExtractAdapter(ABC):
     @abstractmethod
     def extract(self, request: ExtractRequest) -> ExtractResult:
         """Extract clean content from ``request.html``. Must not raise."""
-
-    def available(self) -> bool:
-        return True

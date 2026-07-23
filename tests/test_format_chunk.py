@@ -56,6 +56,18 @@ def test_fixed_overlap_repeats_boundary_text():
     assert starts[0] == 0 and starts[1] == 7
 
 
+def test_fixed_overlap_at_or_past_max_chars_is_clamped():
+    # overlap >= max_chars would leave no fresh chars per window; the effective overlap
+    # is clamped to max_chars - 1, so all degenerate configs behave like that boundary.
+    text = "abcdefghijklmnopqrstuvwxyz"
+    at_max = chunk_markdown(text, strategy="fixed", max_chars=10, overlap=10)
+    way_past = chunk_markdown(text, strategy="fixed", max_chars=10, overlap=999)
+    boundary = chunk_markdown(text, strategy="fixed", max_chars=10, overlap=9)
+    assert at_max == way_past == boundary
+    for t, s, e in at_max:
+        assert text[s:e] == t  # offsets still slice back verbatim
+
+
 def test_token_estimate_default_and_pluggable():
     assert estimate_tokens("") == 0
     assert estimate_tokens("a" * 8) == 2  # ceil(8/4)

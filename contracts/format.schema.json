@@ -74,12 +74,12 @@
           "default": "highlights",
           "description": "In index mode, which compact preview to show per result: a top highlight, the summary field, or the leading text of the body. The full body is always recoverable by id regardless."
         },
-        "inline_token_budget": { "type": "integer", "minimum": 0, "default": 6000, "description": "auto mode renders the page full when its estimated tokens are at or below this, else index. Mitigates needless resolver round-trips for small result sets." },
+        "inline_token_budget": { "type": "integer", "minimum": 0, "default": 6000, "description": "auto mode renders the page full when its estimated tokens are at or below this, else index. Mitigates needless resolver round-trips for small result sets. 0 means no limit: auto always renders full." },
         "body_char_budget": {
           "type": ["integer", "null"],
           "minimum": 0,
           "default": 4000,
-          "description": "Per-result soft budget for the RENDERED Markdown body in full mode. A longer body is shown up to the budget with a resolve hint; the FULL body is never discarded (it stays in the sidecar and the store, recoverable by id). This is a progressive-disclosure offload trigger, NOT a content cap. null inlines every body in full, no offload."
+          "description": "Per-result soft budget for the RENDERED Markdown body in full mode. A longer body is shown up to the budget with a resolve hint; the FULL body is never discarded (it stays in the sidecar and the store, recoverable by id). This is a progressive-disclosure offload trigger, NOT a content cap. 0 or null means no limit: every body is inlined in full, no offload."
         },
         "dedup": { "$ref": "#/$defs/DedupParams", "default": { "enabled": true, "method": "both", "jaccard_threshold": 0.9, "num_perm": 128, "shingle_size": 4 } },
         "include_sidecar": { "type": "boolean", "default": true, "description": "Emit the parallel JSON sidecar (identical data)." },

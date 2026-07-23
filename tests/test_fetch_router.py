@@ -121,6 +121,16 @@ def test_render_js_requires_browser_tier():
     assert "not installed" in (res.error or "")
 
 
+def test_unavailable_tiers_are_dependency_missing_and_non_retriable():
+    # No adapter can appear by retrying: both no-adapters shapes carry the structured
+    # dependency_missing kind so the pipeline marks the failure non-retriable.
+    none = FetchRouter([]).fetch(FetchRequest(url="https://x.test/"))
+    assert none.status == 0 and none.failure_kind == "dependency_missing"
+    httpx = _http("httpx", 0, status=200, ok=True)
+    browser = FetchRouter([httpx]).fetch(FetchRequest(url="https://x.test/", tier_hint="browser"))
+    assert browser.status == 0 and browser.failure_kind == "dependency_missing"
+
+
 def test_unavailable_fetcher_is_skipped():
     dead = _http("dead", 0, available=False)
     live = FakeFetcher("curl_cffi", order=1, fetched_via="curl_cffi", status=200, ok=True)

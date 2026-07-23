@@ -5,7 +5,7 @@ from __future__ import annotations
 from tests.conftest import ARTICLE_HTML, EXTRACT_RESPONSE_REF
 from websearch.layer2_extract import FetchExtractPipeline, FetchRouter, TrafilaturaExtractor
 from websearch.layer2_extract.exceptions import DependencyMissing
-from websearch.layer2_extract.models import FetchRequest, FetchResult
+from websearch.layer2_extract.models import ExtractResult, FetchRequest, FetchResult
 from websearch.layer2_extract.ports import ExtractAdapter, FetchAdapter
 
 
@@ -157,3 +157,45 @@ def test_unavailable_engine_falls_back_to_default_with_warning():
     assert env.ok is True
     assert any("resiliparse" in w and "opt-in" in w for w in env.data["warnings"])
     assert env.data["result"]["extracted_via"] == "trafilatura"
+
+
+class _ExtractorNamed(ExtractAdapter):
+    name = "jina_readerlm"
+
+    def extract(self, request):
+        return ExtractResult(
+            content_markdown="neural output", quality_score=1.0, extracted_via=self.name
+        )
+
+
+def test_injected_extractor_matching_requested_engine_does_not_warn():
+    # An injected custom extractor satisfies its own engine name: no "opt-in adapter
+    # not installed" warning, and the request runs through that extractor.
+    fetcher = _FetcherReturning(status=200, ok=True, raw_html="<p>x</p>")
+    env = _pipeline(fetcher, _ExtractorNamed()).run(
+        FetchRequest(url="https://x.test/"), extract_overrides={"engine": "jina_readerlm"}
+    )
+    assert env.ok is True
+    assert not any("opt-in" in w for w in env.data["warnings"])
+    assert env.data["result"]["extracted_via"] == "jina_readerlm"
+
+
+def test_reserved_wait_for_and_politeness_warn():
+    fetcher = _FetcherReturning(status=200, ok=True, raw_html=ARTICLE_HTML)
+    env = _pipeline(fetcher).run(
+        FetchRequest(
+            url="https://x.test/",
+            wait_for="#main",
+            politeness={"per_host_delay_ms": 500, "respect_robots": True},
+        )
+    )
+    assert env.ok is True
+    warnings = env.data["warnings"]
+    assert any("wait_for is reserved" in w for w in warnings)
+    assert any("politeness is reserved" in w for w in warnings)
+
+
+def test_default_politeness_and_no_wait_for_do_not_warn():
+    fetcher = _FetcherReturning(status=200, ok=True, raw_html=ARTICLE_HTML)
+    env = _pipeline(fetcher).run(FetchRequest(url="https://x.test/"))
+    assert not any("reserved" in w for w in env.data["warnings"])

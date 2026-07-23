@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from ..chunk import chunk_markdown
 from ..dedup import content_hash
-from ..ids import doc_id, passage_id
+from ..ids import doc_id
 from ..models import DEFAULT_CHARS_PER_TOKEN, PageInput, StoreConfig
 from ..tokens import estimate_tokens
 
@@ -24,7 +24,7 @@ _CONTROL_TO_SPACE[0x7F] = " "
 
 @dataclass
 class PreparedPassage:
-    id: str
+    # No stored id: both adapters recompute passage_id(doc_id, ordinal) at search time.
     doc_id: str
     url: str
     title: str | None
@@ -58,7 +58,6 @@ def prepare_doc(page: PageInput, config: StoreConfig) -> PreparedDoc:
     )
     passages = [
         PreparedPassage(
-            id=passage_id(did, ordinal),
             doc_id=did,
             url=page.url,
             title=page.title,

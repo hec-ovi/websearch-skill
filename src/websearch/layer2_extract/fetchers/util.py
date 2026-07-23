@@ -2,11 +2,45 @@
 
 from __future__ import annotations
 
+from ..models import Cookie
+
 # A current, realistic desktop Chrome UA used when the caller does not supply one.
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 )
+
+
+def hop_headers(headers: dict[str, str], origin_host: str, host: str | None) -> dict[str, str]:
+    """The caller headers safe to send on one redirect hop.
+
+    Credentials are scoped to the host the caller addressed: a redirect to a different
+    host must not receive the Authorization header or a raw Cookie header, or a
+    malicious/compromised origin could exfiltrate them cross-origin.
+    """
+    if (host or "").lower() == origin_host:
+        return dict(headers)
+    return {k: v for k, v in headers.items() if k.lower() not in ("authorization", "cookie")}
+
+
+def hop_cookies(cookies: list[Cookie], origin_host: str, host: str | None) -> dict[str, str]:
+    """The caller cookies that match ``host`` for one redirect hop.
+
+    A cookie without a domain belongs to the host the caller addressed and is dropped on
+    any cross-origin redirect; a domain-scoped cookie goes only to matching hosts
+    (the domain itself or a subdomain of it).
+    """
+    h = (host or "").lower()
+    out: dict[str, str] = {}
+    for c in cookies:
+        if c.domain is None:
+            if h == origin_host:
+                out[c.name] = c.value
+            continue
+        d = c.domain.lstrip(".").lower()
+        if h == d or h.endswith("." + d):
+            out[c.name] = c.value
+    return out
 
 
 def _charset_from_content_type(content_type: str | None) -> str | None:

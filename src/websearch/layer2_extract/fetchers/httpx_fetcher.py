@@ -10,7 +10,7 @@ with charset detection rather than a blind UTF-8 fallback.
 from __future__ import annotations
 
 import time
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -18,7 +18,7 @@ from ..blocks import detect_block
 from ..egress import BlockedEgress, guard_url
 from ..models import FetchRequest, FetchResult
 from ..ports import FetchAdapter
-from .util import DEFAULT_USER_AGENT, read_body
+from .util import DEFAULT_USER_AGENT, hop_cookies, hop_headers, read_body
 
 _MAX_REDIRECTS = 10
 _REDIRECT_STATUS = (301, 302, 303, 307, 308)
@@ -64,7 +64,7 @@ class HttpxFetcher(FetchAdapter):
 
         headers = dict(request.headers)
         headers.setdefault("User-Agent", request.user_agent or DEFAULT_USER_AGENT)
-        cookies = {c.name: c.value for c in request.cookies}
+        origin_host = (urlsplit(request.url).hostname or "").lower()
         proxy = request.proxy.url if (request.proxy and request.proxy.type != "none") else None
         timeout = request.timeout_ms / 1000.0
 
@@ -75,8 +75,6 @@ class HttpxFetcher(FetchAdapter):
                 follow_redirects=False,
                 timeout=timeout,
                 proxy=proxy,
-                headers=headers,
-                cookies=cookies,
             ) as client:
                 for _hop in range(_MAX_REDIRECTS + 1):
                     try:
@@ -89,8 +87,17 @@ class HttpxFetcher(FetchAdapter):
                             kind="egress_refused",
                         )
 
+                    # Per-hop credential scoping: a cross-origin redirect never receives
+                    # the Authorization header or caller cookies (Cookie.domain widens a
+                    # cookie to matching hosts only).
+                    host = urlsplit(current).hostname
+                    send_headers = hop_headers(headers, origin_host, host)
+                    jar = hop_cookies(request.cookies, origin_host, host)
+                    if jar:
+                        send_headers["Cookie"] = "; ".join(f"{n}={v}" for n, v in jar.items())
+
                     content, status, resp_headers, final_url = self._get(
-                        client, current, request.max_bytes
+                        client, current, request.max_bytes, send_headers
                     )
 
                     location = _header(resp_headers, "location")
@@ -124,9 +131,9 @@ class HttpxFetcher(FetchAdapter):
             return fail(f"{type(exc).__name__}: {exc}", None, redirects, kind="transport_error")
 
     def _get(
-        self, client: httpx.Client, url: str, max_bytes: int | None
+        self, client: httpx.Client, url: str, max_bytes: int | None, headers: dict[str, str]
     ) -> tuple[bytes, int, dict[str, str], str]:
-        with client.stream("GET", url) as resp:
+        with client.stream("GET", url, headers=headers) as resp:
             chunks: list[bytes] = []
             total = 0
             for chunk in resp.iter_bytes():

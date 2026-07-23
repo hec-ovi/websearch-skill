@@ -51,7 +51,6 @@ def _tokenize(text: str) -> list[str]:
 
 @dataclass
 class _MemPassage:
-    id: str
     doc_id: str
     url: str
     title: str | None
@@ -89,9 +88,13 @@ class MemoryBm25Index:
         # for one shared store; serialize so a concurrent reindex never sees half-updated
         # lists. RLock because _reindex is called from within the add() critical section.
         self._lock = threading.RLock()
+        self._closed = False
 
-    def available(self) -> bool:
-        return True
+    def _check_open(self) -> None:
+        # Match the sqlite adapter: use-after-close is a programming error, never a
+        # silently-empty result from a cleared corpse.
+        if self._closed:
+            raise RuntimeError("memory-bm25 index is closed; create a new index")
 
     def _reindex(self) -> None:
         self._df = Counter()
@@ -104,6 +107,7 @@ class MemoryBm25Index:
 
     def add(self, pages: list[PageInput]) -> AddResult:
         with self._lock:
+            self._check_open()
             return self._add_locked(pages)
 
     def _add_locked(self, pages: list[PageInput]) -> AddResult:
@@ -148,7 +152,6 @@ class MemoryBm25Index:
                 tokens = _tokenize(p.text)
                 self._passages.append(
                     _MemPassage(
-                        id=p.id,
                         doc_id=p.doc_id,
                         url=p.url,
                         title=p.title,
@@ -200,6 +203,7 @@ class MemoryBm25Index:
 
     def search(self, request: SearchPageRequest) -> SearchPageResult:
         with self._lock:
+            self._check_open()
             query_terms = _tokenize(request.query)
             n = len(self._passages)
             if not query_terms or n == 0:
@@ -248,6 +252,7 @@ class MemoryBm25Index:
 
     def get(self, id_or_url: str) -> PageDocument | None:
         with self._lock:
+            self._check_open()
             doc = self._docs.get(id_or_url)
             if doc is None:
                 doc = next((d for d in self._docs.values() if d.url == id_or_url), None)
@@ -266,6 +271,7 @@ class MemoryBm25Index:
 
     def resolve_index(self) -> ResolveIndex:
         with self._lock:
+            self._check_open()
             docs = [
                 ResolveIndexEntry(
                     id=self._docs[did].id,
@@ -281,6 +287,7 @@ class MemoryBm25Index:
 
     def close(self) -> None:
         with self._lock:
+            self._closed = True
             self._docs.clear()
             self._order.clear()
             self._passages.clear()

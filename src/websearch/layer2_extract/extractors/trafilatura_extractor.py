@@ -31,14 +31,6 @@ QUALITY_FALLBACK_THRESHOLD = 0.80
 class TrafilaturaExtractor(ExtractAdapter):
     name = "trafilatura"
 
-    def available(self) -> bool:
-        try:
-            import lxml  # noqa: F401
-            import trafilatura  # noqa: F401
-        except ImportError:
-            return False
-        return True
-
     def extract(self, request: ExtractRequest) -> ExtractResult:
         t0 = time.perf_counter()
         try:

@@ -97,7 +97,9 @@ class FetchExtractPipeline:
 
         warnings: list[str] = []
         requested_engine = overrides.get("engine", "trafilatura")
-        if requested_engine not in _DEFAULT_ENGINES:
+        # An injected custom extractor satisfies its own engine name; only warn when the
+        # request names an engine neither the default nor the wired adapter provides.
+        if requested_engine not in _DEFAULT_ENGINES and requested_engine != self._extractor.name:
             warnings.append(
                 f"extract engine '{requested_engine}' is an opt-in adapter not installed in "
                 f"this build; used '{self._extractor.name}' instead."
@@ -168,6 +170,15 @@ class FetchExtractPipeline:
             warnings.append(f"fetch returned HTTP {fr.status}.")
         if fetch_request.screenshot and fr.screenshot_b64 is None:
             warnings.append("screenshot requires a browser tier (opt-in); none was captured.")
+        if fetch_request.wait_for is not None:
+            warnings.append(
+                "wait_for is reserved (accepted but not implemented yet); it was ignored."
+            )
+        politeness = fetch_request.politeness
+        if politeness.per_host_delay_ms or politeness.respect_robots:
+            warnings.append(
+                "politeness is reserved (accepted but not implemented yet); it was ignored."
+            )
 
         source = ExtractSource(
             url=fetch_request.url,

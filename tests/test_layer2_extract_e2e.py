@@ -1,7 +1,7 @@
 """End-to-end Layer 2A through the real CLI ``websearch fetch``.
 
 Only the two external boundaries are stubbed: the httpx Tier-0 request (via
-pytest-httpx) and, when escalation is exercised, ``curl_cffi.get`` (faked at the
+pytest-httpx) and, when escalation is exercised, ``curl_cffi.Session`` (faked at the
 libcurl boundary, since pytest-httpx cannot intercept it). Request parsing, tier
 escalation, block detection, extraction, quality scoring, Envelope assembly, and JSON
 serialization all run for real, and the output is validated against the contract.
@@ -20,6 +20,20 @@ from tests.conftest import (
 from websearch import cli
 
 URL = "https://page.test/article"
+
+
+class _FakeCurlSession:
+    """Stands in for curl_cffi.Session: .get delegates to a canned responder."""
+
+    def __init__(self, responder):
+        self._responder = responder
+
+    def get(self, url, **kwargs):
+        return self._responder(url, **kwargs)
+
+
+def fake_session_factory(responder):
+    return lambda *a, **k: _FakeCurlSession(responder)
 
 
 def test_cli_fetch_success_end_to_end(httpx_mock, capsys, assert_valid):
@@ -67,7 +81,8 @@ def test_cli_fetch_transport_failure_is_fetch_failed(httpx_mock, monkeypatch, ca
     def boom(url, **kwargs):
         raise RuntimeError("curl down")
 
-    monkeypatch.setattr("curl_cffi.get", boom)  # block escalation to the real network
+    # block escalation to the real network
+    monkeypatch.setattr("curl_cffi.Session", fake_session_factory(boom))
     rc = cli.main(["fetch", URL, "--json"])
     assert rc == 1
     env = json.loads(capsys.readouterr().out)
@@ -76,7 +91,7 @@ def test_cli_fetch_transport_failure_is_fetch_failed(httpx_mock, monkeypatch, ca
 
 def test_cli_fetch_escalates_to_curl_cffi(httpx_mock, monkeypatch, capsys):
     httpx_mock.add_response(status_code=403, html=CLOUDFLARE_HTML)
-    monkeypatch.setattr("curl_cffi.get", fake_curl_getter(ARTICLE_HTML))
+    monkeypatch.setattr("curl_cffi.Session", fake_session_factory(fake_curl_getter(ARTICLE_HTML)))
     rc = cli.main(["fetch", URL, "--json"])
     assert rc == 0
     data = json.loads(capsys.readouterr().out)["data"]
@@ -87,7 +102,10 @@ def test_cli_fetch_escalates_to_curl_cffi(httpx_mock, monkeypatch, capsys):
 
 def test_cli_fetch_blocked_is_surfaced(httpx_mock, monkeypatch, capsys):
     httpx_mock.add_response(status_code=403, html=CLOUDFLARE_HTML)
-    monkeypatch.setattr("curl_cffi.get", fake_curl_getter(CLOUDFLARE_HTML, status_code=403))
+    monkeypatch.setattr(
+        "curl_cffi.Session",
+        fake_session_factory(fake_curl_getter(CLOUDFLARE_HTML, status_code=403)),
+    )
     rc = cli.main(["fetch", URL, "--json"])
     assert rc == 0  # we still return what we got, with the block surfaced
     data = json.loads(capsys.readouterr().out)["data"]

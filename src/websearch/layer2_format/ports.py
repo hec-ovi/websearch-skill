@@ -69,8 +69,5 @@ class PageIndex(ABC):
     def resolve_index(self) -> ResolveIndex:
         """Return lightweight metadata for every held document (cheap index first)."""
 
-    def available(self) -> bool:
-        return True
-
     def close(self) -> None:  # noqa: B027  (optional hook; default is intentionally a no-op)
         """Release any backing resources (no-op by default)."""

@@ -19,22 +19,9 @@ EXTRACT_CONTRACT_VERSION = "1.0.0"
 # This is a DoS defense, not an output/LLM cap; extracted content is never truncated.
 DEFAULT_MAX_BYTES = 10_000_000
 
-# Recommended block_reason vocabulary (kept as plain strings in the contract so a
-# new anti-bot vendor never forces a contract bump). Grouped by escalation policy.
-ESCALATABLE_BLOCKS = frozenset(
-    {
-        "cloudflare_challenge",
-        "cloudflare_firewall",
-        "datadome",
-        "perimeterx",
-        "akamai",
-        "imperva",
-        "ddos_guard",
-        "forbidden_suspected_bot",
-        "unavailable_suspected_block",
-    }
-)
-# These will not be helped by a stealthier tier from the same egress, so stop.
+# block_reason vocabulary is kept as plain strings in the contract so a new anti-bot
+# vendor never forces a contract bump. Any reason not listed here is escalatable; these
+# will not be helped by a stealthier tier from the same egress, so the router stops.
 TERMINAL_BLOCKS = frozenset({"rate_limited", "auth_required", "legal_geo_block"})
 
 

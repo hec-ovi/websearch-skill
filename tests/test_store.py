@@ -144,11 +144,17 @@ def test_resolve_index_lists_held_docs(adapter, assert_valid):
     assert all(e.token_estimate > 0 for e in ri.docs)
 
 
-def test_empty_query_returns_no_passages():
-    idx = _index("sqlite-fts5")
+@pytest.mark.parametrize("adapter", ADAPTERS)
+@pytest.mark.parametrize("query", [" ", "\x00\x01\x1b"])
+def test_query_with_no_usable_tokens_returns_empty(adapter, query):
+    # Whitespace/control-only queries yield no tokens (escape_fts5_query -> None); both
+    # adapters must short-circuit to an empty result instead of raising or matching.
+    idx = _index(adapter)
     idx.add(_pages())
-    res = idx.search(SearchPageRequest(query="   x   "))  # only "x", matches nothing
-    assert res.passages == [] or all(p.score >= 0 for p in res.passages)
+    res = idx.search(SearchPageRequest(query=query))
+    assert res.passages == []
+    assert res.total == 0
+    assert res.has_more is False
 
 
 def test_sqlite_fts5_available_on_this_interpreter():
@@ -246,3 +252,62 @@ def test_persistence_round_trips(tmp_path):
     got = reopened.get("https://a.test/own")
     assert got is not None and got.markdown == OWNERSHIP
     reopened.close()
+
+
+def test_sqlite_use_after_close_raises():
+    import sqlite3
+
+    idx = _index("sqlite-fts5")
+    idx.add(_pages())
+    idx.close()
+    with pytest.raises(sqlite3.ProgrammingError):
+        idx.search(SearchPageRequest(query="rust"))
+
+
+def test_memory_use_after_close_raises_like_sqlite():
+    # Close must not leave a silently-usable empty corpse; every entry point raises.
+    idx = _index("memory")
+    idx.add(_pages())
+    idx.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        idx.search(SearchPageRequest(query="rust"))
+    with pytest.raises(RuntimeError, match="closed"):
+        idx.add(_pages())
+    with pytest.raises(RuntimeError, match="closed"):
+        idx.get("https://a.test/own")
+    with pytest.raises(RuntimeError, match="closed"):
+        idx.resolve_index()
+
+
+def test_sqlite_init_failure_closes_the_connection(monkeypatch):
+    import sqlite3
+
+    captured = {}
+    real_connect = sqlite3.connect
+
+    def spy(*args, **kwargs):
+        con = real_connect(*args, **kwargs)
+        captured["con"] = con
+        return con
+
+    monkeypatch.setattr(sqlite3, "connect", spy)
+
+    def boom(self):
+        raise sqlite3.OperationalError("schema creation failed")
+
+    monkeypatch.setattr(SqliteFts5Index, "_create_schema", boom)
+    with pytest.raises(sqlite3.OperationalError):
+        SqliteFts5Index(StoreConfig())
+    # The connection opened by __init__ must not leak when init fails.
+    with pytest.raises(sqlite3.ProgrammingError):
+        captured["con"].execute("SELECT 1")
+
+
+def test_chunk_overlap_must_stay_below_chunk_max_chars():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        StoreConfig(chunk_max_chars=100, chunk_overlap=100)
+    with pytest.raises(ValidationError):
+        StoreConfig(chunk_max_chars=100, chunk_overlap=250)
+    assert StoreConfig(chunk_max_chars=100, chunk_overlap=99).chunk_overlap == 99

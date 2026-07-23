@@ -38,7 +38,7 @@ from .models import (
 )
 from .ports import FormatRenderer
 from .renderer import MarkdownRenderer
-from .tokens import Estimator, estimate_tokens
+from .tokens import estimate_tokens
 
 
 def _score_key(item: ResultInput) -> tuple[int, float]:
@@ -60,22 +60,20 @@ class FormatPipeline:
         self,
         request: FormatRequest,
         *,
-        token_estimator: Estimator | None = None,
         trace_id: str | None = None,
     ) -> Envelope:
         """Format ``request`` into an Envelope (meta.layer "format").
 
         ``envelope.data`` is a JSON-serialized ``FormatPayload``: ``data["markdown"]`` is
         the layout-stable document and ``data["sidecar"]`` is the lossless JSON view
-        (full bodies verbatim). Pass ``token_estimator`` to use a real tokenizer instead
-        of the character heuristic. Never raises on valid input.
+        (full bodies verbatim). Never raises on valid input.
         """
         request_id = str(uuid.uuid4())
         t0 = time.perf_counter()
         cpt = request.chars_per_token
 
         def toks(text: str | None) -> int:
-            return estimate_tokens(text, chars_per_token=cpt, estimator=token_estimator)
+            return estimate_tokens(text, chars_per_token=cpt)
 
         # 1. Normalize: fill derived fields without mutating the input models.
         norm: list[ResultInput] = []
@@ -132,7 +130,8 @@ class FormatPipeline:
             dropped = [
                 DroppedDuplicate(
                     url=item.url,
-                    id=doc_id(item.url),
+                    # Honor a caller-supplied ResultInput.id (normalization filled it).
+                    id=item.payload.id or doc_id(item.url),
                     similarity=sim,
                     reason=reason,
                 )
@@ -163,9 +162,11 @@ class FormatPipeline:
 
         page_token_estimate = sum(r.token_estimate for r in page_results)
 
-        # 6. Resolve the render mode.
+        # 6. Resolve the render mode. inline_token_budget == 0 means "no limit"
+        # (repo-wide capping-knob convention), so auto always inlines.
         if request.mode == "auto":
-            fits = page_token_estimate <= request.inline_token_budget
+            budget = request.inline_token_budget
+            fits = budget == 0 or page_token_estimate <= budget
             resolved_mode = "full" if fits else "index"
         else:
             resolved_mode = request.mode

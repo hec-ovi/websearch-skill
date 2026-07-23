@@ -80,12 +80,18 @@ def guard_url(
         raise BlockedEgress(f"refused: cannot resolve host '{host}' ({exc})") from exc
     if not addrs:
         raise BlockedEgress(f"refused: host '{host}' resolved to no addresses")
+    parsed_any = False
     for addr in addrs:
         try:
             ip = ipaddress.ip_address(addr)
         except ValueError:
             continue
+        parsed_any = True
         if _ip_is_internal(ip):
             raise BlockedEgress(
                 f"refused: host '{host}' resolves to private or reserved address {addr}"
             )
+    # Fail closed: a resolver whose every entry is unparseable must not slip through
+    # (the loop above would otherwise skip everything and allow the URL).
+    if not parsed_any:
+        raise BlockedEgress(f"refused: host '{host}' resolved to no parseable addresses")

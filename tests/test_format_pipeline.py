@@ -158,6 +158,59 @@ def test_no_truncate_inlines_full_body():
     assert data["sidecar"]["results"][0]["truncated_in_markdown"] is False
 
 
+def test_zero_body_char_budget_means_never_offload():
+    # Repo-wide capping-knob convention: 0 == no limit, same as null.
+    long_body = "para. " * 2000
+    _env, data = _run(
+        FormatRequest(
+            results=[
+                ResultInput(url="https://a.test/x", title="A", score=0.9, body_markdown=long_body)
+            ],
+            mode="full",
+            body_char_budget=0,
+        )
+    )
+    assert long_body.strip() in data["markdown"]
+    assert data["sidecar"]["results"][0]["truncated_in_markdown"] is False
+
+
+def test_zero_inline_token_budget_means_always_inline():
+    # 0 == no limit: auto mode resolves to full no matter how large the page is.
+    long_body = "para. " * 2000
+    _env, data = _run(
+        FormatRequest(
+            results=[
+                ResultInput(url="https://a.test/x", title="A", score=0.9, body_markdown=long_body)
+            ],
+            mode="auto",
+            inline_token_budget=0,
+            body_char_budget=None,
+        )
+    )
+    assert data["sidecar"]["mode"] == "full"
+    assert long_body.strip() in data["markdown"]
+
+
+def test_dropped_duplicate_honors_caller_supplied_id():
+    _env, data = _run(
+        FormatRequest(
+            results=[
+                ResultInput(url="https://a.test/1", title="A", score=0.9, body_markdown=LOREM),
+                ResultInput(
+                    url="https://mirror.test/1",
+                    id="caller-id-7",
+                    title="A mirror",
+                    score=0.1,
+                    body_markdown=LOREM,
+                ),
+            ]
+        )
+    )
+    dropped = data["sidecar"]["results"][0]["dropped_duplicates"][0]
+    assert dropped["url"] == "https://mirror.test/1"
+    assert dropped["id"] == "caller-id-7"
+
+
 def test_layout_stable_delimited_blocks_carry_ids():
     _env, data = _run(
         FormatRequest(

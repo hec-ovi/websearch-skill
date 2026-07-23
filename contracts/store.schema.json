@@ -15,10 +15,10 @@
           "description": "Index backend. sqlite-fts5 (default) and memory (the pure-Python BM25 fallback) require zero third-party packages. sqlite-vec/tantivy are opt-in adapters honoring the same shapes."
         },
         "persist_path": { "type": ["string", "null"], "default": null, "description": "null => in-memory (ephemeral). A path => persistence; behavior is otherwise identical (WAL is enabled for a file-backed SQLite)." },
-        "cache_ttl_seconds": { "type": ["integer", "null"], "minimum": 0, "default": null, "description": "When set, enables cross-query URL/content-hash dedup so a re-add of an unchanged page is a no-op within the TTL." },
+        "cache_ttl_seconds": { "type": ["integer", "null"], "minimum": 0, "default": null, "description": "Reserved: accepted but not implemented yet (no adapter reads it). Intended to enable cross-query URL/content-hash dedup so a re-add of an unchanged page is a no-op within the TTL." },
         "chunk_strategy": { "enum": ["heading", "fixed"], "default": "heading", "description": "How Markdown is split into passages before indexing: heading-aware (split on Markdown headings, then size-bound) or fixed-size windows." },
         "chunk_max_chars": { "type": "integer", "minimum": 1, "default": 1200, "description": "Upper bound on a passage's character length." },
-        "chunk_overlap": { "type": "integer", "minimum": 0, "default": 0, "description": "Character overlap between adjacent fixed windows." }
+        "chunk_overlap": { "type": "integer", "minimum": 0, "default": 0, "description": "Character overlap between adjacent fixed windows. Must be smaller than chunk_max_chars (an overlap at or past it would degenerate to one window per character)." }
       }
     },
 
@@ -104,7 +104,7 @@
       "additionalProperties": false,
       "properties": {
         "passages": { "type": "array", "items": { "$ref": "#/$defs/Passage" } },
-        "total": { "type": "integer", "minimum": 0, "description": "Total ranked passages matched (capped at top_k)." },
+        "total": { "type": "integer", "minimum": 0, "description": "The TRUE total of matched passages, NOT capped at top_k (the returned/pageable pool is). total > top_k tells the caller more matches exist than were ranked." },
         "page": { "type": "integer", "minimum": 1 },
         "page_size": { "type": "integer", "minimum": 1 },
         "has_more": { "type": "boolean" },

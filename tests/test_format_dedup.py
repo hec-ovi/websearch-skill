@@ -125,6 +125,56 @@ def test_empty_and_single_body_safe():
     assert len(clusters) == 1
 
 
+def test_length_band_prefilter_skips_isolated_lengths(monkeypatch):
+    # At the 0.9 default threshold, two bodies whose normalized lengths sit outside the
+    # [0.8, 1.25] ratio band cannot be near-duplicates, so no signature is computed.
+    import websearch.layer2_format.dedup as dedup_mod
+
+    calls: list = []
+    real = dedup_mod.minhash_signature
+
+    def counting(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(dedup_mod, "minhash_signature", counting)
+    short = "a tiny body of only a few words"
+    huge = "completely different vocabulary in every single sentence here " * 40
+    items = _items(("https://a.test/s", short, 0.5), ("https://a.test/h", huge, 0.4))
+    clusters = dedup_mod.dedup_items(items, method="minhash", jaccard_threshold=0.9)
+    assert len(clusters) == 2  # same outcome as without the prefilter
+    assert calls == []  # neither doc had a band neighbor; signatures skipped entirely
+
+
+def test_length_band_prefilter_off_below_default_threshold(monkeypatch):
+    # A looser threshold admits wider length ratios, so the prefilter must not apply.
+    import websearch.layer2_format.dedup as dedup_mod
+
+    calls: list = []
+    real = dedup_mod.minhash_signature
+
+    def counting(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(dedup_mod, "minhash_signature", counting)
+    items = _items(("https://a.test/base", _BASE, 0.9), ("https://a.test/near", _NEAR, 0.4))
+    clusters = dedup_mod.dedup_items(items, method="minhash", jaccard_threshold=0.6)
+    assert len(clusters) == 1  # still folds, exactly as before the prefilter
+    assert len(calls) == 2  # signatures were computed for both docs
+
+
+def test_length_band_prefilter_preserves_near_duplicate_folding():
+    # In-band near-duplicates still fold at the 0.9 default with the prefilter active.
+    body = " ".join(f"word{i}" for i in range(400))
+    near = body.replace("word200", "changed")
+    items = _items(("https://a.test/1", body, 0.9), ("https://a.test/2", near, 0.1))
+    clusters = dedup_items(items, method="minhash", jaccard_threshold=0.9)
+    assert len(clusters) == 1
+    assert clusters[0].canonical.url == "https://a.test/1"
+    assert clusters[0].duplicates[0][1] == "minhash"
+
+
 def test_distinct_empty_bodies_are_not_folded():
     # Snippet-only or failed-extraction results all hash to the empty-string digest;
     # they must NOT collapse into one canonical (would silently drop distinct URLs).

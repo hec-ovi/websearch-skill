@@ -59,3 +59,14 @@ def test_resolution_failure_is_blocked():
 def test_mixed_resolution_blocks_if_any_address_is_internal():
     with pytest.raises(BlockedEgress):
         guard_url("https://rebind.test/", resolve=lambda h: {"93.184.216.34", "127.0.0.1"})
+
+
+def test_all_unparseable_resolved_entries_fail_closed():
+    # A resolver yielding only garbage must not fall through to "allowed": the guard
+    # requires at least one successfully parsed, non-internal address.
+    with pytest.raises(BlockedEgress):
+        guard_url("https://weird.test/", resolve=lambda h: {"not-an-ip", "also-garbage"})
+
+
+def test_garbage_entries_alongside_a_public_address_are_tolerated():
+    guard_url("https://ok.test/", resolve=lambda h: {"garbage", "93.184.216.34"})  # no raise

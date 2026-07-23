@@ -91,10 +91,12 @@ _STRONG_ERROR_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(p) for p in _STRONG_ERROR_PHRASES) + r")\b"
 )
 # Ambiguous single words and bare HTTP codes ("forbidden", "404"): a legitimate title can
-# contain them ("Forbidden City", "Top 500 Companies"), so they count only in a SHORT or
-# explicitly-error-shaped title. The quality.py veto additionally corroborates with a low
-# word count, so a long real article is never tanked.
+# contain them ("Forbidden City", "Top 500 Companies"), so they count only when the title
+# is made of nothing but error vocabulary ("403 Forbidden", "Forbidden") or co-occurs
+# with the word "error" ("500 Internal Server Error"). The quality.py veto additionally
+# corroborates with a low word count, so a long real article is never tanked.
 _WEAK_ERROR_RE = re.compile(r"\b(?:forbidden|40[0-9]|50[0-9])\b")
+_ERROR_VOCAB_TOKEN_RE = re.compile(r"^(?:forbidden|error|http|40[0-9]|50[0-9])$")
 
 
 def _akamai_deny(body_lc: str) -> bool:
@@ -160,7 +162,11 @@ def title_looks_like_error(title: str | None) -> bool:
     if _STRONG_ERROR_RE.search(t):
         return True
     if _WEAK_ERROR_RE.search(t):
-        # A weak signal (bare "forbidden"/HTTP code) counts only in a short or explicitly
-        # error-shaped title, so "Forbidden City" / "Top 500 Companies" do not trip it.
-        return len(t.split()) <= 4 or "error" in t
+        # A weak signal (bare "forbidden"/HTTP code) counts only when it IS the whole
+        # title (every token is error vocabulary, e.g. "403 Forbidden") or co-occurs
+        # with the token "error", so "Forbidden City" / "Top 500 Companies" never trip.
+        tokens = re.findall(r"[a-z0-9]+", t)
+        if tokens and all(_ERROR_VOCAB_TOKEN_RE.fullmatch(tok) for tok in tokens):
+            return True
+        return "error" in tokens
     return False

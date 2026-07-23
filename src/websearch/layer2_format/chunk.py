@@ -47,7 +47,10 @@ def chunk_markdown(
         return []
 
     if strategy == "fixed":
-        step = max(1, max_chars - max(0, overlap))
+        # An overlap at or past max_chars would degenerate to step=1 (a window per
+        # character); clamp so each window always advances by at least one fresh char.
+        # StoreConfig already rejects such a config; this guards direct callers.
+        step = max_chars - min(max(0, overlap), max_chars - 1)
         out: list[tuple[str, int, int]] = []
         i = 0
         n = len(markdown)

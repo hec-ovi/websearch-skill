@@ -12,10 +12,9 @@ import threading
 
 import pytest
 
-from tests.conftest import DDGS_ROWS, FakeDDGS, ddgs_factory
+from tests.conftest import DDGS_ROWS, ddgs_factory
 from websearch import errors
 from websearch.cli import main
-from websearch.layer2_extract.blocks import title_looks_like_error
 from websearch.layer2_extract.egress import BlockedEgress, guard_url
 from websearch.layer2_extract.models import FetchRequest, FetchResult
 from websearch.layer2_extract.pipeline import FetchExtractPipeline
@@ -33,8 +32,8 @@ def _json(capsys) -> dict:
 # --- facade-1 / cli-1: page <= 0 must never crash with a traceback -------------------
 
 
-def test_web_fetch_page_zero_is_clean_invalid_request(monkeypatch, capsys):
-    monkeypatch.setattr("ddgs.DDGS", lambda *a, **k: FakeDDGS([]))
+def test_web_fetch_page_zero_is_clean_invalid_request(capsys):
+    # Validation rejects the request before any network or engine is touched.
     rc = main(["web-fetch", "https://example.com", "--page", "0", "--json"])
     out = _json(capsys)
     assert rc == 1
@@ -182,17 +181,7 @@ def test_egress_guard_allows_public():
 
 
 # --- layer2-extract-2: error-title veto is tightened ---------------------------------
-
-
-def test_title_error_detector_ignores_legit_long_titles():
-    assert title_looks_like_error("Forbidden City: a complete travel guide") is False
-    assert title_looks_like_error("The Top 500 Companies of 2026") is False
-
-
-def test_title_error_detector_still_flags_real_errors():
-    assert title_looks_like_error("404 Not Found") is True
-    assert title_looks_like_error("Just a moment...") is True
-    assert title_looks_like_error("Access Denied") is True
+# The title_looks_like_error cases live in tests/test_blocks.py (their canonical home).
 
 
 # --- layer2-format-2 / -4: NaN score + chunk hang ------------------------------------
