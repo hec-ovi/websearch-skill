@@ -14,7 +14,9 @@ nothing is written into the repo working tree.
 
 ## Start it
 
-Requires Docker with the Compose plugin. From anywhere in the repo:
+Requires Docker with the Compose plugin, and a shell that can run the script: Linux and
+macOS as-is, Windows through WSL or Git Bash. The tool itself does not need any of this,
+only this optional container does. From anywhere in the repo:
 
 ```bash
 ./docker/searxng/searxng.sh up

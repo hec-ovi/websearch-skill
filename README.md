@@ -383,7 +383,9 @@ uv run pytest    # 667 tests, no network
 uv run ruff check .
 ```
 
-CI runs ruff and pytest on Python 3.11, 3.12, and 3.13 via uv. The contract tests validate real output against the frozen JSON Schemas, so a change that breaks a contract shape fails CI. Build one isolated layer at a time, against its versioned contract; adding or swapping an engine or an extractor touches only its adapter module.
+CI runs ruff and pytest on Python 3.11, 3.12, and 3.13 via uv, on Linux only. The package itself is pure Python with no OS-specific imports, and its two compiled dependencies (`curl_cffi`, and `primp` under `ddgs`) publish wheels for Linux, macOS, and Windows on both x86-64 and arm64, so macOS and Windows should work; they are not covered by CI, so run `uv run pytest` and `uv run websearch doctor` there before trusting it. Two platform notes: `websearch doctor` reads network interface names for `WEBSEARCH_VPN=any`, which Windows does not expose usefully (it reports the tunnel as unconfirmed there, while `WEBSEARCH_VPN=nordvpn` works everywhere because it is an HTTP check), and the optional SearXNG helper is a bash script that needs WSL or Git Bash on Windows.
+
+The contract tests validate real output against the frozen JSON Schemas, so a change that breaks a contract shape fails CI. Build one isolated layer at a time, against its versioned contract; adding or swapping an engine or an extractor touches only its adapter module.
 
 ## License
 

@@ -28,6 +28,12 @@ semantic versioning.
   the doctor verifies it rather than assuming it. It routes nothing itself. `nordvpn` is
   checked against NordVPN's keyless connection endpoint, along the path the tool
   actually uses, which is the egress proxy when one is configured.
+- The doctor's tunnel detection now uses `socket.if_nameindex`, which is stdlib on Linux,
+  macOS, and Windows, instead of walking `/sys/class/net`. macOS puts every tunnel on
+  `utun` and is matched; Windows names like `ethernet_32770` carry no tunnel signal, so
+  `WEBSEARCH_VPN=any` reports unconfirmed there rather than guessing (`nordvpn` is an
+  HTTP check and works everywhere). The runtime check also reports the CPU architecture,
+  since a missing wheel is almost always an arm64-versus-amd64 problem.
 - `websearch.optional_layers`: one module for the three optional layers (VPN, egress
   proxy, SearXNG), each off unless its variable is set, with credential redaction that
   every display path goes through. Proxy userinfo never reaches output, including inside
