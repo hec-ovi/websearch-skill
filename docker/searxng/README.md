@@ -12,6 +12,13 @@ config self-hosts a private one.
 Everything lives in this folder or in Docker. Nothing is installed on the host, and
 nothing is written into the repo working tree.
 
+**No Docker on this machine?** `websearch searxng up` does the same job without it: it
+clones upstream SearXNG, builds a virtualenv, and starts it on 127.0.0.1:8888. It also
+works from a `pip` or `uvx` install, where this folder is not present at all. What you
+give up is what this stack adds on top of upstream defaults: the curated engine list
+described below, and routing SearXNG's own engine requests through your egress proxy. On
+a Docker host, prefer this one.
+
 ## Start it
 
 Requires Docker with the Compose plugin, and a shell that can run the script: Linux and

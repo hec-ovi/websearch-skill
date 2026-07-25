@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/searxng.schema.json",
+  "title": "SearXNG local stack - lifecycle contract",
+  "description": "Bring a self-hosted SearXNG up on this machine without Docker, report on it, or stop it. This is process control, not a search path: it clones upstream SearXNG into a state directory, builds a virtualenv, starts the server detached from the caller, and records the resulting URL where the search layer reads it. The server it starts is the thing WEBSEARCH_SEARXNG_URL points at, which is how a SearXNG joins the Layer-1 engine fanout. Emits the same Envelope (meta.layer \"searxng\") as every other port.",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "SearxngRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "enum": ["up", "status", "down"],
+          "description": "up: install if this is the first time, start it, and record its URL for the search layer. status: where the state lives and whether the instance answers. down: stop it. 'up' against an instance that already answers only re-records the URL; it never installs over a live server."
+        },
+        "reinstall": {
+          "type": "boolean",
+          "default": false,
+          "description": "Delete the state directory and rebuild the checkout and virtualenv from scratch. Only meaningful with 'up'."
+        },
+        "ref": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Git branch or tag of upstream SearXNG to clone. null takes its default branch, which is what keeps the engine scrapers current."
+        }
+      }
+    },
+
+    "SearxngPayload": {
+      "type": "object",
+      "description": "The state of the local stack after the action ran.",
+      "required": ["action", "home", "url", "installed", "healthy", "wired"],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": ["up", "status", "down"],
+          "description": "The action that produced this state."
+        },
+        "home": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The state directory holding the checkout, the virtualenv, the settings file, the log, and the pidfile. WEBSEARCH_SEARXNG_HOME sets it; the default is a 'searxng' directory beside WEBSEARCH_ENV_FILE, else the XDG cache."
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^http://127\\.0\\.0\\.1:[0-9]+$",
+          "description": "Where the instance listens. Always loopback: a local SearXNG is for this machine, and binding it wider would publish an open search proxy."
+        },
+        "installed": {
+          "type": "boolean",
+          "description": "Whether the checkout and virtualenv are present and usable."
+        },
+        "pid": {
+          "type": ["integer", "null"],
+          "default": null,
+          "description": "The running server's process id, or null when nothing is running. It is a session leader, not a child of the caller, which is what lets it outlive the command that started it."
+        },
+        "healthy": {
+          "type": "boolean",
+          "description": "Whether /healthz answered."
+        },
+        "wired": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The env file WEBSEARCH_SEARXNG_URL was written into, or null when no env file is configured and the caller must export the variable itself."
+        },
+        "version": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The running SearXNG version, when it could be read."
+        },
+        "engines_active": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "default": null,
+          "description": "How many engines the instance has enabled."
+        },
+        "engines_available": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "default": null,
+          "description": "How many engines it knows about in total."
+        },
+        "log": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The server's log file, which is where a failed start explains itself."
+        }
+      }
+    }
+  }
+}

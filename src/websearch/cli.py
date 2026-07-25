@@ -1164,11 +1164,124 @@ def _print_doctor_human(env: dict) -> None:
         print(f"[note] {w}", file=sys.stderr)
 
 
+def _add_searxng_command(sub: Any) -> None:
+    sp = sub.add_parser(
+        "searxng",
+        help="Run a local SearXNG without Docker: clone it, install it, start it "
+        "detached, and point this tool at it.",
+        epilog=(
+            "state lives in WEBSEARCH_SEARXNG_HOME (default: a 'searxng' directory beside "
+            "WEBSEARCH_ENV_FILE, else the XDG cache). The first 'up' clones upstream and "
+            "installs it, which needs git and network; later ones only start it."
+        ),
+    )
+    sp.add_argument(
+        "action",
+        choices=["up", "status", "down", "url"],
+        help="up: install if needed, then start and wire it in. status: where it is and "
+        "whether it answers. down: stop it. url: print the base URL.",
+    )
+    sp.add_argument(
+        "--reinstall",
+        action="store_true",
+        help="Delete the state directory and rebuild it from scratch (up only).",
+    )
+    sp.add_argument(
+        "--ref",
+        default=None,
+        help="Git branch or tag of upstream SearXNG to clone (default: its default branch).",
+    )
+    sp.add_argument("--json", action="store_true", help="Emit the state as JSON.")
+
+
+def _cmd_searxng(args: argparse.Namespace) -> int:
+    from . import searxng_local as sx
+
+    try:
+        p = sx.port()
+    except sx.SearxngError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    paths = sx.Paths(sx.home_dir())
+    url = sx.base_url(p)
+
+    if args.action == "url":
+        print(url)
+        return 0
+
+    was_running = sx.is_healthy(url)
+    # The first `up` clones a repository and builds a virtualenv, which is otherwise a
+    # minute of silence. Said before the work, not after.
+    if args.action == "up" and not was_running and (args.reinstall or not paths.granian.exists()):
+        print(f"installing SearXNG into {paths.home} (clone + dependencies)...", flush=True)
+
+    envelope = sx.control(
+        sx.SearxngRequest(action=args.action, reinstall=args.reinstall, ref=args.ref)
+    )
+    if args.json:
+        print(json.dumps(envelope.model_dump(mode="json"), indent=2))
+        return 0 if envelope.ok else 1
+    if not envelope.ok:
+        print(f"error: {envelope.error.message}", file=sys.stderr)  # type: ignore[union-attr]
+        return 1
+
+    state = envelope.data
+    if args.action == "down":
+        print(f"stopped {url}" if was_running else f"nothing was running at {url}")
+        return 0
+    if args.action == "status":
+        _print_searxng_status(state)
+        return 0 if state["healthy"] else 1
+    if was_running:
+        print(f"already running at {state['url']}")
+        _print_searxng_wiring(state["url"], state["wired"])
+        return 0
+
+    version = f"SearXNG {state['version']}, " if state.get("version") else ""
+    active = f"{state['engines_active']} engines active, " if state.get("engines_active") else ""
+    where = f" (pid {state['pid']}, log {state['log']})" if state.get("pid") else ""
+    print(f"{version}{active}ready at {state['url']}{where}")
+    _print_searxng_wiring(state["url"], state["wired"])
+    return 0
+
+
+def _print_searxng_status(state: dict[str, Any]) -> None:
+    pid = state["pid"]
+    process = f"running (pid {pid})" if pid else "not running"
+    install = "present" if state["installed"] else "not installed yet"
+    health = "answering" if state["healthy"] else "not answering"
+    version, active, available = (
+        state.get("version"),
+        state.get("engines_active"),
+        state.get("engines_available"),
+    )
+    print(f"home    {state['home']}")
+    print(f"url     {state['url']}")
+    print(f"install {install}")
+    print(f"process {process}")
+    print(f"health  {health}")
+    if version:
+        print(f"engines SearXNG {version}, {active} active of {available}")
+    if state.get("log"):
+        print(f"log     {state['log']}")
+    if not state["healthy"]:
+        print("\nstart it with: websearch searxng up")
+
+
+def _print_searxng_wiring(url: str, wired: str | None) -> None:
+    from .optional_layers import SEARXNG_ENV
+
+    if wired:
+        print(f"wired {SEARXNG_ENV} into {wired}")
+    else:
+        print(f"point this tool at it: export {SEARXNG_ENV}={url}")
+
+
 def _add_mcp_command(sub: Any) -> None:
     sub.add_parser(
         "mcp",
         help="Start the FastMCP stdio server (web_search/web_fetch/web_open/arxiv_search/"
-        "github_search). fastmcp ships in the base install.",
+        "github_search/searxng_setup). fastmcp ships in the base install.",
     )
 
 
@@ -1261,6 +1374,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_arxiv_command(sub)
     _add_github_command(sub)
     _add_doctor_command(sub)
+    _add_searxng_command(sub)
     _add_mcp_command(sub)
     args = parser.parse_args(argv)
     dispatch = {
@@ -1273,6 +1387,7 @@ def main(argv: list[str] | None = None) -> int:
         "arxiv": _cmd_arxiv,
         "github": _cmd_github,
         "doctor": _cmd_doctor,
+        "searxng": _cmd_searxng,
         "mcp": _cmd_mcp,
     }
     handler = dispatch.get(args.command)

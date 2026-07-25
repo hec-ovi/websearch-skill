@@ -422,6 +422,59 @@ def github_search(
     )
 
 
+@mcp.tool
+def searxng_setup(action: str = "status", reinstall: bool = False, ref: str | None = None) -> dict:
+    """Set up, inspect, or stop a self-hosted SearXNG on this machine (no Docker needed).
+
+    web_search runs on keyless engines by default. A local SearXNG joins that fanout and
+    parses the providers itself, which is what recovers the engines that block scrapers.
+    Call this with action="up" when searches keep coming back thin or empty, or when a
+    diagnostic says SearXNG is off. The first "up" clones upstream SearXNG and builds a
+    virtualenv (roughly 15-30 seconds and a few hundred MB); later ones only start it.
+    The server is left running detached, so it outlives this call and the next web_search
+    picks it up with no further setup.
+
+    Args:
+        action: "status" (default) to report where it lives and whether it answers, "up"
+            to install if needed and start it, "down" to stop it. "up" against an instance
+            that already answers only re-records its URL; it never installs over a live
+            server.
+        reinstall: With "up", delete the state directory and rebuild it from scratch. Use
+            only when an install is broken.
+        ref: With "up", a git branch or tag of upstream SearXNG. Leave unset for its
+            default branch, which is what keeps the engine scrapers current.
+
+    Returns:
+        An Envelope whose data has ``action``, ``home`` (the state directory), ``url``,
+        ``installed``, ``pid``, ``healthy``, ``wired`` (the env file the URL was recorded
+        in), and, when it is answering, ``version``/``engines_active``/
+        ``engines_available``. A failed start carries its log path in the error message.
+
+    Examples:
+        searxng_setup()
+        searxng_setup(action="up")
+    """
+    from ..searxng_local import SEARXNG_CONTRACT_VERSION, SearxngRequest, control
+
+    try:
+        req = SearxngRequest(action=action, reinstall=reinstall, ref=ref)  # type: ignore[arg-type]
+    except Exception as exc:
+        return error_envelope(
+            SEARXNG_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=f"invalid searxng_setup arguments: {exc}",
+            retriable=False,
+            layer="searxng",
+            backend="searxng-local",
+        ).model_dump(mode="json")
+    return _safe(
+        lambda: control(req),
+        contract=SEARXNG_CONTRACT_VERSION,
+        layer="searxng",
+        backend="searxng-local",
+    )
+
+
 def run() -> None:
     """Start the stdio MCP server (FastMCP defaults to stdio transport)."""
     mcp.run()

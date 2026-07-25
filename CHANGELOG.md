@@ -6,6 +6,35 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-07-25
+
+### Added
+
+- **`websearch searxng up|status|down`: a self-hosted SearXNG with no Docker.** It clones
+  upstream SearXNG into a state directory, builds a virtualenv beside it, writes a
+  settings file with the JSON API on and the server bound to loopback, starts it, and
+  records `WEBSEARCH_SEARXNG_URL` in the configured env file so the next search fuses it
+  with the keyless engines. The first `up` takes about 15 to 30 seconds; later ones only
+  start it. `WEBSEARCH_SEARXNG_HOME` moves the state directory (it defaults beside
+  `WEBSEARCH_ENV_FILE`, else the XDG cache) and `WEBSEARCH_SEARXNG_PORT` moves it off
+  8888. Over the new `searxng@1.0.0` contract.
+- The same lifecycle is on the MCP face as `searxng_setup`, so an agent that only speaks
+  MCP can set SearXNG up itself instead of reporting that it cannot.
+
+### Fixed
+
+- The server is started in its own session, not as a child of the calling shell. Agent
+  CLIs run each tool command as a process group and kill that group when the command
+  returns, so a SearXNG backgrounded with `&` died with the call that started it. That is
+  the difference between an agent being able to bring this layer up and only being able
+  to describe it.
+- The hints that said to run `./docker/searxng/searxng.sh up` now name a command that
+  exists everywhere. That script ships in this repository, not in the installed package,
+  so from a `pip` or `uvx` install (which is how an agent sandbox has it) the instruction
+  pointed at a path that was not there. The Docker stack is unchanged and is still the
+  better option on a Docker host: it curates the engine list and routes SearXNG's own
+  egress through the configured proxy.
+
 ## [0.2.5] - 2026-07-25
 
 ### Fixed

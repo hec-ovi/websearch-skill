@@ -30,7 +30,7 @@ Two extra keyless tools cover what general web search does not:
 
 Search works the moment you install it. The default engine is the keyless [`ddgs`](https://github.com/deedy5/ddgs) metasearch library, which by itself spans **Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, and Grokipedia**. Each query is served by whichever of those respond. No API key, no account, no service to run, and no engine flags: the agent surface (`web-search`) is plug-and-play. Picking a subset is a power-user knob on the lower-level `search` command via `--ddgs-backends google,brave,mojeek`, not on `web-search`. Which of them actually answer from your connection today is a question `websearch doctor` answers per provider, and it varies.
 
-For broader and more reliable search you can run your own SearXNG (~280 engines, your own server, still no keys), and the router fuses it with `ddgs` and de-correlates the engines they share. A one-command Docker setup is in [`docker/searxng/`](docker/searxng/), including a probe that enables every engine that answers on your connection; see Self-hosting SearXNG below. Public SearXNG instances are deliberately not a default: most disable the JSON API and rate-limit automated clients, so depending on them would break on a fresh install.
+For broader and more reliable search you can run your own SearXNG (~280 engines, your own server, still no keys), and the router fuses it with `ddgs` and de-correlates the engines they share. `websearch searxng up` sets one up and starts it on any machine with git and Python; on a Docker host, [`docker/searxng/`](docker/searxng/) is the curated stack, including a probe that enables every engine that answers on your connection. See Self-hosting SearXNG below. Public SearXNG instances are deliberately not a default: most disable the JSON API and rate-limit automated clients, so depending on them would break on a fresh install.
 
 It is MIT-licensed and open source. On top of the keyless default you can add a self-hosted SearXNG, keyed engines (Brave, Exa, Tavily), or a paid egress adapter, all behind the same contracts, none of them required.
 
@@ -268,7 +268,7 @@ The base install searches the keyless engines over a direct connection. Three sw
 |---|---|---|
 | VPN | `WEBSEARCH_VPN=nordvpn` or `any` | declares that egress should be tunneled, so the doctor verifies it instead of assuming it. It routes nothing on its own: the tunnel is your VPN app's job |
 | Egress proxy | `WEBSEARCH_PROXY=<url>` or `nordvpn` | one proxy for every network path the tool opens |
-| SearXNG | `WEBSEARCH_SEARXNG_URL=<url>` | a self-hosted metasearch instance joins the Layer-1 fanout |
+| SearXNG | `WEBSEARCH_SEARXNG_URL=<url>` | a self-hosted metasearch instance joins the Layer-1 fanout. `websearch searxng up` starts one and sets this for you, with or without Docker |
 
 All three read from a gitignored `.env` in the working directory if you have one (copy `.env.example`), which keeps NordVPN service credentials out of your shell history. An exported variable always beats the file, and `--vpn` / `--proxy` / `--searxng-url` beat both for a single run.
 
@@ -276,15 +276,32 @@ All three read from a gitignored `.env` in the working directory if you have one
 
 You never need this; the keyless `ddgs` engines work out of the box. Run your own SearXNG when you want the broadest, most reliable search: every engine SearXNG can reach, your own server, no public rate limits, and still no API keys. It is also the tool's second opinion: `websearch doctor` uses it to tell a stale `ddgs` parser apart from a provider blocking your IP.
 
+Two ways to run one. Pick by whether the machine has Docker.
+
+**No Docker (works anywhere, including an agent sandbox):**
+
+```bash
+websearch searxng up                          # clone, install, start detached, wire it in
+websearch web-search "your query"             # now fuses SearXNG + ddgs
+websearch searxng status                      # where it lives, whether it answers
+websearch searxng down                        # stop it
+```
+
+The first `up` clones upstream SearXNG and builds a virtualenv beside it, about 15 to 30 seconds and a few hundred MB; later ones only start it. Everything lands in one state directory (`WEBSEARCH_SEARXNG_HOME`, defaulting beside `WEBSEARCH_ENV_FILE` or in the XDG cache), and `WEBSEARCH_SEARXNG_URL` is written into your env file for you, so the next search picks it up with nothing else to do. The server is started in its own session rather than as a child of the command, which is what lets it survive an agent CLI killing the process group of every shell command it runs. `WEBSEARCH_SEARXNG_PORT` moves it off 8888. The same thing is on the MCP face as `searxng_setup`, so an agent that only speaks MCP can set it up itself.
+
+**With Docker:**
+
 ```bash
 ./docker/searxng/searxng.sh up                # generates a per-machine secret, waits for health
 export WEBSEARCH_SEARXNG_URL=http://127.0.0.1:8888
-uv run websearch web-search "your query"      # now fuses SearXNG + ddgs
+uv run websearch web-search "your query"
 ```
 
-One container, nothing installed on the host. SearXNG ships ~280 engines but leaves most of them off, so a stock instance answers a general query from about six of them (and on a home connection Brave and Startpage return a CAPTCHA). `searxng.sh engines` probes every engine from your own connection and enables the ones that answer, recording the reason next to each one it skips. Measured here: a general query went from 26 results across 2 engines to 155-240 across 21-29, in 3 to 4 seconds.
+One container, nothing installed on the host, and it can route SearXNG's own engine requests through your egress proxy. SearXNG ships ~280 engines but leaves most of them off, so a stock instance answers a general query from about six of them (and on a home connection Brave and Startpage return a CAPTCHA). `searxng.sh engines` probes every engine from your own connection and enables the ones that answer, recording the reason next to each one it skips. Measured here: a general query went from 26 results across 2 engines to 155-240 across 21-29, in 3 to 4 seconds.
 
 The container is kept in its box: config mounted read-only, runtime state in a Docker volume rather than the repo, all capabilities dropped, loopback-only by default, and no secret committed. Torrent trackers and shadow libraries stay out of the default fanout (still queryable by name). Details and the checklist for exposing it beyond localhost are in [`docker/searxng/`](docker/searxng/).
+
+Both bind to loopback and turn the JSON API on. The difference is the engine list: the no-Docker path runs upstream defaults (83 engines enabled of 278 here), while the Docker stack's probe enables everything that answers from your own connection (213 of 279 on the same machine, same day). The Docker stack also routes SearXNG's own engine requests through your egress proxy. Use it when you have Docker; use `websearch searxng up` when you do not.
 
 ### Egress proxy
 
@@ -390,7 +407,7 @@ uv run pytest    # 667 tests, no network
 uv run ruff check .
 ```
 
-CI runs ruff and pytest on Python 3.11, 3.12, and 3.13 via uv, on Linux only. The package itself is pure Python with no OS-specific imports, and its two compiled dependencies (`curl_cffi`, and `primp` under `ddgs`) publish wheels for Linux, macOS, and Windows on both x86-64 and arm64, so macOS and Windows should work; they are not covered by CI, so run `uv run pytest` and `uv run websearch doctor` there before trusting it. Two platform notes: `websearch doctor` reads network interface names for `WEBSEARCH_VPN=any`, which Windows does not expose usefully (it reports the tunnel as unconfirmed there, while `WEBSEARCH_VPN=nordvpn` works everywhere because it is an HTTP check), and the optional SearXNG helper is a bash script that needs WSL or Git Bash on Windows.
+CI runs ruff and pytest on Python 3.11, 3.12, and 3.13 via uv, on Linux only. The package itself is pure Python with no OS-specific imports, and its two compiled dependencies (`curl_cffi`, and `primp` under `ddgs`) publish wheels for Linux, macOS, and Windows on both x86-64 and arm64, so macOS and Windows should work; they are not covered by CI, so run `uv run pytest` and `uv run websearch doctor` there before trusting it. Two platform notes: `websearch doctor` reads network interface names for `WEBSEARCH_VPN=any`, which Windows does not expose usefully (it reports the tunnel as unconfirmed there, while `WEBSEARCH_VPN=nordvpn` works everywhere because it is an HTTP check), and the Docker SearXNG stack is driven by a bash script that needs WSL or Git Bash on Windows (`websearch searxng up` is Python and has no such requirement).
 
 The contract tests validate real output against the frozen JSON Schemas, so a change that breaks a contract shape fails CI. Build one isolated layer at a time, against its versioned contract; adding or swapping an engine or an extractor touches only its adapter module.
 

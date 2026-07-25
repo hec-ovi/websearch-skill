@@ -442,7 +442,7 @@ class Doctor:
         hint = f"Silent this run: {', '.join(silent)}."
         if not self._layer("searxng").enabled:
             hint += (
-                " Turn on SearXNG (./docker/searxng/searxng.sh up) and re-run: it parses "
+                " Turn on SearXNG (`websearch searxng up`) and re-run: it parses "
                 "these providers itself, which says whether they are blocking you or "
                 "ddgs just cannot read their pages any more."
             )

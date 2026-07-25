@@ -470,8 +470,9 @@ def probe_searxng(
             FAIL,
             f"not responding at {base}: {_err(exc, proxy)}",
             detail,
-            hint="Start it with ./docker/searxng/searxng.sh up, or unset "
-            "WEBSEARCH_SEARXNG_URL to fall back to the keyless engines.",
+            hint="Start it with `websearch searxng up` (or ./docker/searxng/searxng.sh up on "
+            "a Docker host), or unset WEBSEARCH_SEARXNG_URL to fall back to the "
+            "keyless engines.",
         )
 
     try:

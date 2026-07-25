@@ -254,7 +254,7 @@ def searxng_state(cli_value: str | None = None) -> LayerState:
             enabled=False,
             source=None,
             value=None,
-            detail=f"off (set {SEARXNG_ENV}; ./docker/searxng/searxng.sh up starts one)",
+            detail=f"off (set {SEARXNG_ENV}; `websearch searxng up` starts one)",
         )
     url = raw.strip().rstrip("/")  # type: ignore[union-attr]
     if not url.startswith(("http://", "https://")):

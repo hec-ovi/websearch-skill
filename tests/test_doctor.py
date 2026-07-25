@@ -526,7 +526,7 @@ def test_with_searxng_off_the_aggregate_says_to_turn_it_on():
     dead = probes.ddgs_backends()[0]
     doctor = build_doctor(net=net_with(), ddgs_factory=ddgs_where({dead}))
     aggregate = checks_by_name(doctor.run(DoctorRequest(checks=["engines"])))["engines"]
-    assert "searxng.sh up" in aggregate["hint"]
+    assert "websearch searxng up" in aggregate["hint"]
 
 
 def test_the_cross_check_never_runs_when_nothing_is_silent(monkeypatch):

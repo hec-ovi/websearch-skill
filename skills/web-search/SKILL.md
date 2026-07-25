@@ -134,13 +134,37 @@ For `web-fetch`/`web-open`, `data.pages[]` carries `handle`, `url`, `title`, `co
 `url`, `snippet`, `handle`, and (with `--detail detailed`) `engines` and `score`.
 `warnings` are informational; use `ok` and `error` to detect real failures.
 
+## searxng: broaden the engine fanout
+
+```
+websearch searxng up|status|down [--reinstall] [--ref BRANCH] [--json]
+```
+
+Runs a self-hosted SearXNG on this machine and points the search layer at it, so
+`web-search` fuses it with the keyless engines. Reach for it when searches keep coming
+back thin or empty, or when `doctor` says SearXNG is off: SearXNG parses the providers
+itself, which recovers the engines whose pages ddgs can no longer read.
+
+No Docker involved. The first `up` clones upstream SearXNG and builds a virtualenv (about
+15 to 30 seconds and a few hundred MB); later ones only start it. It leaves the server
+running detached and writes `WEBSEARCH_SEARXNG_URL` into the configured env file, so the
+next search picks it up with no further setup. `status` says where the state lives and
+whether it answers. The MCP equivalent is `searxng_setup(action="up")`.
+
+Do not try to start SearXNG some other way. The `searxng` name on PyPI is an unrelated
+package, public instances block automated clients, and a server you background with `&`
+is killed when the shell command that started it returns. This command is the supported
+path, and it handles the detachment for you.
+
 ## Notes
 
-- For broader search, set `WEBSEARCH_SEARXNG_URL` to a self-hosted SearXNG; the router
-  fuses it with ddgs. Engine-selection flags (`--engines`, `--ddgs-backends`, `--no-ddgs`)
-  live only on the lower-level `websearch search` command, for debugging.
 - If searches keep coming back empty, `websearch doctor` reports which engines answered
   and why the rest did not. Report what it says; do not retry the same query in a loop.
+  A full run probes every engine and can take a minute or more through a slow proxy, so
+  give it a generous timeout, or run `websearch doctor --quick` first.
+- `WEBSEARCH_SEARXNG_URL` can also point at a SearXNG you already run; `searxng up` just
+  sets it for you. Engine-selection flags (`--engines`, `--ddgs-backends`, `--no-ddgs`)
+  live only on the lower-level `websearch search` command, for debugging.
 - The MCP server is `websearch mcp` (stdio, bundled). Point a client at
   `{"command": "uvx", "args": ["websearch-skill", "mcp"]}`; see `docs/INSTALL.md` for
   per-harness registration.
