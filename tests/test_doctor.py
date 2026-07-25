@@ -182,11 +182,42 @@ def test_proxy_is_ok_when_the_exit_ip_moves(monkeypatch):
 
 def test_proxy_warns_when_the_exit_ip_is_unchanged(monkeypatch):
     monkeypatch.setenv(PROXY_ENV, PROXY_URL)
+    # Detecting "unchanged" needs a direct exit to compare against, which is exactly the
+    # request that leaves the tunnel, so it only happens when explicitly asked for.
     check = checks_by_name(
-        doctor_with(net=net_with(proxied=DIRECT_IP)).run(DoctorRequest(quick=True))
+        doctor_with(net=net_with(proxied=DIRECT_IP)).run(DoctorRequest(quick=True, baseline=True))
     )["proxy"]
     assert check["status"] == "warn"
     assert "unchanged" in check["summary"]
+
+
+def test_no_direct_request_is_made_when_a_proxy_is_configured(monkeypatch):
+    """The leak rule: with the proxy on, every doctor request goes through it."""
+    monkeypatch.setenv(PROXY_ENV, PROXY_URL)
+    net = net_with()
+    env = doctor_with(net=net).run(DoctorRequest(quick=True))
+    assert [url for url, proxy in net.calls if proxy is None] == []
+    checks = checks_by_name(env)
+    assert checks["baseline"]["status"] == "skipped"
+    assert "leave the tunnel" in checks["baseline"]["summary"]
+    assert checks["internet"]["detail"]["proxied"] is True
+    assert "not compared to a direct exit" in checks["proxy"]["summary"]
+
+
+def test_baseline_opts_into_the_one_direct_request(monkeypatch):
+    monkeypatch.setenv(PROXY_ENV, PROXY_URL)
+    net = net_with()
+    checks = checks_by_name(doctor_with(net=net).run(DoctorRequest(quick=True, baseline=True)))
+    assert checks["baseline"]["detail"]["exit_ip"] == DIRECT_IP
+    assert f"direct was {DIRECT_IP}" in checks["proxy"]["summary"]
+    assert [url for url, proxy in net.calls if proxy is None] != []
+
+
+def test_without_a_proxy_the_baseline_is_taken_anyway():
+    """Direct is the only path when no proxy is set, so the baseline costs nothing."""
+    checks = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))
+    assert checks["baseline"]["status"] == "ok"
+    assert checks["internet"]["detail"]["proxied"] is False
 
 
 def test_proxy_fails_when_nothing_gets_through(monkeypatch):

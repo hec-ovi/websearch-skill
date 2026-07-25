@@ -257,17 +257,48 @@ def probe_mcp() -> Outcome:
 # --- egress -------------------------------------------------------------------------
 
 
-def probe_internet(net: Net, *, timeout_s: float) -> Outcome:
-    """The baseline: a direct request, no proxy. Everything else is measured against it."""
-    ip, echo, errors = exit_ip(net, proxy=None, timeout_s=timeout_s)
+def probe_internet(net: Net, *, timeout_s: float, proxy: str | None = None) -> Outcome:
+    """Can this installation reach the internet by the path it will actually use?
+
+    With an egress proxy configured, that path IS the proxy, so this request goes through
+    it. Probing directly would put a packet outside the tunnel purely to satisfy a
+    diagnostic, which is the opposite of what turning the proxy on asked for.
+    """
+    ip, echo, errors = exit_ip(net, proxy=proxy, timeout_s=timeout_s)
+    via = "through the egress proxy" if proxy else "direct"
     if not ip:
         return Outcome(
             FAIL,
-            "no direct internet: every IP echo failed",
-            {"errors": errors},
-            hint="Check the machine's connectivity and DNS; every other network check "
-            "below will fail for the same reason.",
+            f"no internet {via}: every IP echo failed",
+            {"errors": errors, "proxied": bool(proxy)},
+            hint="Check connectivity and DNS; every other network check below will fail "
+            "for the same reason."
+            if not proxy
+            else "Check the proxy first: with it unreachable, nothing else can work.",
         )
+    return Outcome(
+        OK,
+        f"exit {ip} {via} (via {echo})",
+        {"exit_ip": ip, "echo": echo, "proxied": bool(proxy)},
+    )
+
+
+def probe_baseline(net: Net, *, timeout_s: float, requested: bool) -> Outcome:
+    """The direct exit IP, for comparing against the proxied one.
+
+    Opt-in, because it is the only request in the whole tool that deliberately leaves the
+    tunnel. Skipped by default when a proxy is configured: knowing your own ISP-assigned
+    IP is not worth handing your real address to a third-party echo service while you are
+    paying for a VPN to hide it.
+    """
+    if not requested:
+        return Outcome(
+            SKIPPED,
+            "not measured: a direct request would leave the tunnel (--baseline to allow it)",
+        )
+    ip, echo, errors = exit_ip(net, proxy=None, timeout_s=timeout_s)
+    if not ip:
+        return Outcome(WARN, "no direct internet outside the proxy", {"errors": errors})
     return Outcome(OK, f"direct exit {ip} (via {echo})", {"exit_ip": ip, "echo": echo})
 
 
@@ -309,7 +340,11 @@ def probe_proxy(
             hint="A transparent or same-network proxy hides nothing. Confirm the proxy "
             "URL points at a remote exit.",
         )
-    return Outcome(OK, f"exit {ip} through {shown}", detail)
+    if direct_ip:
+        return Outcome(OK, f"exit {ip} through {shown} (direct was {direct_ip})", detail)
+    # No baseline was taken, on purpose. Say so rather than implying a comparison that
+    # did not happen; for NordVPN the vpn check below is the stronger statement anyway.
+    return Outcome(OK, f"exit {ip} through {shown} (not compared to a direct exit)", detail)
 
 
 def _tunnel_interfaces() -> list[str] | None:

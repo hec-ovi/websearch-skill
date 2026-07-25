@@ -149,14 +149,15 @@ class CurlCffiFetcher(FetchAdapter):
             "timeout": request.timeout_ms / 1000.0,
             "allow_redirects": False,
         }
-        if request.proxy and request.proxy.type != "none":
+        proxied = bool(request.proxy and request.proxy.type != "none")
+        if proxied:
             base_kwargs["proxies"] = {"http": request.proxy.url, "https": request.proxy.url}
 
         redirects: list[str] = []
         current = request.url
         for _hop in range(_MAX_REDIRECTS + 1):
             try:
-                guard_url(current, allow_private=request.allow_private_hosts)
+                guard_url(current, allow_private=request.allow_private_hosts, proxied=proxied)
             except BlockedEgress as exc:
                 return fail(
                     exc.reason,

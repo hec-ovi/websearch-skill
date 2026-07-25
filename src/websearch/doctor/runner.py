@@ -112,6 +112,7 @@ class Doctor:
             ("dependencies", "runtime", None),
             ("mcp", "mcp", None),
             ("internet", "egress", None),
+            ("baseline", "egress", None),
             ("proxy", "egress", "proxy"),
             ("vpn", "vpn", "vpn"),
             ("searxng", "searxng", "searxng"),
@@ -193,13 +194,29 @@ class Doctor:
             }
         )
 
-        # Phase 2: the direct-egress baseline the proxy check compares against.
-        run_all({"internet": lambda: probes.probe_internet(self._net, timeout_s=timeout_s)})
-        internet = results.get("internet")
-        direct_ip = (internet.detail.get("exit_ip") if internet else None) or None
+        # Phase 2: connectivity along the path the tool actually uses, plus the opt-in
+        # direct baseline. With a proxy configured, both of these go through it unless
+        # --baseline explicitly allows the one request that does not.
+        proxy_url = self._proxy_url
+        path_proxy = self._effective_proxy()
+        run_all(
+            {
+                "internet": lambda: probes.probe_internet(
+                    self._net, timeout_s=timeout_s, proxy=path_proxy
+                ),
+                "baseline": lambda: probes.probe_baseline(
+                    self._net,
+                    timeout_s=timeout_s,
+                    # With no proxy configured, "direct" is already the only path, so the
+                    # baseline is free and always worth having.
+                    requested=request.baseline or not self._proxy_enabled,
+                ),
+            }
+        )
+        baseline = results.get("baseline")
+        direct_ip = (baseline.detail.get("exit_ip") if baseline else None) or None
 
         # Phase 3: the three optional layers.
-        proxy_url = self._proxy_url
         run_all(
             {
                 "proxy": lambda: probes.probe_proxy(

@@ -78,7 +78,11 @@ class HttpxFetcher(FetchAdapter):
             ) as client:
                 for _hop in range(_MAX_REDIRECTS + 1):
                     try:
-                        guard_url(current, allow_private=request.allow_private_hosts)
+                        guard_url(
+                            current,
+                            allow_private=request.allow_private_hosts,
+                            proxied=proxy is not None,
+                        )
                     except BlockedEgress as exc:
                         return fail(
                             exc.reason,

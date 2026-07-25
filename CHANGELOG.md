@@ -6,6 +6,31 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-07-25
+
+### Fixed
+
+- **DNS leak behind an egress proxy.** The SSRF guard resolved every URL's hostname
+  through the local resolver before fetching, so the ISP saw every site visited even
+  though the traffic itself went through the proxy, which is the one thing turning the
+  proxy on was meant to prevent. Behind a proxy the guard no longer resolves: a
+  `socks5h://` proxy resolves at the exit node, so the local lookup never decided the
+  route and could not bind it. Literal IPs are still refused with no lookup at all, so
+  `http://127.0.0.1` and the `169.254.169.254` metadata endpoint stay blocked, and the
+  full resolution check is unchanged on the direct path.
+- `websearch doctor` no longer makes a direct request while an egress proxy is
+  configured. Connectivity is now measured along the path the tool actually uses, and
+  the direct exit IP, previously taken on every run to compare against the proxied one,
+  moved behind `--baseline`. It is still taken automatically when no proxy is set, since
+  direct is then the only path. `doctor@1.1.0` adds the `baseline` request field.
+
+### Notes
+
+- Verified by instrumenting every socket and DNS call during a real run, and by pointing
+  each component at a dead proxy to confirm it fails rather than falling back to a direct
+  connection. That covers `ddgs` (Rust) and `curl_cffi` (libcurl), whose native sockets a
+  Python-level check cannot observe.
+
 ## [0.2.4] - 2026-07-25
 
 ### Added

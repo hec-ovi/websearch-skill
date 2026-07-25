@@ -51,8 +51,13 @@ def guard_url(
     *,
     allow_private: bool = False,
     resolve: Callable[[str], set[str]] | None = None,
+    proxied: bool = False,
 ) -> None:
-    """Raise ``BlockedEgress`` if ``url`` violates the egress policy."""
+    """Raise ``BlockedEgress`` if ``url`` violates the egress policy.
+
+    ``proxied`` says the request will be made by a remote exit node rather than by this
+    machine. That changes what the hostname check is worth: see below.
+    """
     parts = urlsplit(url)
     scheme = (parts.scheme or "").lower()
     if scheme not in ALLOWED_SCHEMES:
@@ -63,7 +68,8 @@ def guard_url(
     if allow_private:
         return
 
-    # Literal IP: check directly without resolving.
+    # Literal IP: check directly without resolving. This runs on every path, proxied or
+    # not, so http://127.0.0.1 and the 169.254.169.254 metadata endpoint stay refused.
     try:
         literal = ipaddress.ip_address(host)
     except ValueError:
@@ -71,6 +77,18 @@ def guard_url(
     if literal is not None:
         if _ip_is_internal(literal):
             raise BlockedEgress(f"refused: {host} is a private or reserved address")
+        return
+
+    if proxied:
+        # Behind an egress proxy, resolving the hostname here is both a leak and a lie.
+        # A leak because the local resolver, and therefore the ISP, sees every host the
+        # tool visits even though the traffic itself is tunneled, which is the one thing
+        # the proxy was turned on to prevent. A lie because a socks5h proxy resolves the
+        # name at the exit node, so this lookup never decides where the connection goes:
+        # "internal" would mean the exit node's network, which our resolver cannot see
+        # and our answer cannot bind. The literal-IP check above still holds, and the
+        # remote exit is not a route into this machine's LAN, which is what the guard
+        # exists to prevent.
         return
 
     resolver = resolve or _resolve

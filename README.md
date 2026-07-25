@@ -300,6 +300,13 @@ The `nordvpn` shorthand builds the SOCKS5 URL for you from `NORDVPN_USER` and `N
 
 Every network command also takes `--proxy <url|nordvpn|off>`, which overrides the variable for that run, so `--proxy off` gets you a direct connection without unsetting anything. Prefer `socks5h://` over `socks5://`: it resolves DNS through the proxy, so hostnames never hit your local resolver. A per-request `fetch --proxy` still wins over the process-wide default.
 
+**Nothing bypasses it.** With `WEBSEARCH_PROXY` set, every path that leaves the machine goes through it: both fetch tiers, the `ddgs` engines, arXiv, GitHub, the MCP tools, and the doctor's own probes. Two consequences that are easy to get wrong and are tested for:
+
+- **No DNS leak.** The SSRF guard used to resolve every hostname locally before fetching, which showed your resolver, and therefore your ISP, every site you visited while the traffic itself was tunneled. Behind a proxy it no longer resolves: `socks5h://` resolves at the exit node, so the local lookup never decided the route anyway, and skipping it removes the leak. Literal IPs are still refused without any lookup, so `http://127.0.0.1` and the `169.254.169.254` metadata endpoint stay blocked.
+- **Fail closed.** Point the proxy at a dead port and every component errors rather than falling back to a direct connection. That includes the two that open sockets in native code, `ddgs` (Rust) and `curl_cffi` (libcurl), which a Python-level check cannot see.
+
+The one deliberate exception is opt-in: `websearch doctor --baseline` makes a single direct request to learn your own exit IP so the proxied one can be compared against it. It is off by default, because handing your real address to an echo service while paying for a VPN to hide it is the wrong trade.
+
 With a self-hosted SearXNG there are two hops and the proxy applies to the one that matters. The client's hop to `127.0.0.1` is never proxied, because asking a remote exit node to reach `127.0.0.1` gets you its localhost, not yours. The hop that actually reaches Google and Bing is SearXNG's own, out of the container, and `docker/searxng/searxng.sh up` routes that one through the same `WEBSEARCH_PROXY` (expanding the `nordvpn` shorthand for you). `searxng.sh egress` prints both IPs so you can see it. Set `SEARXNG_OUTGOING_PROXY=off` for direct container egress; a SearXNG on a public address still goes through the proxy on the client hop too.
 
 ### VPN

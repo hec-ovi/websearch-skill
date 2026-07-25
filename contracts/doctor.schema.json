@@ -3,7 +3,7 @@
   "$id": "https://github.com/hec-ovi/websearch-skill/contracts/doctor.schema.json",
   "title": "Doctor - environment and integration diagnostics contract",
   "description": "A full self-test of one installation: the three optional layers (VPN, egress proxy, self-hosted SearXNG), every search engine the tool integrates, the keyless extra tools, both fetch tiers, and the MCP face. Each check is independent and carries its own status, so one dead engine reads as one warn rather than a blanket failure. A standalone diagnostic, not part of the search-fetch-format pipeline; it emits the same Envelope (meta.layer \"doctor\") so a CLI or MCP face handles it uniformly.",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "1.1.0",
   "$defs": {
     "DoctorRequest": {
       "type": "object",
@@ -19,6 +19,11 @@
           "type": "boolean",
           "default": false,
           "description": "Skip the per-engine fanout, the extra tools, and the fetch tiers; keep runtime, connectivity, the optional layers, and MCP."
+        },
+        "baseline": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow ONE direct request, outside the egress proxy, to learn this machine's own exit IP so the proxied exit can be compared against it. Off by default: with a proxy configured it is the only request in the tool that leaves the tunnel, and handing your real address to an echo service defeats the reason the proxy is on. Ignored (treated as true) when no proxy is configured, since direct is then the only path."
         },
         "timeout_ms": {
           "type": "integer",

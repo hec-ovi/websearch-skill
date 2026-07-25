@@ -6,6 +6,59 @@ import pytest
 
 from websearch.layer2_extract.egress import BlockedEgress, guard_url
 
+
+class _Resolver:
+    """Records every hostname the guard asks the local resolver about."""
+
+    def __init__(self, addrs: set[str] | None = None):
+        self.asked: list[str] = []
+        self._addrs = addrs or {"93.184.216.34"}
+
+    def __call__(self, host: str) -> set[str]:
+        self.asked.append(host)
+        return self._addrs
+
+
+def test_behind_a_proxy_no_hostname_is_resolved_locally():
+    """The DNS-leak regression: with a proxy, the local resolver must never see the host.
+
+    Resolving here would show the ISP every site the tool visits while the traffic itself
+    is tunneled, which is precisely what the proxy was turned on to prevent.
+    """
+    resolver = _Resolver()
+    guard_url("https://example.com/page", resolve=resolver, proxied=True)
+    assert resolver.asked == []
+
+
+def test_without_a_proxy_the_hostname_is_still_resolved():
+    resolver = _Resolver()
+    guard_url("https://example.com/page", resolve=resolver, proxied=False)
+    assert resolver.asked == ["example.com"]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8080/admin",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://10.0.0.5/internal",
+        "http://[::1]:9000/",
+    ],
+)
+def test_literal_internal_addresses_stay_refused_even_behind_a_proxy(url):
+    """Skipping DNS must not skip the guard: a literal IP needs no lookup to judge."""
+    resolver = _Resolver()
+    with pytest.raises(BlockedEgress):
+        guard_url(url, resolve=resolver, proxied=True)
+    assert resolver.asked == []
+
+
+def test_non_http_schemes_stay_refused_behind_a_proxy():
+    for url in ("file:///etc/passwd", "gopher://x/", "dict://x:11/"):
+        with pytest.raises(BlockedEgress):
+            guard_url(url, proxied=True)
+
+
 PUBLIC = lambda host: {"93.184.216.34"}  # noqa: E731
 
 

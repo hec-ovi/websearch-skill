@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-DOCTOR_CONTRACT_VERSION = "1.0.0"
+DOCTOR_CONTRACT_VERSION = "1.1.0"
 
 Status = Literal["ok", "warn", "fail", "skipped"]
 Group = Literal["runtime", "egress", "vpn", "searxng", "engines", "tools", "fetch", "mcp"]
@@ -41,6 +41,9 @@ class DoctorRequest(BaseModel):
 
     checks: list[str] | None = None
     quick: bool = False
+    # Off by default: the direct baseline is the only request in the tool that
+    # deliberately leaves the egress proxy.
+    baseline: bool = False
     timeout_ms: int = Field(default=DEFAULT_TIMEOUT_MS, ge=1000, le=120000)
     query: str = Field(default=DEFAULT_QUERY, min_length=1)
     fetch_url: str = Field(default=DEFAULT_FETCH_URL, min_length=1)

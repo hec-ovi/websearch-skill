@@ -11,7 +11,7 @@ import json
 import pytest
 
 from websearch import cli
-from websearch.doctor import DoctorRequest
+from websearch.doctor import DOCTOR_CONTRACT_VERSION, DoctorRequest
 from websearch.envelope import ok_envelope
 from websearch.optional_layers import PROXY_ENV, SEARXNG_ENV, VPN_ENV
 
@@ -73,7 +73,7 @@ class FakeDoctor:
 
     def run(self, request):
         self.request = request
-        return ok_envelope("1.0.0", self._payload, layer="doctor", healthy=True)
+        return ok_envelope(DOCTOR_CONTRACT_VERSION, self._payload, layer="doctor", healthy=True)
 
 
 def install(monkeypatch, doctor):
@@ -125,7 +125,7 @@ def test_json_emits_the_raw_envelope(monkeypatch, capsys):
     install(monkeypatch, FakeDoctor(HEALTHY))
     assert cli.main(["doctor", "--json"]) == 0
     env = json.loads(capsys.readouterr().out)
-    assert env["contract_version"] == "1.0.0"
+    assert env["contract_version"] == DOCTOR_CONTRACT_VERSION
     assert env["meta"]["layer"] == "doctor"
     assert env["data"]["summary"]["total"] == 4
 
@@ -141,6 +141,7 @@ def test_flags_reach_the_request_and_the_builder(monkeypatch):
             "--check",
             "engines",
             "--quick",
+            "--baseline",
             "--timeout-ms",
             "5000",
             "--query",
@@ -157,6 +158,7 @@ def test_flags_reach_the_request_and_the_builder(monkeypatch):
     )
     assert doctor.request.checks == ["proxy", "engines"]
     assert doctor.request.quick is True
+    assert doctor.request.baseline is True
     assert doctor.request.timeout_ms == 5000
     assert doctor.request.query == "probe me"
     assert doctor.request.fetch_url == "https://probe.test"
@@ -176,6 +178,8 @@ def test_defaults_leave_every_layer_to_the_environment(monkeypatch):
     assert captured == {"vpn": None, "proxy": None, "searxng_url": None}
     assert doctor.request.checks is None
     assert doctor.request.quick is False
+    # The one request that would leave the egress proxy is opt-in.
+    assert doctor.request.baseline is False
     # Omitted flags fall through to the contract's defaults rather than a copy in the parser.
     assert doctor.request.timeout_ms == DEFAULT_TIMEOUT_MS
     assert doctor.request.query == DEFAULT_QUERY
@@ -200,7 +204,7 @@ def test_a_doctor_that_explodes_becomes_an_internal_error_envelope(monkeypatch, 
     assert cli.main(["doctor", "--json"]) == 1
     env = json.loads(capsys.readouterr().out)
     assert env["error"]["code"] == "internal_error"
-    assert env["contract_version"] == "1.0.0"
+    assert env["contract_version"] == DOCTOR_CONTRACT_VERSION
 
 
 def test_doctor_is_listed_in_the_cli_help(capsys):
