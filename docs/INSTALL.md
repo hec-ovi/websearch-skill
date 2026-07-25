@@ -175,7 +175,7 @@ workflow is `.github/workflows/release.yml`, bound to the GitHub environment `py
 trusted publisher configured on the PyPI project.
 
 To release: set the version in `pyproject.toml` (and `server.json`), commit, then tag and
-push a `v*` tag (`git tag v0.2.3 && git push origin v0.2.3`). The workflow builds with
+push a `v*` tag (`git tag v0.2.4 && git push origin v0.2.4`). The workflow builds with
 `uv build` and publishes via OIDC. Verify at `https://pypi.org/project/websearch-skill/`.
 
 ## In the MCP Registry

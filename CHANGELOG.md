@@ -6,6 +6,8 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-07-25
+
 ### Added
 
 - `websearch doctor`: a per-capability self-test of one installation, over the new
@@ -81,6 +83,10 @@ semantic versioning.
 - The container drops all capabilities, runs with `no-new-privileges`, and has a
   healthcheck. The committed placeholder secret key is gone: compose reads
   `SEARXNG_SECRET` with no fallback, so an unset secret aborts the start.
+- `docker/searxng/searxng.sh verify` now calls `websearch doctor --check searxng` rather
+  than repeating the health check and live query, and keeps only the part the doctor
+  cannot see from outside the container: where SearXNG's engine requests leave from.
+- Package metadata now identifies the author by name and GitHub profile.
 
 ## [0.2.3] - 2026-07-23
 
