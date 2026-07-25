@@ -1228,6 +1228,12 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
 
+    # Pick up a gitignored .env before anything reads the optional layers' variables.
+    # An exported variable still wins, so this only fills in what the shell did not set.
+    from .optional_layers import load_env_file
+
+    load_env_file()
+
     parser = argparse.ArgumentParser(
         prog="websearch",
         description="Open-source multi-engine web search for AI agents.",

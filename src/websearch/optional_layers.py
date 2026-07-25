@@ -12,7 +12,8 @@ keyless engines over a direct connection, and each of these adds one thing on to
 - ``searxng`` (``WEBSEARCH_SEARXNG_URL``)  a self-hosted SearXNG joins the Layer-1 fanout.
 
 Each is off when its variable is unset, empty, or one of the off words, so a fresh
-install has all three off and no way to be surprised by one.
+install has all three off and no way to be surprised by one. The variables can come from
+a gitignored ``.env`` (see ``load_env_file``) instead of your shell history.
 
 Credentials live in these values (a proxy URL carries user:pass), so every display path
 goes through ``redact_url``/``scrub``. The doctor prints layer state constantly; it must
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from .proxy import ProxyConfigError, resolve_proxy
@@ -43,6 +45,44 @@ OFF_WORDS = {"", "off", "none", "no", "false", "0", "direct"}
 VPN_NORDVPN = "nordvpn"
 VPN_ANY = "any"
 _VPN_ANY_ALIASES = {"any", "on", "yes", "true", "1", "vpn"}
+
+
+ENV_FILE = ".env"
+ENV_FILE_VAR = "WEBSEARCH_ENV_FILE"
+
+
+def load_env_file(path: str | None = None) -> list[str]:
+    """Read ``.env`` into the environment and return the names it set.
+
+    The credentials these layers need (NordVPN service credentials, a proxy URL) are the
+    kind you do not want in shell history or a systemd unit, and ``.env`` is already
+    gitignored. Real environment variables always win, so exporting one still overrides
+    the file. Stdlib only: a 30-line parser is cheaper than a dependency.
+    """
+    target = Path(path or os.environ.get(ENV_FILE_VAR) or ENV_FILE)
+    try:
+        lines = Path(target).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    loaded: list[str] = []
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].lstrip()
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key in os.environ:  # an exported variable beats the file
+            continue
+        os.environ[key] = value
+        loaded.append(key)
+    return loaded
 
 
 def redact_url(url: str | None) -> str | None:

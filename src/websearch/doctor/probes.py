@@ -495,16 +495,36 @@ def probe_engine(adapter, request) -> Outcome:
         return Outcome(WARN, f"raised {_err(exc)}", {"engine": adapter.name})
     detail = {"engine": adapter.name, "results": len(out.results)}
     if out.error:
-        return Outcome(
-            WARN,
-            out.error,
-            detail,
-            hint="Keyless engines rate-limit and serve CAPTCHAs; one failing engine only "
-            "narrows the fanout.",
-        )
+        # Deliberately not called a block. ddgs reports "No results found" for a CAPTCHA,
+        # a rate limit, AND for a 200 whose HTML its parser no longer understands, and
+        # from here those are indistinguishable. The SearXNG cross-check below is what
+        # tells them apart, because it parses the same provider independently.
+        return Outcome(WARN, out.error, detail)
     if not out.results:
         return Outcome(WARN, "answered with 0 results", detail)
     return Outcome(OK, f"{len(out.results)} results", detail)
+
+
+def probe_searxng_engine(
+    net: Net, base: str, engine: str, *, query: str, timeout_s: float, proxy: str | None
+) -> tuple[bool, int, str | None]:
+    """Ask a SearXNG instance for ONE named engine: (reached, result count, error).
+
+    The second opinion on a silent provider. SearXNG's scraper for an engine is written
+    and updated independently of ddgs's, so "ddgs got nothing, SearXNG got 200 results"
+    is a parser problem, and "neither got anything" is the provider refusing this IP.
+    """
+    try:
+        payload = net.json(
+            f"{base.rstrip('/')}/search",
+            proxy=proxy,
+            timeout_s=timeout_s,
+            params={"q": query, "format": "json", "engines": engine},
+        )
+    except Exception as exc:
+        return False, 0, _err(exc, proxy)
+    count = len(payload.get("results") or [])
+    return count > 0, count, None
 
 
 def probe_arxiv(tool, query: str) -> Outcome:

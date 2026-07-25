@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from ..envelope import Envelope, ok_envelope
 from ..layer1_search import DdgsAdapter, SearchRequest, SearxngAdapter
 from ..optional_layers import LayerState, layer_states, resolved_proxy_url
+from ..proxy import proxy_for
 from . import probes
 from .models import (
     DOCTOR_CONTRACT_VERSION,
@@ -230,6 +231,9 @@ class Doctor:
         # Phase 4: everything that issues a real query or fetch.
         run_all(self._work_jobs(request))
 
+        # Phase 5: ask SearXNG about the providers ddgs could not get results from.
+        self._cross_check_silent_providers(results, request)
+
         checks = self._ordered(results, plan)
         engines_aggregate = self._engines_aggregate(checks)
         if engines_aggregate is not None:
@@ -298,6 +302,67 @@ class Doctor:
         jobs["fetch:impersonation"] = probes.probe_impersonation
         return jobs
 
+    def _cross_check_silent_providers(
+        self, results: dict[str, CheckResult], request: DoctorRequest
+    ) -> None:
+        """Tell a broken parser apart from a provider that is refusing this IP.
+
+        ddgs says "No results found" for a CAPTCHA, a rate limit, and a 200 whose markup
+        it can no longer parse. SearXNG scrapes the same providers with independently
+        maintained parsers, so asking it about exactly the silent ones settles which it
+        was. Only runs when SearXNG is up, and only for the providers that went quiet.
+        """
+        state = self._layer("searxng")
+        if not state.enabled or not state.value:
+            return
+        silent = {
+            check.name.split(":")[-1]: check
+            for name, check in results.items()
+            if name.startswith("engine:ddgs:") and check.status == WARN
+        }
+        if not silent:
+            return
+        proxy = proxy_for(state.value, self._proxy_url if self._proxy_enabled else None)
+
+        def ask(engine: str):
+            return engine, probes.probe_searxng_engine(
+                self._net,
+                state.value,
+                engine,
+                query=request.query,
+                timeout_s=request.timeout_s,
+                proxy=proxy,
+            )
+
+        with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(silent))) as pool:
+            answers = dict(pool.map(ask, silent))
+
+        for engine, check in silent.items():
+            reached, count, error = answers.get(engine, (False, 0, "not checked"))
+            check.detail["searxng_cross_check"] = {
+                "reached": reached,
+                "results": count,
+                "error": error,
+            }
+            if reached:
+                check.summary = f"{check.summary} (SearXNG reached it: {count} results)"
+                check.hint = (
+                    f"The provider is up: SearXNG's own {engine} parser got {count} results "
+                    "for the same query, so this is ddgs's parser, not a block on your IP. "
+                    "Query this provider through SearXNG."
+                )
+            elif error:
+                check.hint = (
+                    f"No second opinion: SearXNG could not be asked about {engine} ({error})."
+                )
+            else:
+                check.summary = f"{check.summary} (SearXNG got nothing from it either)"
+                check.hint = (
+                    f"Both parsers came back empty, so {engine} is refusing this IP (CAPTCHA "
+                    "or rate limit). A different egress exit is what changes that, not a "
+                    "different parser."
+                )
+
     @staticmethod
     def _ordered(
         results: dict[str, CheckResult], plan: list[tuple[str, Group, str | None]]
@@ -312,8 +377,7 @@ class Doctor:
             out.extend(by_group.get(group, []))
         return out
 
-    @staticmethod
-    def _engines_aggregate(checks: list[CheckResult]) -> CheckResult | None:
+    def _engines_aggregate(self, checks: list[CheckResult]) -> CheckResult | None:
         """One line for the fanout as a whole.
 
         A single provider going quiet is a warn, not a failure: ddgs rotates and the
@@ -349,14 +413,34 @@ class Doctor:
         counted = f"{len(answered)} of {len(providers)} providers answered"
         if default_path is not None and default_path.status == OK and silent:
             counted += "; the default ddgs path still works"
+        rescued = [
+            c.name.split(":")[-1]
+            for c in providers
+            if (c.detail.get("searxng_cross_check") or {}).get("reached")
+        ]
+        detail["reached_via_searxng"] = rescued
+        if rescued:
+            counted += f"; SearXNG reaches {len(rescued)} of the silent ones"
         return CheckResult(
             name="engines",
             group="engines",
             status=OK if not silent else WARN,
             summary=counted,
             detail=detail,
-            hint=None if not silent else f"Silent this run: {', '.join(silent)}.",
+            hint=self._silent_hint(silent),
         )
+
+    def _silent_hint(self, silent: list[str]) -> str | None:
+        if not silent:
+            return None
+        hint = f"Silent this run: {', '.join(silent)}."
+        if not self._layer("searxng").enabled:
+            hint += (
+                " Turn on SearXNG (./docker/searxng/searxng.sh up) and re-run: it parses "
+                "these providers itself, which says whether they are blocking you or "
+                "ddgs just cannot read their pages any more."
+            )
+        return hint
 
     def _warnings(self) -> list[str]:
         out: list[str] = []
