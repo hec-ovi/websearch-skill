@@ -168,12 +168,18 @@ def test_flags_reach_the_request_and_the_builder(monkeypatch):
 
 
 def test_defaults_leave_every_layer_to_the_environment(monkeypatch):
+    from websearch.doctor.models import DEFAULT_FETCH_URL, DEFAULT_QUERY, DEFAULT_TIMEOUT_MS
+
     doctor = FakeDoctor(HEALTHY)
     captured = install(monkeypatch, doctor)
     cli.main(["doctor"])
     assert captured == {"vpn": None, "proxy": None, "searxng_url": None}
     assert doctor.request.checks is None
     assert doctor.request.quick is False
+    # Omitted flags fall through to the contract's defaults rather than a copy in the parser.
+    assert doctor.request.timeout_ms == DEFAULT_TIMEOUT_MS
+    assert doctor.request.query == DEFAULT_QUERY
+    assert doctor.request.fetch_url == DEFAULT_FETCH_URL
 
 
 def test_an_out_of_range_timeout_is_a_clean_invalid_request(monkeypatch, capsys):

@@ -328,7 +328,7 @@ warn  engine:ddgs:startpage  No results found. (SearXNG got nothing from it eith
                              -> startpage is refusing this IP. Only a different egress exit changes that.
 ```
 
-Measured on one home connection in July 2026: of ten `ddgs` providers, Brave, Grokipedia, Yahoo, and Yandex answered directly; Google, DuckDuckGo, and Mojeek were silent through `ddgs` but returned results through SearXNG; Startpage and Wikipedia were empty in both. Through NordVPN's shared SOCKS exit, DuckDuckGo dropped out as well. Your numbers will differ, which is the reason the command exists.
+Two runs on one home connection in July 2026, minutes apart, over the nine `ddgs` providers: Brave, Yahoo, and Yandex answered both times. Google and Mojeek were silent through `ddgs` both times and returned 181 and 10 results through SearXNG, so `ddgs` cannot read their pages any more. Startpage and Wikipedia were empty in both parsers, which is a block, not a parser. DuckDuckGo and Grokipedia flipped between the two runs, and moving the client onto NordVPN's shared SOCKS exit cost one more provider. None of that is stable enough to write into a table, which is why it is a command.
 
 ## Security
 

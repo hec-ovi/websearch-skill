@@ -1055,7 +1055,9 @@ def _add_doctor_command(sub: Any) -> None:
         action="store_true",
         help="Skip the per-engine fanout, the extra tools, and the fetch tiers.",
     )
-    dp.add_argument("--timeout-ms", type=int, default=15000, help="Per-check network timeout.")
+    # No argparse default: DoctorRequest owns it, so the contract default cannot drift
+    # out of lockstep with a number copied into the parser.
+    dp.add_argument("--timeout-ms", type=int, help="Per-check network timeout (default 15000).")
     dp.add_argument(
         "--query",
         default=None,
@@ -1078,15 +1080,15 @@ def _add_doctor_command(sub: Any) -> None:
 def _cmd_doctor(args: argparse.Namespace) -> int:
     from .doctor import DOCTOR_CONTRACT_VERSION, DoctorRequest
 
-    fields: dict[str, Any] = {
-        "checks": args.check or None,
-        "quick": args.quick,
-        "timeout_ms": args.timeout_ms,
-    }
-    if args.query:
-        fields["query"] = args.query
-    if args.fetch_url:
-        fields["fetch_url"] = args.fetch_url
+    fields: dict[str, Any] = {"checks": args.check or None, "quick": args.quick}
+    for flag, field in (
+        ("timeout_ms", "timeout_ms"),
+        ("query", "query"),
+        ("fetch_url", "fetch_url"),
+    ):
+        value = getattr(args, flag)
+        if value:  # an omitted flag keeps DoctorRequest's contract default
+            fields[field] = value
     try:
         request = DoctorRequest(**fields)
     except ValidationError as exc:
