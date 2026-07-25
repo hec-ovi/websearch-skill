@@ -8,6 +8,7 @@ error mapping.
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from websearch import cli
@@ -21,6 +22,8 @@ from websearch.proxy import (
     NORDVPN_DEFAULT_HOST,
     ProxyConfigError,
     as_fetch_proxy,
+    bypasses_proxy,
+    proxy_for,
     proxy_type,
     resolve_proxy,
 )
@@ -56,6 +59,86 @@ def test_env_url_passthrough(monkeypatch):
 def test_cli_value_beats_env(monkeypatch):
     monkeypatch.setenv("WEBSEARCH_PROXY", HTTP)
     assert resolve_proxy(SOCKS) == SOCKS
+
+
+# --- local targets skip the proxy ---------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8888",
+        "http://localhost:8888/",
+        "http://LOCALHOST:8888",
+        "http://[::1]:8888",
+        "http://192.168.1.20:8888",
+        "http://10.0.0.5",
+        "http://172.16.4.4:8080",
+        "http://169.254.10.1",
+        "http://searxng.local:8888",
+        "http://box.home.arpa:8888",
+    ],
+)
+def test_local_targets_bypass_the_proxy(url):
+    assert bypasses_proxy(url) is True
+    assert proxy_for(url, SOCKS) is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://searx.be",
+        "http://8.8.8.8",
+        "https://searxng.example.com:8888",
+        "http://mylocalhost.example.com",
+    ],
+)
+def test_remote_targets_keep_the_proxy(url):
+    assert bypasses_proxy(url) is False
+    assert proxy_for(url, SOCKS) == SOCKS
+
+
+def test_bypass_tolerates_a_missing_or_hostless_url():
+    assert bypasses_proxy(None) is False
+    assert bypasses_proxy("") is False
+    assert bypasses_proxy("not a url") is False
+    assert proxy_for(None, SOCKS) == SOCKS
+
+
+def test_proxy_for_stays_none_when_no_proxy_is_configured():
+    assert proxy_for("https://searx.be", None) is None
+
+
+def test_searxng_on_loopback_is_not_proxied_even_when_one_is_set(httpx_mock, monkeypatch):
+    """The bug this guards: WEBSEARCH_PROXY sent the loopback SearXNG hop to a remote
+    SOCKS exit, which resolved localhost to itself, so every search failed."""
+    seen: dict = {}
+    real_client = httpx.Client
+
+    def recording_client(*args, **kwargs):
+        seen.update(kwargs)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("websearch.layer1_search.adapters.searxng.httpx.Client", recording_client)
+    httpx_mock.add_response(json={"results": []})
+
+    SearxngAdapter("http://127.0.0.1:8888", proxy=SOCKS).search(SearchRequest(query="q"))
+    assert seen["proxy"] is None
+
+
+def test_searxng_on_a_public_host_still_uses_the_proxy(httpx_mock, monkeypatch):
+    seen: dict = {}
+    real_client = httpx.Client
+
+    def recording_client(*args, **kwargs):
+        seen.update(kwargs)
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr("websearch.layer1_search.adapters.searxng.httpx.Client", recording_client)
+    httpx_mock.add_response(json={"results": []})
+
+    SearxngAdapter("https://searx.example.com", proxy=SOCKS).search(SearchRequest(query="q"))
+    assert seen["proxy"] == SOCKS
 
 
 def test_cli_off_beats_env(monkeypatch):

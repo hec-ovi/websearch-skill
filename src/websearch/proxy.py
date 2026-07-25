@@ -15,12 +15,17 @@ A ``--proxy`` CLI value takes precedence over the environment and accepts the sa
 three forms, so ``--proxy off`` forces a direct connection even when the variable is
 set. ``socks5h`` resolves DNS through the proxy, so target hostnames never reach the
 local resolver.
+
+One exception: a host on your own machine or LAN is never proxied. Sending
+``http://127.0.0.1:8888`` (a self-hosted SearXNG) through a remote SOCKS exit asks that
+exit to connect to *its* loopback, which fails every time. See ``bypasses_proxy``.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import os
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 NORDVPN_DEFAULT_HOST = "nl.socks.nordhold.net"
 NORDVPN_PORT = 1080
@@ -54,6 +59,39 @@ def resolve_proxy(cli_value: str | None = None) -> str | None:
     if value.lower() == "nordvpn":
         return _nordvpn_url()
     return value
+
+
+_LOCAL_SUFFIXES = (".local", ".localdomain", ".internal", ".home.arpa")
+
+
+def bypasses_proxy(url: str | None) -> bool:
+    """True when ``url`` names a host on this machine or this network.
+
+    An egress proxy exists to change where requests leave the internet from. A
+    self-hosted service on loopback or a LAN address is not on the internet, and a
+    remote exit node resolving ``localhost`` would reach its own machine, so proxying
+    it is always wrong rather than merely wasteful. Hostnames that are not obviously
+    local are left to the proxy: guessing would mean a DNS lookup on every call, and
+    leaking a lookup for a host the user wanted resolved proxy-side.
+    """
+    if not url:
+        return False
+    host = urlsplit(url if "://" in url else f"//{url}").hostname
+    if not host:
+        return False
+    host = host.lower()
+    if host == "localhost" or host.endswith(_LOCAL_SUFFIXES):
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return bool(address.is_loopback or address.is_private or address.is_link_local)
+
+
+def proxy_for(target_url: str | None, proxy: str | None) -> str | None:
+    """The proxy to use when talking to ``target_url``: None for a local target."""
+    return None if bypasses_proxy(target_url) else proxy
 
 
 def proxy_type(url: str) -> str:

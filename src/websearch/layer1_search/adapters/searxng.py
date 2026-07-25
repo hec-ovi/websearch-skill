@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from ...proxy import proxy_for
 from ..capability import GENERAL_AGGREGATOR
 from ..models import FreshnessRange, SearchRequest
 from ..port import EngineAdapter, EngineOutput, RawResult
@@ -51,7 +52,12 @@ class SearxngAdapter(EngineAdapter):
         self._engines = engines
         self._client = client
         self._owned_client: httpx.Client | None = None
-        self._proxy = proxy
+        # A self-hosted SearXNG usually lives on loopback or the LAN, where an egress
+        # proxy cannot reach it: the exit node would try to connect to its own
+        # localhost. The proxy still applies to a SearXNG on a public address, and
+        # either way the engine traffic that leaves the instance is SearXNG's own
+        # outgoing config, not this hop.
+        self._proxy = proxy_for(self.base_url, proxy)
 
     def enabled(self) -> bool:
         return bool(self.base_url)
