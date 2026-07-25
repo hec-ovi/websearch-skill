@@ -4,7 +4,7 @@
 #
 #   ./searxng.sh up        start it (generates .env with a per-machine secret)
 #   ./searxng.sh status    health, engine counts, and a live query
-#   ./searxng.sh verify    end-to-end check through the websearch CLI
+#   ./searxng.sh verify    websearch doctor --check searxng, plus the container's egress IP
 #   ./searxng.sh egress    where SearXNG's engine requests leave from
 #   ./searxng.sh engines   re-probe every engine and regenerate settings.yml
 #   ./searxng.sh restart   apply a settings.yml change
@@ -155,28 +155,13 @@ if silent:
 }
 
 cmd_verify() {
+  # The health, engine-count, and live-query checks live in `websearch doctor`, which
+  # every install has; this adds the one thing the doctor cannot see from outside the
+  # container, which is where SearXNG's own engine requests leave from.
   need_docker
-  local base
-  base="$(url)"
-  curl -fsS -o /dev/null "$base/healthz" || { echo "not running; start with: $0 up" >&2; exit 1; }
-  echo "querying through the websearch CLI against $base"
-  ( cd "$HERE/../.." && WEBSEARCH_SEARXNG_URL="$base" uv run websearch search "rust ownership" \
-      --json --no-ddgs --count 10 ) | python3 -c '
-import json, sys
-envelope = json.load(sys.stdin)
-if not envelope.get("ok"):
-    print("  search failed: " + json.dumps(envelope.get("error")))
-    sys.exit(1)
-results = (envelope.get("data") or {}).get("results") or []
-print("  backend={} results={}".format(envelope["meta"].get("backend"), len(results)))
-for r in results[:3]:
-    print("  - " + r["title"][:70])
-    print("    " + r["url"][:90])
-sys.exit(0 if results else 1)
-'
+  ( cd "$HERE/../.." && uv run websearch doctor --check searxng --searxng-url "$(url)" ) || exit 1
   echo
   cmd_egress
-  echo "searxng path works end to end"
 }
 
 cmd_egress() {

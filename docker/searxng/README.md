@@ -30,8 +30,7 @@ collides with roughly everything.
 |---|---|
 | `searxng.sh up` | generate the secret if missing, start, wait for health |
 | `searxng.sh status` | container state, engine counts, and a live query |
-| `searxng.sh verify` | run a real search through the `websearch` CLI |
-| `websearch doctor --check searxng` | health, active engines, and a live JSON query, as a check |
+| `searxng.sh verify` | `websearch doctor --check searxng`, plus the container's egress IP |
 | `searxng.sh egress` | show where SearXNG's engine requests leave from |
 | `searxng.sh engines` | re-probe every engine and regenerate `settings.yml` |
 | `searxng.sh restart` | apply a `settings.yml` change |
