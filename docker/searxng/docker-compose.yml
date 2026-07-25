@@ -1,13 +1,16 @@
-# Lean local SearXNG for websearch-skill.
+# Self-contained local SearXNG for websearch-skill.
 #
-# One container, JSON API on, rate limiter off. This is a PRIVATE instance that
-# only your own tool talks to, so the bot limiter (which exists to throttle
-# automated clients) is turned off and no Valkey/Redis is needed. For a public
-# instance you would add Valkey and enable the limiter; see the upstream docs:
-# https://docs.searxng.org/admin/installation-docker.html
+# One container, nothing installed on the host, nothing written into the repo.
+# The JSON API is on, the bot limiter is off (this instance is private and only
+# your own tool talks to it), and the secret key comes from a generated .env
+# rather than being committed here.
 #
-# Start it:   docker compose -f docker/searxng/docker-compose.yml up -d
-# Then point the tool at it:  export WEBSEARCH_SEARXNG_URL=http://localhost:8080
+# Use ./searxng.sh instead of driving compose by hand:
+#   ./docker/searxng/searxng.sh up        # generate secret, start, wait for health
+#   ./docker/searxng/searxng.sh status    # health + engine counts + a live query
+#   ./docker/searxng/searxng.sh down      # stop and remove
+#
+# Upstream reference: https://docs.searxng.org/admin/installation-docker.html
 
 name: websearch-searxng
 
@@ -17,13 +20,39 @@ services:
     image: docker.io/searxng/searxng:${SEARXNG_VERSION:-latest}
     restart: unless-stopped
     ports:
-      # Binds to 127.0.0.1 by default (local only). Set SEARXNG_HOST=0.0.0.0 in
-      # .env to expose it on your LAN.
-      - "${SEARXNG_HOST:-127.0.0.1}:${SEARXNG_PORT:-8080}:8080"
+      # Loopback only by default. Set SEARXNG_HOST=0.0.0.0 in .env to expose it on
+      # your LAN, and read "Before exposing it" in README.md first.
+      - "${SEARXNG_HOST:-127.0.0.1}:${SEARXNG_PORT:-8888}:8080"
     volumes:
-      # Your overrides live in core-config/settings.yml. The Granian-based image reads
-      # /etc/searxng/settings.yml; because this repo ships that file, the entrypoint uses
-      # it as-is (it only generates a settings.yml when none is present).
-      - ./core-config/:/etc/searxng/:Z
+      # Config is read-only: the container cannot rewrite the settings this repo
+      # ships. FORCE_OWNERSHIP=false below stops the entrypoint from trying to
+      # chown a read-only mount.
+      - ./core-config/:/etc/searxng/:ro
+      # Runtime cache (favicons, engine state) lives in a Docker-managed volume,
+      # not in the repo working tree. `searxng.sh down --purge` removes it.
+      - searxng-cache:/var/cache/searxng
     environment:
-      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8080}/
+      - FORCE_OWNERSHIP=false
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_PORT:-8888}/
+      # No default on purpose: an unset secret must fail loudly, never fall back
+      # to a shared placeholder. ./searxng.sh up writes one into .env.
+      - SEARXNG_SECRET=${SEARXNG_SECRET:?run ./docker/searxng/searxng.sh up (it generates .env)}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      # wget ships in the image; curl does not.
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  searxng-cache:

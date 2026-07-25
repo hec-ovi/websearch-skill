@@ -40,3 +40,6 @@ coverage.xml
 .env
 .env.*
 !.env.example
+
+# Machine-local SearXNG probe cache (docker/searxng/.probe-cache.json)
+.probe-cache.json

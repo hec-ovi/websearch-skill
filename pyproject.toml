@@ -67,6 +67,8 @@ dev = [
     "pytest-httpx>=0.30",
     "jsonschema>=4.21",
     "ruff>=0.6",
+    # Reads docker/searxng/*.yml in the SearXNG stack tests; not a runtime dependency.
+    "pyyaml>=6.0",
 ]
 
 [build-system]

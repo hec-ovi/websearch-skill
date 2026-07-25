@@ -1,17 +1,18 @@
-# Minimal overrides layered on top of SearXNG's shipped defaults.
+# Overrides layered on top of SearXNG's shipped defaults.
 # Full reference: https://docs.searxng.org/admin/settings/index.html
 #
-# `use_default_settings: true` pulls in the complete default engine list, so you
-# only declare what you want to change below.
+# `use_default_settings: true` pulls in the complete default engine list, so only the
+# deltas live here. The engine block at the bottom is generated: see
+# ./docker/searxng/searxng.sh engines.
 use_default_settings: true
 
 server:
-  # Change this before any non-local use:  openssl rand -hex 32
-  secret_key: "change-me-local-only-placeholder-secret-key"
-
-  # This instance is private and only your tool queries it, so the bot limiter
-  # (which would 429 your automated client) stays off. Turn it on, add the
-  # valkey service back, and set public_instance: true only for a public box.
+  # secret_key comes from the SEARXNG_SECRET env var (docker-compose.yml reads it from
+  # .env, which searxng.sh generates per machine). Nothing secret is committed here.
+  #
+  # This instance is private and only your tool queries it, so the bot limiter (which
+  # would 429 an automated client) stays off. Turn it on, add a valkey service, and set
+  # public_instance: true only for a public box.
   limiter: false
   public_instance: false
 
@@ -21,3 +22,478 @@ search:
   formats:
     - html
     - json
+
+outgoing:
+  # The generated block below puts ~50 engines in the general fanout instead of the
+  # stock handful, so the defaults (pool_maxsize 20) would queue connections and the
+  # slowest engines would decide the response time.
+  pool_connections: 300
+  pool_maxsize: 100
+  request_timeout: 3.0
+  # Hard ceiling per engine. Engines may declare their own timeout and some ask for
+  # 10s; the search client gives up at 8s, and losing every result to one slow engine
+  # is a worse trade than losing that engine. Measured: ~30 engines answer within it.
+  max_request_timeout: 5.0
+
+# >>> BEGIN generated engine list
+# Regenerate with: ./docker/searxng/searxng.sh engines
+# Every engine below answered a live probe from this host, so it joins the
+# default fanout. 180 engines.
+engines:
+  - name: abcnyheter
+    disabled: false
+  - name: acfun
+    disabled: false
+  - name: adobe stock
+    disabled: false
+  - name: adobe stock audio
+    disabled: false
+  - name: adobe stock video
+    disabled: false
+  - name: alpine linux packages
+    disabled: false
+  - name: ansa
+    disabled: false
+  - name: apk mirror
+    disabled: false
+  - name: apple app store
+    disabled: false
+  - name: apple maps
+    disabled: false
+  - name: artic
+    disabled: false
+  - name: artstation
+    disabled: false
+  - name: arxiv
+    disabled: false
+  - name: askubuntu
+    disabled: false
+  - name: baidu
+    disabled: false
+  - name: baidu kaifa
+    disabled: false
+  - name: bilibili
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: bing images
+    disabled: false
+  - name: bing news
+    disabled: false
+  - name: bing videos
+    disabled: false
+  - name: bitchute
+    disabled: false
+  - name: boardreader
+    disabled: false
+  - name: bpb
+    disabled: false
+  - name: cachy os packages
+    disabled: false
+  - name: caddy.community
+    disabled: false
+  - name: cara
+    disabled: false
+  - name: chefkoch
+    disabled: false
+  - name: crates.io
+    disabled: false
+  - name: crossref
+    disabled: false
+  - name: crowdview
+    disabled: false
+  - name: dailymotion
+    disabled: false
+  - name: ddg definitions
+    disabled: false
+  - name: deezer
+    disabled: false
+  - name: devicons
+    disabled: false
+  - name: discuss.python
+    disabled: false
+  - name: docker hub
+    disabled: false
+  - name: dogpile
+    disabled: false
+  - name: dogpile images
+    disabled: false
+  - name: dogpile news
+    disabled: false
+  - name: dogpile videos
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: duckduckgo images
+    disabled: false
+  - name: duckduckgo news
+    disabled: false
+  - name: duckduckgo videos
+    disabled: false
+  - name: duckduckgo web
+    disabled: false
+  - name: duden
+    disabled: false
+  - name: emojipedia
+    disabled: false
+  - name: encyclosearch
+    disabled: false
+  - name: fdroid
+    disabled: false
+  - name: findfiles
+    disabled: false
+  - name: findfiles music
+    disabled: false
+  - name: findfiles videos
+    disabled: false
+  - name: findthatmeme
+    disabled: false
+  - name: flaticon
+    disabled: false
+  - name: flickr
+    disabled: false
+  - name: free software directory
+    disabled: false
+  - name: frinkiac
+    disabled: false
+  - name: fynd
+    disabled: false
+  - name: fyyd
+    disabled: false
+  - name: gabanza
+    disabled: false
+  - name: genius
+    disabled: false
+  - name: gentoo
+    disabled: false
+  - name: giphy
+    disabled: false
+  - name: gitea.com
+    disabled: false
+  - name: github
+    disabled: false
+  - name: gitlab
+    disabled: false
+  - name: gmx
+    disabled: false
+  - name: google cse
+    disabled: false
+  - name: google cse images
+    disabled: false
+  - name: google play apps
+    disabled: false
+  - name: google play movies
+    disabled: false
+  - name: google scholar
+    disabled: false
+  - name: hackernews
+    disabled: false
+  - name: hex
+    disabled: false
+  - name: hoogle
+    disabled: false
+  - name: huggingface
+    disabled: false
+  - name: huggingface datasets
+    disabled: false
+  - name: huggingface spaces
+    disabled: false
+  - name: il post
+    disabled: false
+  - name: imdb
+    disabled: false
+  - name: imgur
+    disabled: false
+  - name: ipernity
+    disabled: false
+  - name: iqiyi
+    disabled: false
+  - name: jisho
+    disabled: false
+  - name: lib.rs
+    disabled: false
+  - name: lobste.rs
+    disabled: false
+  - name: lucide
+    disabled: false
+  - name: magnific
+    disabled: false
+  - name: mankier
+    disabled: false
+  - name: mastodon hashtags
+    disabled: false
+  - name: mastodon users
+    disabled: false
+  - name: material icons
+    disabled: false
+  - name: mdn
+    disabled: false
+  - name: mediathekviewweb
+    disabled: false
+  - name: microsoft learn
+    disabled: false
+  - name: minecraft wiki
+    disabled: false
+  - name: mojeek images
+    disabled: false
+  - name: moviepilot
+    disabled: false
+  - name: mwmbl
+    disabled: false
+  - name: national vulnerability database
+    disabled: false
+  - name: naver
+    disabled: false
+  - name: nixos wiki
+    disabled: false
+  - name: npm
+    disabled: false
+  - name: odysee
+    disabled: false
+  - name: openairedatasets
+    disabled: false
+  - name: openairepublications
+    disabled: false
+  - name: openalex
+    disabled: false
+  - name: openlibrary
+    disabled: false
+  - name: openrepos
+    disabled: false
+  - name: openverse
+    disabled: false
+  - name: packagist
+    disabled: false
+  - name: pdbe
+    disabled: false
+  - name: peertube
+    disabled: false
+  - name: pexels
+    disabled: false
+  - name: photon
+    disabled: false
+  - name: pi-hole.community
+    disabled: false
+  - name: picjumbo
+    disabled: false
+  - name: pixabay images
+    disabled: false
+  - name: pixabay videos
+    disabled: false
+  - name: pkg.go.dev
+    disabled: false
+  - name: podchaser
+    disabled: false
+  - name: presearch
+    disabled: false
+  - name: presearch images
+    disabled: false
+  - name: presearch news
+    disabled: false
+  - name: presearch videos
+    disabled: false
+  - name: privacywall
+    disabled: false
+  - name: privacywall images
+    disabled: false
+  - name: privacywall videos
+    disabled: false
+  - name: pub.dev
+    disabled: false
+  - name: pubmed
+    disabled: false
+  - name: qwant news
+    disabled: false
+  - name: qwant videos
+    disabled: false
+  - name: radio browser
+    disabled: false
+  - name: reloado
+    disabled: false
+  - name: resulthunter
+    disabled: false
+  - name: resulthunter images
+    disabled: false
+  - name: reuters
+    disabled: false
+  - name: rottentomatoes
+    disabled: false
+  - name: searchch
+    disabled: false
+  - name: searchmysite
+    disabled: false
+  - name: searchtoday
+    disabled: false
+  - name: selfhst icons
+    disabled: false
+  - name: senscritique
+    disabled: false
+  - name: sepiasearch
+    disabled: false
+  - name: shopify stock
+    disabled: false
+  - name: sogou videos
+    disabled: false
+  - name: sogou wechat
+    disabled: false
+  - name: soundcloud
+    disabled: false
+  - name: sourcehut
+    disabled: false
+  - name: stackoverflow
+    disabled: false
+  - name: steam
+    disabled: false
+  - name: stocksnap
+    disabled: false
+  - name: superuser
+    disabled: false
+  - name: tagesschau
+    disabled: false
+  - name: tootfinder
+    disabled: false
+  - name: unsplash
+    disabled: false
+  - name: uxwing
+    disabled: false
+  - name: voidlinux
+    disabled: false
+  - name: vuhuv
+    disabled: false
+  - name: vuhuv images
+    disabled: false
+  - name: vuhuv videos
+    disabled: false
+  - name: wiby
+    disabled: false
+  - name: wikibooks
+    disabled: false
+  - name: wikicommons.audio
+    disabled: false
+  - name: wikicommons.files
+    disabled: false
+  - name: wikicommons.images
+    disabled: false
+  - name: wikicommons.videos
+    disabled: false
+  - name: wikinews
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: wikiquote
+    disabled: false
+  - name: wikisource
+    disabled: false
+  - name: wikispecies
+    disabled: false
+  - name: wikiversity
+    disabled: false
+  - name: wolframalpha
+    disabled: false
+  - name: wordnik
+    disabled: false
+  - name: yandex
+    disabled: false
+  - name: yandex images
+    disabled: false
+  - name: youtube
+    disabled: false
+  - name: zapmeta
+    disabled: false
+#
+# Held back (10): torrent trackers and shadow libraries, still
+# queryable by name. Rerun with --include-restricted to enable them.
+#   1337x, annas archive, bt4g, btdigg, kickass, library genesis, nyaa, piratebay, solidtorrents, tokyotoshokan
+#
+# Left off (89): probed and did not answer. An engine SearXNG enables
+# upstream stays on regardless; SearXNG suspends it on its own when it fails.
+#   1x: ERROR - 1x Suspended: timeout
+#   360search: ERROR - 360search Suspended: timeout
+#   360search videos: ERROR - 360search videos Suspended: timeout
+#   500px: EMPTY - 0 results
+#   9gag: ERROR - 9gag Suspended: access denied
+#   anaconda: EMPTY - 0 results
+#   arch linux wiki: EMPTY - 0 results
+#   ayo: EMPTY - 0 results
+#   baidu images: ERROR - baidu images Suspended: timeout
+#   bandcamp: EMPTY - 0 results
+#   bitbucket: EMPTY - 0 results
+#   brave: ERROR - brave Suspended: too many requests
+#   brave.images: ERROR - brave.images Suspended: too many requests
+#   brave.news: ERROR - brave.news Suspended: too many requests
+#   brave.videos: ERROR - brave.videos Suspended: too many requests
+#   codeberg: ERROR - codeberg Suspended: timeout
+#   currency: EMPTY - 0 results
+#   destatis: EMPTY - 0 results
+#   deviantart: EMPTY - 0 results
+#   dictzone: EMPTY - 0 results
+#   duckduckgo weather: ERROR - duckduckgo weather Suspended: timeout
+#   erowid: ERROR - erowid Suspended: access denied
+#   etymonline: EMPTY - 0 results
+#   fastbot: ERROR - fastbot Suspended: access denied
+#   findfiles images: ERROR - findfiles images unexpected crash
+#   fireball: ERROR - fireball Suspended: access denied
+#   fireball news: ERROR - fireball news Suspended: access denied
+#   fireball videos: ERROR - fireball videos Suspended: access denied
+#   geizhals: ERROR - geizhals Suspended: access denied
+#   goodreads: ERROR - goodreads parsing error
+#   google news: EMPTY - 0 results
+#   habrahabr: EMPTY - 0 results
+#   ina: ERROR - ina Suspended: timeout
+#   infospace: ERROR - infospace timeout
+#   lemmy comments: ERROR - lemmy comments Suspended: timeout
+#   lemmy communities: ERROR - lemmy communities Suspended: timeout
+#   lemmy posts: ERROR - lemmy posts Suspended: timeout
+#   lemmy users: ERROR - lemmy users Suspended: timeout
+#   library of congress: ERROR - library of congress parsing error
+#   lingva: EMPTY - 0 results
+#   media.ccc.de: ERROR - media.ccc.de Suspended: HTTP error
+#   metacpan: ERROR - metacpan Suspended: HTTP error
+#   mixcloud: ERROR - mixcloud Suspended: timeout
+#   mojeek: ERROR - mojeek Suspended: access denied
+#   mojeek news: ERROR - mojeek news Suspended: access denied
+#   mozhi: EMPTY - 0 results
+#   mymemory translated: EMPTY - 0 results
+#   naver images: EMPTY - 0 results
+#   naver news: ERROR - naver news Suspended: timeout
+#   naver videos: ERROR - naver videos Suspended: timeout
+#   niconico: EMPTY - 0 results
+#   ollama: EMPTY - 0 results
+#   openmeteo: ERROR - openmeteo timeout
+#   openstreetmap: ERROR - openstreetmap Suspended: access denied
+#   pinterest: ERROR - pinterest parsing error
+#   public domain image archive: ERROR - public domain image archive Suspended: access denied
+#   pypi: EMPTY - 0 results
+#   quark: ERROR - quark Suspended: timeout
+#   quark images: ERROR - quark images Suspended: timeout
+#   qwant: ERROR - qwant CAPTCHA
+#   qwant images: ERROR - qwant images timeout
+#   reddit: ERROR - reddit Suspended: access denied
+#   rubygems: EMPTY - 0 results
+#   rumble: EMPTY - 0 results
+#   semantic scholar: ERROR - semantic scholar Suspended: timeout
+#   seznam: ERROR - seznam Suspended: timeout
+#   sogou: ERROR - sogou Suspended: CAPTCHA
+#   sogou images: ERROR - sogou images Suspended: timeout
+#   startpage: ERROR - startpage Suspended: CAPTCHA
+#   startpage images: ERROR - startpage images Suspended: CAPTCHA
+#   startpage news: ERROR - startpage news Suspended: CAPTCHA
+#   tineye: EMPTY - 0 results
+#   tmdb: ERROR - tmdb unexpected crash
+#   tusksearch: ERROR - tusksearch Suspended: HTTP error
+#   tusksearch images: ERROR - tusksearch images Suspended: HTTP error
+#   tusksearch news: ERROR - tusksearch news Suspended: HTTP error
+#   tusksearch videos: ERROR - tusksearch videos Suspended: HTTP error
+#   vimeo: ERROR - vimeo Suspended: access denied
+#   wikidata: EMPTY - 0 results
+#   wikimini: ERROR - wikimini Suspended: timeout
+#   wikivoyage: ERROR - wikivoyage Suspended: too many requests
+#   wiktionary: ERROR - wiktionary Suspended: too many requests
+#   woxikon.de synonyme: ERROR - woxikon.de synonyme Suspended: access denied
+#   wttr.in: ERROR - wttr.in parsing error
+#   yacy: ERROR - yacy Suspended: timeout
+#   yacy images: ERROR - yacy images Suspended: timeout
+#   yahoo: ERROR - yahoo Suspended: HTTP protocol error
+#   yandex music: ERROR - yandex music Suspended: HTTP error
+#   yep: EMPTY - 0 results
+# <<< END generated engine list

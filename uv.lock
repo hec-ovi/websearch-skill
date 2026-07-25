@@ -2155,6 +2155,7 @@ dev = [
     { name = "jsonschema" },
     { name = "pytest" },
     { name = "pytest-httpx" },
+    { name = "pyyaml" },
     { name = "ruff" },
 ]
 
@@ -2176,6 +2177,7 @@ dev = [
     { name = "jsonschema", specifier = ">=4.21" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-httpx", specifier = ">=0.30" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", specifier = ">=0.6" },
 ]
 
