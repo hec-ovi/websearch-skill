@@ -69,7 +69,7 @@ uv run websearch web-search "open source vector database comparison 2026" --max-
 uv run websearch search "..." --ddgs-backends google,brave,mojeek
 
 # add your own SearXNG for broader recall (works on web-search too)
-export WEBSEARCH_SEARXNG_URL=http://localhost:8080   # see docker/searxng/
+export WEBSEARCH_SEARXNG_URL=http://127.0.0.1:8888   # see docker/searxng/
 ```
 
 Pair the output against whatever search your agent harness ships, on the same query at

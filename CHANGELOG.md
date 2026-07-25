@@ -4,6 +4,43 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and releases follow
 semantic versioning.
 
+## [Unreleased]
+
+### Added
+
+- `docker/searxng/searxng.sh`: one entry point for the local SearXNG (`up`, `down`,
+  `status`, `verify`, `engines`, `restart`, `logs`). `up` generates a per-machine
+  secret into a gitignored `.env`, starts the container, and waits for `/healthz`.
+- `docker/searxng/tools/probe-engines.py`: probes every engine the running instance
+  knows about and regenerates the engine block in `core-config/settings.yml`, enabling
+  the ones that answered and recording the reason next to the ones that did not.
+  `--reuse` re-renders from the last probe, `--dry-run` reports without writing, and
+  `--include-restricted` opts torrent trackers and shadow libraries into the fanout
+  (they are held out by default and stay queryable by name).
+
+### Fixed
+
+- A SearXNG instance on loopback or a LAN address is no longer sent through the egress
+  proxy. With `WEBSEARCH_PROXY` set, every search against a self-hosted instance failed
+  with `all_engines_failed`, because the remote exit node was asked to reach its own
+  localhost.
+- The SearXNG container no longer writes into the repo: the config directory is mounted
+  read-only with `FORCE_OWNERSHIP=false`, so the entrypoint can no longer chown tracked
+  files to a container uid. Runtime cache moved to a named Docker volume.
+
+### Changed
+
+- SearXNG now runs the wide fanout. SearXNG enables about six general engines out of
+  the ~280 it ships, so the generated config enables every engine that answers a live
+  probe: 180 here, 45 of them general. A plain query went from 26 results across 2
+  engines to 155-240 across 21-29, in 3 to 4 seconds. `outgoing` pool sizes were raised
+  to match, with a 5s per-engine ceiling so no single slow engine outlives the client's
+  8s search timeout.
+- The default SearXNG port is 8888 rather than 8080, which collides with most things.
+- The container drops all capabilities, runs with `no-new-privileges`, and has a
+  healthcheck. The committed placeholder secret key is gone: compose reads
+  `SEARXNG_SECRET` with no fallback, so an unset secret aborts the start.
+
 ## [0.2.3] - 2026-07-23
 
 ### Fixed

@@ -6,7 +6,7 @@ Open-source multi-engine web search and content extraction for AI agents, built 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-528%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-570%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
 > **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). The keyless search, the clean-Markdown reader, the five agent tools, and the opt-in egress proxy work today and are covered by the test suite. The hard anti-bot tiers and local rerank are not built yet (see Roadmap). Pin a version and try it in a sandbox before wiring it into anything sensitive.
@@ -30,7 +30,7 @@ Two extra keyless tools cover what general web search does not:
 
 Search works the moment you install it. The default engine is the keyless [`ddgs`](https://github.com/deedy5/ddgs) metasearch library, which by itself spans **Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, and Wikipedia**. Each query is served by whichever of those respond fastest. No API key, no account, no service to run, and no engine flags: the agent surface (`web-search`) is plug-and-play. Picking a subset of underlying engines (or adding Bing by name) is a power-user knob on the lower-level `search` command via `--ddgs-backends google,brave,mojeek`, not on `web-search`.
 
-For broader and more reliable search you can run your own SearXNG (hundreds of engines, your own server, still no keys), and the router fuses it with `ddgs` and de-correlates the engines they share. A one-command Docker setup is in [`docker/searxng/`](docker/searxng/); see Self-hosting SearXNG below. Public SearXNG instances are deliberately not a default: most disable the JSON API and rate-limit automated clients, so depending on them would break on a fresh install.
+For broader and more reliable search you can run your own SearXNG (~280 engines, your own server, still no keys), and the router fuses it with `ddgs` and de-correlates the engines they share. A one-command Docker setup is in [`docker/searxng/`](docker/searxng/), including a probe that enables every engine that answers on your connection; see Self-hosting SearXNG below. Public SearXNG instances are deliberately not a default: most disable the JSON API and rate-limit automated clients, so depending on them would break on a fresh install.
 
 It is MIT-licensed and open source. On top of the keyless default you can add a self-hosted SearXNG, keyed engines (Brave, Exa, Tavily), or a paid egress adapter, all behind the same contracts, none of them required.
 
@@ -170,7 +170,7 @@ uv run websearch search "rust ownership" --json
 uv run websearch search "rust ownership" --ddgs-backends google,brave,mojeek
 
 # add a self-hosted SearXNG (see docker/searxng/) as a second, broader engine
-export WEBSEARCH_SEARXNG_URL=http://localhost:8080
+export WEBSEARCH_SEARXNG_URL=http://127.0.0.1:8888
 uv run websearch search "rust ownership" --engines searxng,ddgs
 
 # Layer 2A: fetch + extract one page to clean Markdown
@@ -227,7 +227,7 @@ As a library:
 ```python
 from websearch.layer1_search import build_router, SearchRequest
 
-router = build_router(searxng_url="http://localhost:8080", enable_ddgs=True)
+router = build_router(searxng_url="http://127.0.0.1:8888", enable_ddgs=True)
 envelope = router.search(SearchRequest(query="rust ownership", count=10))
 for r in envelope.data["results"]:
     print(r["fused_score"], r["url"], [s["engine"] for s in r["sources"]])
@@ -258,15 +258,17 @@ hits = index.search(SearchPageRequest(query="borrow checker"))
 
 ## Self-hosting SearXNG (optional)
 
-You never need this; the keyless `ddgs` engines work out of the box. Run your own SearXNG when you want the broadest, most reliable search: hundreds of engines, your own server, no public rate limits, and still no API keys.
+You never need this; the keyless `ddgs` engines work out of the box. Run your own SearXNG when you want the broadest, most reliable search: every engine SearXNG can reach, your own server, no public rate limits, and still no API keys.
 
 ```bash
-docker compose -f docker/searxng/docker-compose.yml up -d
-export WEBSEARCH_SEARXNG_URL=http://localhost:8080
+./docker/searxng/searxng.sh up                # generates a per-machine secret, waits for health
+export WEBSEARCH_SEARXNG_URL=http://127.0.0.1:8888
 uv run websearch web-search "your query"      # now fuses SearXNG + ddgs
 ```
 
-The config in [`docker/searxng/`](docker/searxng/) is one container with the JSON API enabled and the bot limiter off (it is private and only your tool queries it), so no Valkey/Redis is needed. That folder's README has the details and a checklist for before you expose it beyond localhost.
+One container, nothing installed on the host. SearXNG ships ~280 engines but leaves most of them off, so a stock instance answers a general query from about six of them (and on a home connection Brave and Startpage return a CAPTCHA). `searxng.sh engines` probes every engine from your own connection and enables the ones that answer, recording the reason next to each one it skips. Measured here: a general query went from 26 results across 2 engines to 155-240 across 21-29, in 3 to 4 seconds.
+
+The container is kept in its box: config mounted read-only, runtime state in a Docker volume rather than the repo, all capabilities dropped, loopback-only by default, and no secret committed. Torrent trackers and shadow libraries stay out of the default fanout (still queryable by name). Details and the checklist for exposing it beyond localhost are in [`docker/searxng/`](docker/searxng/).
 
 ## Egress proxy (optional)
 
@@ -281,6 +283,8 @@ export WEBSEARCH_PROXY=off                             # or unset it: direct con
 The `nordvpn` shorthand builds the SOCKS5 URL for you from `NORDVPN_USER` and `NORDVPN_PASS`. These are the service credentials shown in the Nord Account dashboard under "Set up NordVPN manually", not your account login. `NORDVPN_HOST` picks a specific server (default `nl.socks.nordhold.net`; any of the official `*.socks.nordhold.net` hosts on port 1080 works).
 
 Every network command also takes `--proxy <url|nordvpn|off>`, which overrides the variable for that run, so `--proxy off` gets you a direct connection without unsetting anything. Prefer `socks5h://` over `socks5://`: it resolves DNS through the proxy, so hostnames never hit your local resolver. A per-request `fetch --proxy` still wins over the process-wide default.
+
+One exception: a SearXNG on loopback or a LAN address is never proxied. Asking a remote exit node to reach `127.0.0.1` gets you its localhost, not yours, so proxying that hop cannot work. The traffic that actually leaves for the engines is SearXNG's own outgoing config, not this hop. A SearXNG on a public address still goes through the proxy.
 
 ## Security
 
