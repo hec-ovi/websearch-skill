@@ -11,6 +11,14 @@ semantic versioning.
 - `docker/searxng/searxng.sh`: one entry point for the local SearXNG (`up`, `down`,
   `status`, `verify`, `engines`, `restart`, `logs`). `up` generates a per-machine
   secret into a gitignored `.env`, starts the container, and waits for `/healthz`.
+- SearXNG's own engine requests now follow `WEBSEARCH_PROXY`. That is the hop that
+  reaches Google and Bing, and it leaves from the container, so it was going out
+  unproxied while every other path was covered. `searxng.sh up` expands the proxy with
+  the same resolver the CLI uses and renders an `outgoing.proxies` entry into the
+  settings the container mounts; `SEARXNG_OUTGOING_PROXY` overrides it, `off` disables
+  it, and `searxng.sh egress` prints the host and container egress IPs to confirm.
+  Because a proxy URL carries credentials, the tracked settings file holds a marker and
+  the real URL only ever lands in the gitignored `.runtime/settings.yml`.
 - `docker/searxng/tools/probe-engines.py`: probes every engine the running instance
   knows about and regenerates the engine block in `core-config/settings.yml`, enabling
   the ones that answered and recording the reason next to the ones that did not.

@@ -6,7 +6,7 @@ Open-source multi-engine web search and content extraction for AI agents, built 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-570%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-578%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
 > **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). The keyless search, the clean-Markdown reader, the five agent tools, and the opt-in egress proxy work today and are covered by the test suite. The hard anti-bot tiers and local rerank are not built yet (see Roadmap). Pin a version and try it in a sandbox before wiring it into anything sensitive.
@@ -284,7 +284,7 @@ The `nordvpn` shorthand builds the SOCKS5 URL for you from `NORDVPN_USER` and `N
 
 Every network command also takes `--proxy <url|nordvpn|off>`, which overrides the variable for that run, so `--proxy off` gets you a direct connection without unsetting anything. Prefer `socks5h://` over `socks5://`: it resolves DNS through the proxy, so hostnames never hit your local resolver. A per-request `fetch --proxy` still wins over the process-wide default.
 
-One exception: a SearXNG on loopback or a LAN address is never proxied. Asking a remote exit node to reach `127.0.0.1` gets you its localhost, not yours, so proxying that hop cannot work. The traffic that actually leaves for the engines is SearXNG's own outgoing config, not this hop. A SearXNG on a public address still goes through the proxy.
+With a self-hosted SearXNG there are two hops and the proxy applies to the one that matters. The client's hop to `127.0.0.1` is never proxied, because asking a remote exit node to reach `127.0.0.1` gets you its localhost, not yours. The hop that actually reaches Google and Bing is SearXNG's own, out of the container, and `docker/searxng/searxng.sh up` routes that one through the same `WEBSEARCH_PROXY` (expanding the `nordvpn` shorthand for you). `searxng.sh egress` prints both IPs so you can see it. Set `SEARXNG_OUTGOING_PROXY=off` for direct container egress; a SearXNG on a public address still goes through the proxy on the client hop too.
 
 ## Security
 
