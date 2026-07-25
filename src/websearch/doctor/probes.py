@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import ipaddress
 import platform
+import socket
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Protocol
 
 from ..optional_layers import LayerState, redact_url, scrub_proxy
@@ -35,10 +35,9 @@ IP_ECHOES = (
 NORDVPN_INSIGHTS = "https://api.nordvpn.com/v1/helpers/ips/insights"
 
 # Interface name prefixes that mean "traffic is tunneled". Covers OpenVPN (tun/tap),
-# WireGuard (wg), and the provider-specific names NordVPN and Proton use.
+# WireGuard (wg), macOS, which puts every tunnel on utun, and the provider-specific names
+# NordVPN and Proton use.
 TUNNEL_PREFIXES = ("tun", "tap", "wg", "nordlynx", "proton", "ipsec", "utun")
-
-_NET_DIR = Path("/sys/class/net")
 
 # The text engines ddgs can query, if the installed ddgs does not tell us. ddgs is the
 # source of truth (it gains and loses engines between releases); this only keeps the
@@ -188,15 +187,23 @@ def probe_runtime() -> Outcome:
     except PackageNotFoundError:
         pkg = "(not installed; running from a source tree)"
     py = platform.python_version()
+    # Machine goes in the summary, not just the detail: when a dependency has no wheel it
+    # is almost always because of the arch (arm64 vs amd64), and that is the first thing
+    # you want to read next to the dependency check below.
+    machine = platform.machine() or "unknown"
     detail = {
         "python": py,
         "package_version": pkg,
+        "system": platform.system(),
+        "machine": machine,
         "platform": platform.platform(terse=True),
         "executable": sys.executable,
     }
     # No version floor check: requires-python >=3.11 means an interpreter that got this
     # far already satisfies it.
-    return Outcome(OK, f"Python {py}, websearch-skill {pkg}", detail)
+    return Outcome(
+        OK, f"Python {py} on {platform.system()} {machine}, websearch-skill {pkg}", detail
+    )
 
 
 def probe_dependencies() -> Outcome:
@@ -306,12 +313,20 @@ def probe_proxy(
 
 
 def _tunnel_interfaces() -> list[str] | None:
-    """Tunnel-looking network interfaces, or None where we cannot enumerate them."""
-    if not _NET_DIR.is_dir():
+    """Tunnel-looking network interfaces, or None where the names carry no signal.
+
+    ``socket.if_nameindex`` is stdlib on Linux, macOS, and Windows (3.8+), so this needs
+    no ``/sys/class/net`` walk and no platform branch beyond one: Windows reports names
+    like ``ethernet_32770``, which say nothing about tunneling, so it returns None and
+    the caller says "unconfirmed" rather than inventing a verdict from a name it cannot
+    read. POSIX names are meaningful (Linux ``tun``/``tap``/``wg``/``nordlynx``, macOS
+    puts every tunnel on ``utun``).
+    """
+    if sys.platform.startswith("win"):
         return None
     try:
-        names = sorted(p.name for p in _NET_DIR.iterdir())
-    except OSError:
+        names = sorted(name for _, name in socket.if_nameindex())
+    except (OSError, AttributeError):
         return None
     return [n for n in names if n.lower().startswith(TUNNEL_PREFIXES)]
 

@@ -276,6 +276,42 @@ def test_vpn_any_uses_tunnel_interfaces(monkeypatch):
     assert checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["vpn"]["status"] == "warn"
 
 
+@pytest.mark.parametrize(
+    ("names", "expected"),
+    [
+        # Linux: OpenVPN, WireGuard, NordVPN's own driver.
+        ([(1, "lo"), (2, "eth0"), (3, "tun0")], ["tun0"]),
+        ([(1, "lo"), (2, "wlan0"), (3, "nordlynx")], ["nordlynx"]),
+        ([(1, "lo"), (2, "eth0"), (3, "wg0")], ["wg0"]),
+        # macOS puts every tunnel on utun, and always has a few even without a VPN.
+        ([(1, "lo0"), (2, "en0"), (3, "utun3")], ["utun3"]),
+        ([(1, "lo0"), (2, "en0")], []),
+    ],
+)
+def test_tunnel_interfaces_reads_posix_names_on_any_platform(monkeypatch, names, expected):
+    monkeypatch.setattr(probes.sys, "platform", "linux")
+    monkeypatch.setattr(probes.socket, "if_nameindex", lambda: names)
+    assert probes._tunnel_interfaces() == expected
+
+
+def test_windows_interface_names_carry_no_tunnel_signal(monkeypatch):
+    """`ethernet_32770` says nothing, so report unconfirmed rather than guess."""
+    monkeypatch.setattr(probes.sys, "platform", "win32")
+    monkeypatch.setattr(probes.socket, "if_nameindex", lambda: [(1, "ethernet_32770")])
+    assert probes._tunnel_interfaces() is None
+
+    monkeypatch.setenv(VPN_ENV, "any")
+    check = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["vpn"]
+    assert check["status"] == "warn"
+    assert "WEBSEARCH_VPN=nordvpn" in check["hint"]
+
+
+def test_the_runtime_check_names_the_architecture():
+    check = checks_by_name(doctor_with().run(DoctorRequest(checks=["runtime"])))["runtime"]
+    assert check["detail"]["machine"] == __import__("platform").machine()
+    assert check["detail"]["machine"] in check["summary"]
+
+
 def test_an_unknown_vpn_name_fails_with_the_accepted_values(monkeypatch):
     monkeypatch.setenv(VPN_ENV, "mullvad")
     check = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["vpn"]

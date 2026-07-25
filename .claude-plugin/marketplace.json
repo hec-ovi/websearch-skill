@@ -1,8 +1,7 @@
 {
   "name": "websearch-skill",
   "owner": {
-    "name": "Hector Oviedo",
-    "email": "hector.ernesto.oviedo@gmail.com"
+    "name": "Hector Oviedo"
   },
   "metadata": {
     "description": "Keyless web search, fetch, and clean extraction tooling for AI agents.",

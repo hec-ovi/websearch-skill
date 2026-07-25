@@ -306,6 +306,8 @@ With a self-hosted SearXNG there are two hops and the proxy applies to the one t
 
 `WEBSEARCH_VPN` does not route anything. It records what you expect, so a tunnel that silently drops fails a check instead of quietly leaking your real IP. `nordvpn` is verified against NordVPN's own keyless connection endpoint, which reports whether the caller is inside their network; `any` only asserts that a tunnel interface is up, because no third party can confirm an arbitrary provider by name. The doctor checks the path the tool actually uses: through the egress proxy when one is set, direct otherwise.
 
+`nordvpn` works on every platform, since it is an HTTP check. `any` reads interface names, which are meaningful on Linux (`tun`, `wg`, `nordlynx`) and macOS (`utun`) but not on Windows, where they look like `ethernet_32770`; there it reports the tunnel as unconfirmed rather than guessing.
+
 ## websearch doctor
 
 One command that says what works right now, capability by capability:
