@@ -24,10 +24,12 @@ services:
       # your LAN, and read "Before exposing it" in README.md first.
       - "${SEARXNG_HOST:-127.0.0.1}:${SEARXNG_PORT:-8888}:8080"
     volumes:
-      # Config is read-only: the container cannot rewrite the settings this repo
-      # ships. FORCE_OWNERSHIP=false below stops the entrypoint from trying to
-      # chown a read-only mount.
-      - ./core-config/:/etc/searxng/:ro
+      # .runtime/settings.yml is rendered from the tracked core-config/settings.yml by
+      # searxng.sh on every up/restart; it is the only copy that may hold an egress
+      # proxy URL, which is why it is gitignored and mode 0600. Mounted read-only, so
+      # the container cannot rewrite its own settings. FORCE_OWNERSHIP=false below
+      # stops the entrypoint from trying to chown a read-only mount.
+      - ./.runtime/:/etc/searxng/:ro
       # Runtime cache (favicons, engine state) lives in a Docker-managed volume,
       # not in the repo working tree. `searxng.sh down --purge` removes it.
       - searxng-cache:/var/cache/searxng

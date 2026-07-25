@@ -5,7 +5,8 @@
 #   ./searxng.sh up        start it (generates .env with a per-machine secret)
 #   ./searxng.sh status    health, engine counts, and a live query
 #   ./searxng.sh verify    end-to-end check through the websearch CLI
-#   ./searxng.sh engines    re-probe every engine and regenerate settings.yml
+#   ./searxng.sh egress    where SearXNG's engine requests leave from
+#   ./searxng.sh engines   re-probe every engine and regenerate settings.yml
 #   ./searxng.sh restart   apply a settings.yml change
 #   ./searxng.sh logs      follow container logs
 #   ./searxng.sh down      stop and remove (add --purge to drop the cache volume)
@@ -43,6 +44,40 @@ ensure_env() {
   echo "wrote $ENV_FILE with a fresh secret"
 }
 
+egress_proxy() {
+  # What SearXNG itself should route its engine requests through. The client's own hop
+  # to a loopback SearXNG is never proxied (it cannot be), so this is the only place
+  # the searches get anonymized.
+  #
+  #   SEARXNG_OUTGOING_PROXY   explicit URL, or "off" to force direct egress
+  #   WEBSEARCH_PROXY          otherwise reuse the tool's proxy, expanded by the same
+  #                            resolver the CLI uses so "nordvpn" shorthand works
+  local explicit="${SEARXNG_OUTGOING_PROXY:-}"
+  if [ -z "$explicit" ] && [ -f "$ENV_FILE" ]; then
+    explicit="$(grep -E '^SEARXNG_OUTGOING_PROXY=' "$ENV_FILE" | tail -1 | cut -d= -f2- || true)"
+  fi
+  case "$(printf '%s' "$explicit" | tr '[:upper:]' '[:lower:]')" in
+    off | none | direct) return 0 ;;
+    "") ;;
+    *) echo "$explicit"; return 0 ;;
+  esac
+
+  [ -n "${WEBSEARCH_PROXY:-}" ] || return 0
+  if ! command -v uv >/dev/null; then
+    echo "WEBSEARCH_PROXY is set but uv is missing, so it cannot be expanded;" >&2
+    echo "set SEARXNG_OUTGOING_PROXY to the proxy URL to route SearXNG's egress." >&2
+    return 0
+  fi
+  ( cd "$HERE/../.." && uv run --quiet python -c \
+      'from websearch.proxy import resolve_proxy; print(resolve_proxy() or "")' 2>/dev/null )
+}
+
+render_settings() {
+  local proxy
+  proxy="$(egress_proxy)"
+  python3 "$HERE/tools/render-settings.py" --proxy "$proxy"
+}
+
 wait_ready() {
   local base="$1" i
   for i in $(seq 1 60); do
@@ -59,6 +94,7 @@ wait_ready() {
 cmd_up() {
   need_docker
   ensure_env
+  render_settings
   "${COMPOSE[@]}" up -d
   wait_ready "$(url)"
   echo
@@ -78,6 +114,7 @@ cmd_down() {
 
 cmd_restart() {
   need_docker
+  render_settings
   "${COMPOSE[@]}" up -d --force-recreate
   wait_ready "$(url)"
 }
@@ -137,7 +174,43 @@ for r in results[:3]:
     print("    " + r["url"][:90])
 sys.exit(0 if results else 1)
 '
+  echo
+  cmd_egress
   echo "searxng path works end to end"
+}
+
+cmd_egress() {
+  # Where SearXNG's engine requests actually come from. Prints IPs only, never the
+  # proxy URL: that carries credentials.
+  need_docker
+  echo "egress:"
+  echo "  host, direct:      $(curl -fsS --max-time 20 https://api.ipify.org || echo unreachable)"
+  docker exec websearch-searxng /usr/local/searxng/.venv/bin/python -c '
+import asyncio, yaml, httpx
+
+config = yaml.safe_load(open("/etc/searxng/settings.yml"))
+proxies = (config.get("outgoing") or {}).get("proxies")
+if not proxies:
+    print("  searxng container: direct (no outgoing proxy configured)")
+    raise SystemExit(0)
+url = list(proxies.values())[0] if isinstance(proxies, dict) else proxies
+if isinstance(url, list):
+    url = url[0]
+
+from searx.network.client import get_transport_for_socks_proxy
+
+async def main():
+    if url.startswith("socks"):
+        transport = get_transport_for_socks_proxy(True, False, "", url, httpx.Limits(), 0)
+        client = httpx.AsyncClient(transport=transport)
+    else:
+        client = httpx.AsyncClient(proxy=url)
+    async with client:
+        r = await client.get("https://api.ipify.org", timeout=30)
+        print("  searxng container: " + r.text + " (through the configured proxy)")
+
+asyncio.run(main())
+' 2>/dev/null || echo "  searxng container: could not determine (is it running?)"
 }
 
 cmd_engines() {
@@ -147,6 +220,7 @@ cmd_engines() {
 
 case "${1:-}" in
   up) shift; cmd_up "$@" ;;
+  egress) shift; cmd_egress "$@" ;;
   down) shift; cmd_down "$@" ;;
   restart) shift; cmd_restart "$@" ;;
   status) shift; cmd_status "$@" ;;
@@ -154,7 +228,8 @@ case "${1:-}" in
   engines) shift; cmd_engines "$@" ;;
   logs) shift; need_docker; "${COMPOSE[@]}" logs -f "$@" ;;
   *)
-    sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # The header comment is the usage text; print it up to the first line of code.
+    awk 'NR>1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
     exit 1
     ;;
 esac

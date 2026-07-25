@@ -26,6 +26,8 @@ COMPOSE = STACK / "docker-compose.yml"
 SETTINGS = STACK / "core-config" / "settings.yml"
 SCRIPT = STACK / "searxng.sh"
 PROBE = STACK / "tools" / "probe-engines.py"
+RENDER = STACK / "tools" / "render-settings.py"
+RUNTIME = STACK / ".runtime" / "settings.yml"
 
 BEGIN = "# >>> BEGIN generated engine list"
 END = "# <<< END generated engine list"
@@ -46,12 +48,21 @@ def settings() -> dict:
     return yaml.safe_load(SETTINGS.read_text())
 
 
-@pytest.fixture(scope="module")
-def probe_module():
-    spec = importlib.util.spec_from_file_location("probe_engines", PROBE)
+def _load(path, name):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.fixture(scope="module")
+def probe_module():
+    return _load(PROBE, "probe_engines")
+
+
+@pytest.fixture(scope="module")
+def render_module():
+    return _load(RENDER, "render_settings")
 
 
 # --- the container stays inside its box -------------------------------------------
@@ -65,6 +76,13 @@ def test_config_is_mounted_read_only(service):
     for mount in mounts:
         assert mount.endswith(":ro"), f"{mount} must be read-only"
     assert "FORCE_OWNERSHIP=false" in service["environment"]
+
+
+def test_container_mounts_the_rendered_settings_not_the_tracked_one(service):
+    """core-config/settings.yml is tracked, so it must never hold a proxy URL; the
+    container reads the rendered copy instead."""
+    assert "./.runtime/:/etc/searxng/:ro" in service["volumes"]
+    assert not any(v.startswith("./core-config") for v in service["volumes"])
 
 
 def test_runtime_state_lives_in_a_named_volume(compose, service):
@@ -239,6 +257,61 @@ def test_splice_refuses_a_file_without_markers(probe_module):
         probe_module.splice("use_default_settings: true\n", "block")
 
 
+# --- the rendered runtime settings --------------------------------------------------
+
+
+def test_tracked_settings_carry_the_proxy_marker_and_no_proxy():
+    body = SETTINGS.read_text()
+    assert body.count(">>> PROXY MARKER <<<") == 1
+    assert "proxies:" not in body, "a proxy URL must never reach a tracked file"
+
+
+def test_render_without_a_proxy_drops_the_marker(render_module):
+    out = render_module.render(SETTINGS.read_text(), None)
+    assert "PROXY MARKER" not in out
+    assert "proxies" not in yaml.safe_load(out)["outgoing"]
+    assert yaml.safe_load(out)["search"]["formats"] == ["html", "json"]
+
+
+def test_render_with_a_proxy_emits_an_outgoing_proxies_entry(render_module):
+    out = render_module.render(SETTINGS.read_text(), "socks5h://u:p@exit.test:1080")
+    outgoing = yaml.safe_load(out)["outgoing"]
+    assert outgoing["proxies"] == {"all://": "socks5h://u:p@exit.test:1080"}
+    assert "PROXY MARKER" not in out
+    assert outgoing["max_request_timeout"] == 5.0, "the rest of the config must survive"
+
+
+def test_render_keeps_the_engine_list_intact(render_module):
+    out = render_module.render(SETTINGS.read_text(), "http://exit.test:3128")
+    assert yaml.safe_load(out)["engines"] == yaml.safe_load(SETTINGS.read_text())["engines"]
+
+
+def test_render_is_idempotent_in_content(render_module):
+    once = render_module.render(SETTINGS.read_text(), "http://exit.test:3128")
+    twice = render_module.render(SETTINGS.read_text(), "http://exit.test:3128")
+    assert once == twice
+
+
+@pytest.mark.skipif(not RUNTIME.exists(), reason="no rendered settings; run searxng.sh up")
+def test_rendered_settings_are_readable_by_the_capability_dropped_container():
+    """The trap this guards: rendering at 0600 makes the entrypoint fail with 'is not a
+    valid file'. The container drops ALL capabilities, so its root has no
+    CAP_DAC_OVERRIDE and cannot read a file owned by the host user."""
+    assert RUNTIME.stat().st_mode & 0o004, "the rendered settings must be world-readable"
+    assert RUNTIME.parent.stat().st_mode & 0o001, "and its directory traversable"
+
+
+def test_runtime_directory_is_gitignored():
+    tracked = subprocess.run(
+        ["git", "ls-files", "docker/searxng/.runtime"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert not tracked, "the rendered settings may hold credentials and must stay untracked"
+
+
 # --- the management script --------------------------------------------------------
 
 
@@ -250,7 +323,7 @@ def test_script_is_executable_and_parses():
 def test_script_usage_lists_the_documented_subcommands():
     out = subprocess.run(["bash", str(SCRIPT)], capture_output=True, text=True)
     assert out.returncode == 1
-    for sub in ("up", "down", "status", "verify", "engines", "restart", "logs"):
+    for sub in ("up", "down", "status", "verify", "egress", "engines", "restart", "logs"):
         assert sub in out.stdout
 
 

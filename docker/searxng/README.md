@@ -31,6 +31,7 @@ collides with roughly everything.
 | `searxng.sh up` | generate the secret if missing, start, wait for health |
 | `searxng.sh status` | container state, engine counts, and a live query |
 | `searxng.sh verify` | run a real search through the `websearch` CLI |
+| `searxng.sh egress` | show where SearXNG's engine requests leave from |
 | `searxng.sh engines` | re-probe every engine and regenerate `settings.yml` |
 | `searxng.sh restart` | apply a `settings.yml` change |
 | `searxng.sh logs` | follow container logs |
@@ -71,6 +72,38 @@ activates an engine whether or not it is in the default fanout:
 curl 'http://127.0.0.1:8888/search?q=rust&format=json&engines=bing,mojeek,yandex'
 ```
 
+## Egress proxy
+
+There are two hops, and only one of them is worth proxying. The client's hop to
+`127.0.0.1` cannot be proxied at all: a remote exit node asked to reach `127.0.0.1`
+reaches its own machine, so the tool sends local targets direct. The hop that actually
+reaches Google and Bing is SearXNG's own, out of the container, and that is the one
+`WEBSEARCH_PROXY` should cover.
+
+`searxng.sh up` handles it. If `WEBSEARCH_PROXY` is set it expands it with the same
+resolver the CLI uses (so the `nordvpn` shorthand works) and writes an
+`outgoing.proxies` entry into the settings the container mounts. Override with
+`SEARXNG_OUTGOING_PROXY` in `.env` for a different proxy, or `off` for direct egress.
+Check it with:
+
+```bash
+./docker/searxng/searxng.sh egress
+#   host, direct:      203.0.113.9
+#   searxng container: 198.51.100.4 (through the configured proxy)
+```
+
+A proxy URL carries credentials, so it never touches a tracked file. The tracked
+`core-config/settings.yml` holds a marker line, and `up`/`restart` render it into
+`.runtime/settings.yml` (gitignored) with the real URL substituted in. That rendered
+file is world-readable on purpose: the container drops every capability, so its root
+has no `CAP_DAC_OVERRIDE` and cannot read a 0600 file owned by your user, and the
+entrypoint just fails. Keeping the capability drop is worth more than hiding the URL
+from other local accounts.
+
+Expect a modest cost. Measured here, the same queries returned 23-26 engines in about
+5 seconds through the proxy against 21-29 in 3 to 4 seconds direct; shared VPN exits
+are more likely to draw a CAPTCHA from the big engines.
+
 ## What is in here
 
 - `docker-compose.yml`: one `searxng` service, no Valkey/Redis (the limiter is off, so
@@ -80,8 +113,12 @@ curl 'http://127.0.0.1:8888/search?q=rust&format=json&engines=bing,mojeek,yandex
   `server.limiter: false`, `server.public_instance: false`, a connection pool sized for
   the wide fanout, and the generated engine block.
 - `tools/probe-engines.py`: the probe behind `searxng.sh engines`. Stdlib only.
+- `tools/render-settings.py`: renders `core-config/settings.yml` into
+  `.runtime/settings.yml`, substituting the egress proxy. Stdlib only.
 - `.env`: generated, gitignored, machine-local. Holds `SEARXNG_SECRET` and optionally
-  `SEARXNG_PORT`, `SEARXNG_HOST`, `SEARXNG_VERSION`. See `.env.example`.
+  `SEARXNG_PORT`, `SEARXNG_HOST`, `SEARXNG_VERSION`, `SEARXNG_OUTGOING_PROXY`. See
+  `.env.example`.
+- `.runtime/`: generated, gitignored. What the container actually mounts.
 
 ## How it stays in its box
 

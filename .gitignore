@@ -43,3 +43,6 @@ coverage.xml
 
 # Machine-local SearXNG probe cache (docker/searxng/.probe-cache.json)
 .probe-cache.json
+
+# Rendered SearXNG settings (may contain a proxy URL with credentials)
+docker/searxng/.runtime/

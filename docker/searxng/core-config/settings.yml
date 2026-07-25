@@ -24,6 +24,12 @@ search:
     - json
 
 outgoing:
+  # searxng.sh replaces the marker line below with an `outgoing.proxies` entry when an
+  # egress proxy is configured, writing the result to the gitignored
+  # .runtime/settings.yml. The URL carries credentials, so it is rendered at start time
+  # and never committed. See tools/render-settings.py.
+  # >>> PROXY MARKER <<<
+  #
   # The generated block below puts ~50 engines in the general fanout instead of the
   # stock handful, so the defaults (pool_maxsize 20) would queue connections and the
   # slowest engines would decide the response time.
