@@ -28,6 +28,7 @@ from fastmcp import FastMCP
 from .. import errors
 from ..envelope import Envelope, error_envelope
 from ..layer2_format import StoreConfig
+from ..optional_layers import load_env_file
 from ..proxy import ProxyConfigError, resolve_proxy
 from ..tool_arxiv import ARXIV_CONTRACT_VERSION, ArxivSearchRequest, ArxivTool, build_arxiv_tool
 from ..tool_github import (
@@ -45,6 +46,12 @@ from .models import (
 )
 
 mcp = FastMCP("websearch")
+
+# `fastmcp run path/mcp_server.py:mcp` imports this module directly and never touches the
+# CLI, so read the gitignored .env here too. Without it that entry point would silently
+# ignore the proxy and SearXNG configuration the `websearch mcp` entry point honors.
+# Exported variables still win, and an MCP client's `env` block is exported variables.
+load_env_file()
 
 # FastMCP runs sync tools on a worker thread pool, so two first-calls can race to build a
 # singleton; double-checked locking on this lock keeps it to one instance (a discarded
