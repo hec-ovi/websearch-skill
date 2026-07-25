@@ -99,6 +99,18 @@ def schema_errors(instance: Any, ref: str) -> list[str]:
 
 
 @pytest.fixture(autouse=True)
+def _no_developer_dotenv(monkeypatch, tmp_path):
+    """Point the .env loader at a file that does not exist, for every test.
+
+    The CLI reads a `.env` from the working directory, so without this a developer who
+    keeps a real one in the repo runs the whole suite with their proxy and NordVPN
+    credentials loaded, and the tests that assert on an unconfigured environment fail on
+    their machine only. Tests that exercise the loader pass an explicit path.
+    """
+    monkeypatch.setenv("WEBSEARCH_ENV_FILE", str(tmp_path / "absent.env"))
+
+
+@pytest.fixture(autouse=True)
 def _public_dns(monkeypatch):
     """In tests, hostnames resolve to a public IP so the SSRF egress guard does not
     block the fake test hosts. Tests that exercise the guard itself pass their own
