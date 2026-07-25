@@ -46,3 +46,6 @@ coverage.xml
 
 # Rendered SearXNG settings (may contain a proxy URL with credentials)
 docker/searxng/.runtime/
+
+# Local scratch (a resume command dropped in the working tree)
+session

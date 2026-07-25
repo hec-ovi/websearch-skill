@@ -2,10 +2,11 @@
 
 Per-layer commands (``search``, ``fetch``, ``open``), the consolidated Layer-3 agent
 face (``web-search``, ``web-fetch``, ``web-open``), the keyless ``arxiv``/``github``
-tools, and ``mcp`` (the FastMCP stdio server). ``--json`` emits the raw Envelope (the
-contract surface); the default is a compact human view. Exit code is 0 on success, 1 on
-an error Envelope. Each command imports its own layer inside its handler, so ``arxiv``
-or ``github`` never pays the search/fetch stack's import cost.
+tools, ``doctor`` (the installation self-test), and ``mcp`` (the FastMCP stdio server).
+``--json`` emits the raw Envelope (the contract surface); the default is a compact human
+view. Exit code is 0 on success, 1 on an error Envelope. Each command imports its own
+layer inside its handler, so ``arxiv`` or ``github`` never pays the search/fetch stack's
+import cost.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ _LAZY_BUILDERS = {
     "build_agent_io": ".layer3_agentio",
     "build_arxiv_tool": ".tool_arxiv",
     "build_github_tool": ".tool_github",
+    "build_doctor": ".doctor",
 }
 
 
@@ -1025,6 +1027,130 @@ def _print_github_human(env: dict) -> None:
         print(f"\n[warning] {w}", file=sys.stderr)
 
 
+# --- doctor: does this installation actually work, layer by layer -------------------
+
+
+def _add_doctor_command(sub: Any) -> None:
+    dp = sub.add_parser(
+        "doctor",
+        help="Self-test the installation: the optional layers (VPN, egress proxy, "
+        "SearXNG), every search engine, the extra tools, both fetch tiers, and MCP.",
+        epilog=(
+            "exit codes: 0 when nothing failed (warnings and skipped checks are fine), "
+            "1 when at least one check failed. An optional layer that is off is skipped, "
+            "never failed."
+        ),
+    )
+    dp.add_argument(
+        "--check",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Run only checks matching this name prefix or group, repeatable. Groups: "
+        "runtime, egress, vpn, searxng, engines, tools, fetch, mcp. Examples: "
+        "--check proxy, --check engines, --check engine:ddgs:google.",
+    )
+    dp.add_argument(
+        "--quick",
+        action="store_true",
+        help="Skip the per-engine fanout, the extra tools, and the fetch tiers.",
+    )
+    dp.add_argument("--timeout-ms", type=int, default=15000, help="Per-check network timeout.")
+    dp.add_argument(
+        "--query",
+        default=None,
+        help="The probe query sent to each engine (default: rust ownership).",
+    )
+    dp.add_argument("--fetch-url", default=None, help="The URL the fetch tiers are probed against.")
+    dp.add_argument(
+        "--vpn",
+        help="VPN layer for this run: 'nordvpn', 'any', or 'off'. Default: the "
+        "WEBSEARCH_VPN environment variable, which defaults to off.",
+    )
+    _add_proxy_arg(dp)
+    dp.add_argument(
+        "--searxng-url",
+        help="SearXNG base URL for this run. Default: WEBSEARCH_SEARXNG_URL, unset = off.",
+    )
+    dp.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    from .doctor import DOCTOR_CONTRACT_VERSION, DoctorRequest
+
+    fields: dict[str, Any] = {
+        "checks": args.check or None,
+        "quick": args.quick,
+        "timeout_ms": args.timeout_ms,
+    }
+    if args.query:
+        fields["query"] = args.query
+    if args.fetch_url:
+        fields["fetch_url"] = args.fetch_url
+    try:
+        request = DoctorRequest(**fields)
+    except ValidationError as exc:
+        return _emit_error(
+            DOCTOR_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=f"invalid doctor request: {exc}",
+            layer="doctor",
+            as_json=args.json,
+        )
+
+    # A misconfigured proxy is a finding, not a crash: build_doctor records it as the
+    # proxy layer's error and the run continues so you see everything else too.
+    doctor = _builder("build_doctor")(vpn=args.vpn, proxy=args.proxy, searxng_url=args.searxng_url)
+    env = doctor.run(request)
+    payload = env.model_dump(mode="json")
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        _print_doctor_human(payload)
+    data = payload.get("data") or {}
+    summary = data.get("summary") or {}
+    return 1 if summary.get("fail") else 0
+
+
+_DOCTOR_GLYPH = {"ok": "ok  ", "warn": "warn", "fail": "FAIL", "skipped": "skip"}
+
+
+def _print_doctor_human(env: dict) -> None:
+    if not env.get("ok"):
+        err = env.get("error") or {}
+        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+        return
+    data = env.get("data") or {}
+
+    print("optional layers (every one off until you turn it on)")
+    for name in ("vpn", "proxy", "searxng"):
+        layer = (data.get("layers") or {}).get(name) or {}
+        state = "on " if layer.get("enabled") else "off"
+        value = layer.get("value") or ""
+        source = f"  [{layer['source']}]" if layer.get("source") else ""
+        print(f"  {name:<9} {state}  {value}{source}")
+        if not layer.get("enabled") or layer.get("error"):
+            print(f"  {'':<9}      {layer.get('error') or layer.get('detail')}")
+
+    group = None
+    for check in data.get("checks") or []:
+        if check.get("group") != group:
+            group = check.get("group")
+            print(f"\n{group}")
+        glyph = _DOCTOR_GLYPH.get(check.get("status"), "?   ")
+        print(f"  {glyph}  {check.get('name'):<22} {check.get('summary')}")
+        if check.get("hint") and check.get("status") in ("warn", "fail"):
+            print(f"        {'':<22} -> {check['hint']}")
+
+    summary = data.get("summary") or {}
+    print(
+        f"\n{summary.get('ok', 0)} ok, {summary.get('warn', 0)} warn, "
+        f"{summary.get('fail', 0)} fail, {summary.get('skipped', 0)} skipped"
+    )
+    for w in data.get("warnings") or []:
+        print(f"[note] {w}", file=sys.stderr)
+
+
 def _add_mcp_command(sub: Any) -> None:
     sub.add_parser(
         "mcp",
@@ -1085,6 +1211,10 @@ def _contract_version_for(command: str) -> str:
         from .tool_github import GITHUB_CONTRACT_VERSION
 
         return GITHUB_CONTRACT_VERSION
+    if command == "doctor":
+        from .doctor import DOCTOR_CONTRACT_VERSION
+
+        return DOCTOR_CONTRACT_VERSION
     # mcp (serves several contracts) or an unknown command: the cross-cutting envelope.
     return ENVELOPE_CONTRACT_VERSION
 
@@ -1111,6 +1241,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_webopen_command(sub)
     _add_arxiv_command(sub)
     _add_github_command(sub)
+    _add_doctor_command(sub)
     _add_mcp_command(sub)
     args = parser.parse_args(argv)
     dispatch = {
@@ -1122,6 +1253,7 @@ def main(argv: list[str] | None = None) -> int:
         "web-open": _cmd_webopen,
         "arxiv": _cmd_arxiv,
         "github": _cmd_github,
+        "doctor": _cmd_doctor,
         "mcp": _cmd_mcp,
     }
     handler = dispatch.get(args.command)

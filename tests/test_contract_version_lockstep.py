@@ -12,6 +12,7 @@ import pathlib
 
 import pytest
 
+from websearch.doctor import DOCTOR_CONTRACT_VERSION
 from websearch.envelope import ENVELOPE_CONTRACT_VERSION
 from websearch.layer1_search import SEARCH_CONTRACT_VERSION
 from websearch.layer2_extract import EXTRACT_CONTRACT_VERSION, FETCH_CONTRACT_VERSION
@@ -32,6 +33,7 @@ PAIRS = [
     ("agent-io.schema.json", AGENTIO_CONTRACT_VERSION),
     ("arxiv.schema.json", ARXIV_CONTRACT_VERSION),
     ("github.schema.json", GITHUB_CONTRACT_VERSION),
+    ("doctor.schema.json", DOCTOR_CONTRACT_VERSION),
 ]
 
 

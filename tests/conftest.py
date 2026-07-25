@@ -71,6 +71,13 @@ GITHUB_REPO_REF = f"{GITHUB_ID}#/$defs/GithubRepo"
 GITHUB_SEARCH_PAYLOAD_REF = f"{GITHUB_ID}#/$defs/GithubSearchPayload"
 GITHUB_SEARCH_RESPONSE_REF = f"{GITHUB_ID}#/$defs/GithubSearchResponse"
 
+DOCTOR_ID = "https://github.com/hec-ovi/websearch-skill/contracts/doctor.schema.json"
+DOCTOR_REQUEST_REF = f"{DOCTOR_ID}#/$defs/DoctorRequest"
+DOCTOR_CHECK_REF = f"{DOCTOR_ID}#/$defs/CheckResult"
+DOCTOR_LAYER_REF = f"{DOCTOR_ID}#/$defs/OptionalLayer"
+DOCTOR_PAYLOAD_REF = f"{DOCTOR_ID}#/$defs/DoctorPayload"
+DOCTOR_RESPONSE_REF = f"{DOCTOR_ID}#/$defs/DoctorResponse"
+
 
 def _build_registry() -> Registry:
     pairs = []

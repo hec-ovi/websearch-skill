@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/doctor.schema.json",
+  "title": "Doctor - environment and integration diagnostics contract",
+  "description": "A full self-test of one installation: the three optional layers (VPN, egress proxy, self-hosted SearXNG), every search engine the tool integrates, the keyless extra tools, both fetch tiers, and the MCP face. Each check is independent and carries its own status, so one dead engine reads as one warn rather than a blanket failure. A standalone diagnostic, not part of the search-fetch-format pipeline; it emits the same Envelope (meta.layer \"doctor\") so a CLI or MCP face handles it uniformly.",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "DoctorRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "type": ["array", "null"],
+          "items": { "type": "string", "minLength": 1 },
+          "default": null,
+          "description": "Run only checks whose name or group starts with one of these (e.g. 'engine', 'proxy', 'engine:ddgs:google'). null runs everything selected by 'quick'."
+        },
+        "quick": {
+          "type": "boolean",
+          "default": false,
+          "description": "Skip the per-engine fanout, the extra tools, and the fetch tiers; keep runtime, connectivity, the optional layers, and MCP."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 120000,
+          "default": 15000,
+          "description": "Per-check network timeout."
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "default": "rust ownership",
+          "description": "The probe query sent to each engine and to the extra tools."
+        },
+        "fetch_url": {
+          "type": "string",
+          "minLength": 1,
+          "default": "https://example.com",
+          "description": "The URL both fetch tiers are probed against. Should be small, stable, and free of anti-bot."
+        }
+      }
+    },
+
+    "OptionalLayer": {
+      "type": "object",
+      "description": "One optional layer's configured state. All three are off unless their variable is set.",
+      "required": ["name", "enabled", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "enum": ["vpn", "proxy", "searxng"] },
+        "enabled": { "type": "boolean", "description": "false is the default for every layer." },
+        "source": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "What turned it on: an environment variable name or a CLI flag."
+        },
+        "value": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The configured value, REDACTED: a proxy URL's userinfo is replaced with ***:*** before it ever reaches this field."
+        },
+        "detail": { "type": "string", "description": "One line of human explanation, including how to turn the layer on when it is off." },
+        "error": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Set when the layer is on but its configuration is unusable (e.g. the nordvpn shorthand without service credentials)."
+        }
+      }
+    },
+
+    "CheckResult": {
+      "type": "object",
+      "description": "One diagnostic. 'fail' means this installation is broken for that capability; 'warn' means degraded but usable (one keyless engine rate-limited, say); 'skipped' means an optional layer is off or a prerequisite is absent, which is never an error.",
+      "required": ["name", "group", "status", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "description": "Stable check id, e.g. 'proxy', 'engine:ddgs:google', 'tool:arxiv'." },
+        "group": { "enum": ["runtime", "egress", "vpn", "searxng", "engines", "tools", "fetch", "mcp"] },
+        "status": { "enum": ["ok", "warn", "fail", "skipped"] },
+        "summary": { "type": "string", "description": "One line, safe to print: never carries credentials." },
+        "detail": {
+          "type": "object",
+          "default": {},
+          "description": "Free-form, check-specific facts (exit IPs, result counts, versions). Additive by contract.",
+          "additionalProperties": true
+        },
+        "hint": { "type": ["string", "null"], "default": null, "description": "What to do about a warn or fail." },
+        "elapsed_ms": { "type": "number", "minimum": 0, "default": 0 },
+        "optional_layer": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The optional layer this check belongs to (vpn/proxy/searxng), or null for a check that is always relevant."
+        }
+      }
+    },
+
+    "DoctorSummary": {
+      "type": "object",
+      "required": ["ok", "warn", "fail", "skipped", "total"],
+      "additionalProperties": false,
+      "properties": {
+        "ok": { "type": "integer", "minimum": 0 },
+        "warn": { "type": "integer", "minimum": 0 },
+        "fail": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "DoctorPayload": {
+      "type": "object",
+      "description": "Envelope.data for a doctor run. Envelope.ok reports whether the DIAGNOSTIC ran, not whether the installation is healthy: a run that finds ten failures is still ok:true with data. Health is summary.fail == 0, mirrored on meta.healthy, and that is what the CLI exit code follows.",
+      "required": ["checked_at", "layers", "checks", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "checked_at": { "type": "string", "description": "ISO 8601 UTC timestamp of the run." },
+        "layers": {
+          "type": "object",
+          "description": "The three optional layers, keyed by name.",
+          "required": ["vpn", "proxy", "searxng"],
+          "additionalProperties": false,
+          "properties": {
+            "vpn": { "$ref": "#/$defs/OptionalLayer" },
+            "proxy": { "$ref": "#/$defs/OptionalLayer" },
+            "searxng": { "$ref": "#/$defs/OptionalLayer" }
+          }
+        },
+        "checks": { "type": "array", "items": { "$ref": "#/$defs/CheckResult" } },
+        "summary": { "$ref": "#/$defs/DoctorSummary" },
+        "warnings": { "type": "array", "items": { "type": "string" }, "default": [] }
+      }
+    },
+
+    "DoctorResponse": {
+      "description": "An Envelope whose meta.layer is \"doctor\" and whose data is a DoctorPayload (or null on error).",
+      "allOf": [
+        { "$ref": "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json" },
+        {
+          "properties": {
+            "data": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/DoctorPayload" }] },
+            "meta": {
+              "properties": { "layer": { "const": "doctor" } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}
