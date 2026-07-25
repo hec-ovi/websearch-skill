@@ -377,7 +377,7 @@ Planned, not built yet:
 
 ```bash
 uv sync          # install deps (including the dev group)
-uv run pytest    # 528 tests
+uv run pytest    # 667 tests, no network
 uv run ruff check .
 ```
 
