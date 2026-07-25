@@ -10,6 +10,7 @@ from websearch.optional_layers import (
     SEARXNG_ENV,
     VPN_ENV,
     layer_states,
+    load_env_file,
     proxy_state,
     redact_url,
     resolved_proxy_url,
@@ -141,6 +142,45 @@ def test_a_relative_searxng_url_is_flagged(monkeypatch):
     state = searxng_state()
     assert state.enabled is True
     assert state.error and "absolute http(s) URL" in state.error
+
+
+# --- .env ------------------------------------------------------------------------------
+
+
+def test_load_env_file_fills_in_unset_variables(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text(
+        "# a comment\n"
+        "\n"
+        "WEBSEARCH_PROXY=nordvpn\n"
+        "export NORDVPN_USER=svc-user\n"
+        'NORDVPN_PASS="quoted secret"\n'
+        "NOT A PAIR\n"
+    )
+    loaded = load_env_file(str(env))
+    assert loaded == ["WEBSEARCH_PROXY", "NORDVPN_USER", "NORDVPN_PASS"]
+    assert proxy_state().value == "socks5h://***:***@nl.socks.nordhold.net:1080"
+    assert resolved_proxy_url() == "socks5h://svc-user:quoted%20secret@nl.socks.nordhold.net:1080"
+
+
+def test_an_exported_variable_beats_the_file(tmp_path, monkeypatch):
+    monkeypatch.setenv(PROXY_ENV, "http://from-shell:3128")
+    env = tmp_path / ".env"
+    env.write_text("WEBSEARCH_PROXY=http://from-file:3128\n")
+    assert load_env_file(str(env)) == []
+    assert proxy_state().value == "http://from-shell:3128"
+
+
+def test_a_missing_env_file_is_not_an_error(tmp_path):
+    assert load_env_file(str(tmp_path / "nope.env")) == []
+
+
+def test_the_env_file_path_is_overridable(tmp_path, monkeypatch):
+    env = tmp_path / "custom.env"
+    env.write_text(f"{SEARXNG_ENV}=http://127.0.0.1:9999\n")
+    monkeypatch.setenv("WEBSEARCH_ENV_FILE", str(env))
+    assert load_env_file() == [SEARXNG_ENV]
+    assert searxng_state().value == "http://127.0.0.1:9999"
 
 
 # --- redaction helpers -----------------------------------------------------------------

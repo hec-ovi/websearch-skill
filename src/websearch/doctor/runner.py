@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
 from ..envelope import Envelope, ok_envelope
-from ..layer1_search import DdgsAdapter, SearchRequest, SearxngAdapter
+from ..layer1_search import DdgsAdapter, SearchRequest
 from ..optional_layers import LayerState, layer_states, resolved_proxy_url
 from ..proxy import proxy_for
 from . import probes
@@ -123,8 +123,6 @@ class Doctor:
         plan.append(("engine:ddgs", "engines", None))
         for backend in probes.ddgs_backends():
             plan.append((f"engine:ddgs:{backend}", "engines", None))
-        if self._layer("searxng").enabled:
-            plan.append(("engine:searxng", "engines", "searxng"))
         plan.append(("tool:arxiv", "tools", None))
         plan.append(("tool:github", "tools", None))
         plan.append(("fetch:http", "fetch", None))
@@ -284,15 +282,6 @@ class Doctor:
         jobs["engine:ddgs"] = ddgs_job("auto")
         for backend in probes.ddgs_backends():
             jobs[f"engine:ddgs:{backend}"] = ddgs_job(backend)
-
-        searxng = self._layer("searxng")
-        if searxng.enabled and searxng.value:
-
-            def searxng_engine_job() -> probes.Outcome:
-                adapter = SearxngAdapter(searxng.value, proxy=proxy)
-                return probes.probe_engine(adapter, search_request)
-
-            jobs["engine:searxng"] = searxng_engine_job
 
         jobs["tool:arxiv"] = lambda: probes.probe_arxiv(self._build_arxiv(), request.query)
         jobs["tool:github"] = lambda: probes.probe_github(self._build_github(), request.query)

@@ -41,22 +41,24 @@ class FakeNet:
         self.proxy_routes = proxy_routes or {}
         self.calls: list[tuple[str, str | None]] = []
 
-    def _lookup(self, url: str, proxy: str | None):
+    def _lookup(self, url: str, proxy: str | None, params: dict | None):
         self.calls.append((url, proxy))
         table = self.proxy_routes if proxy else self.routes
         for prefix, value in table.items():
             if url.startswith(prefix):
+                if callable(value):  # a route that answers differently per query string
+                    value = value(params or {})
                 if isinstance(value, Exception):
                     raise value
                 return value
         raise ConnectionError(f"no route for {url} (proxy={proxy})")
 
     def text(self, url, *, proxy=None, timeout_s=10.0, params=None):
-        value = self._lookup(url, proxy)
+        value = self._lookup(url, proxy, params)
         return value if isinstance(value, str) else json.dumps(value)
 
     def json(self, url, *, proxy=None, timeout_s=10.0, params=None):
-        value = self._lookup(url, proxy)
+        value = self._lookup(url, proxy, params)
         return json.loads(value) if isinstance(value, str) else value
 
 
@@ -391,13 +393,86 @@ def test_the_default_path_working_is_called_out_when_providers_are_silent():
     assert aggregate["detail"]["default_path"] == "ok"
 
 
-def test_searxng_joins_the_engine_list_only_when_enabled(monkeypatch):
-    assert "engine:searxng" not in checks_by_name(
-        doctor_with().run(DoctorRequest(checks=["engines"]))
-    )
+def searxng_per_engine(reachable: dict[str, int]):
+    """A /search route that answers per `engines` parameter, like a real instance."""
+
+    def route(params: dict):
+        engine = params.get("engines")
+        if engine is None:  # the plain fanout
+            return {"results": [{"url": "https://a.test", "engines": ["bing"]}]}
+        return {
+            "results": [
+                {"url": f"https://{engine}.test/{i}"} for i in range(reachable.get(engine, 0))
+            ]
+        }
+
+    return route
+
+
+def test_a_silent_provider_that_searxng_reaches_is_a_parser_problem(monkeypatch):
     monkeypatch.setenv(SEARXNG_ENV, SEARXNG_URL)
-    names = checks_by_name(doctor_with(net=searxng_net()).run(DoctorRequest(checks=["engines"])))
-    assert "engine:searxng" in names
+    dead = probes.ddgs_backends()[0]
+    net = net_with(
+        extra={
+            f"{SEARXNG_URL}/healthz": "ok",
+            f"{SEARXNG_URL}/config": {"version": "x", "engines": []},
+            f"{SEARXNG_URL}/search": searxng_per_engine({dead: 12}),
+        }
+    )
+    doctor = build_doctor(net=net, ddgs_factory=ddgs_where({dead}))
+    checks = checks_by_name(doctor.run(DoctorRequest(checks=["engines"])))
+    check = checks[f"engine:ddgs:{dead}"]
+    assert check["detail"]["searxng_cross_check"] == {"reached": True, "results": 12, "error": None}
+    assert "SearXNG reached it: 12 results" in check["summary"]
+    assert "ddgs's parser, not a block" in check["hint"]
+    assert checks["engines"]["detail"]["reached_via_searxng"] == [dead]
+
+
+def test_a_provider_silent_in_both_is_named_as_blocking_this_ip(monkeypatch):
+    monkeypatch.setenv(SEARXNG_ENV, SEARXNG_URL)
+    dead = probes.ddgs_backends()[0]
+    net = net_with(
+        extra={
+            f"{SEARXNG_URL}/healthz": "ok",
+            f"{SEARXNG_URL}/config": {"version": "x", "engines": []},
+            f"{SEARXNG_URL}/search": searxng_per_engine({}),
+        }
+    )
+    doctor = build_doctor(net=net, ddgs_factory=ddgs_where({dead}))
+    check = checks_by_name(doctor.run(DoctorRequest(checks=["engines"])))[f"engine:ddgs:{dead}"]
+    assert check["detail"]["searxng_cross_check"]["reached"] is False
+    assert "refusing this IP" in check["hint"]
+    assert "different egress exit" in check["hint"]
+
+
+def test_an_unreachable_searxng_never_claims_a_provider_is_blocking(monkeypatch):
+    monkeypatch.setenv(SEARXNG_ENV, SEARXNG_URL)
+    dead = probes.ddgs_backends()[0]
+    net = net_with(extra={f"{SEARXNG_URL}/": ConnectionError("down")})
+    doctor = build_doctor(net=net, ddgs_factory=ddgs_where({dead}))
+    check = checks_by_name(doctor.run(DoctorRequest(checks=["engines"])))[f"engine:ddgs:{dead}"]
+    assert "No second opinion" in check["hint"]
+    assert "refusing" not in check["hint"]
+
+
+def test_with_searxng_off_the_aggregate_says_to_turn_it_on():
+    dead = probes.ddgs_backends()[0]
+    doctor = build_doctor(net=net_with(), ddgs_factory=ddgs_where({dead}))
+    aggregate = checks_by_name(doctor.run(DoctorRequest(checks=["engines"])))["engines"]
+    assert "searxng.sh up" in aggregate["hint"]
+
+
+def test_the_cross_check_never_runs_when_nothing_is_silent(monkeypatch):
+    monkeypatch.setenv(SEARXNG_ENV, SEARXNG_URL)
+    net = net_with(
+        extra={
+            f"{SEARXNG_URL}/healthz": "ok",
+            f"{SEARXNG_URL}/config": {"version": "x", "engines": []},
+            f"{SEARXNG_URL}/search": searxng_per_engine({}),
+        }
+    )
+    doctor_with(net=net).run(DoctorRequest(checks=["engines"]))
+    assert [url for url, _ in net.calls if "/search" in url] == []
 
 
 # --- tools and fetch ------------------------------------------------------------------
