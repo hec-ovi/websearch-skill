@@ -95,9 +95,9 @@ def _add_search_command(sub: Any) -> None:
     sp.add_argument(
         "--ddgs-backends",
         help="Which keyless engines ddgs queries, comma-separated (default auto = all). "
-        "Engines include google, brave, duckduckgo, yandex, yahoo, startpage, mojeek, "
-        "wikipedia (default); bing and others are selectable by name. "
-        "Example: --ddgs-backends google,brave,mojeek",
+        "Engines: google, brave, duckduckgo, yandex, yahoo, startpage, mojeek, "
+        "wikipedia, grokipedia. `websearch doctor --check engines` reports which of "
+        "them answer from here. Example: --ddgs-backends google,brave,mojeek",
     )
     sp.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
 

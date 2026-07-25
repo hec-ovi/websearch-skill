@@ -139,6 +139,8 @@ For `web-fetch`/`web-open`, `data.pages[]` carries `handle`, `url`, `title`, `co
 - For broader search, set `WEBSEARCH_SEARXNG_URL` to a self-hosted SearXNG; the router
   fuses it with ddgs. Engine-selection flags (`--engines`, `--ddgs-backends`, `--no-ddgs`)
   live only on the lower-level `websearch search` command, for debugging.
+- If searches keep coming back empty, `websearch doctor` reports which engines answered
+  and why the rest did not. Report what it says; do not retry the same query in a loop.
 - The MCP server is `websearch mcp` (stdio, bundled). Point a client at
   `{"command": "uvx", "args": ["websearch-skill", "mcp"]}`; see `docs/INSTALL.md` for
   per-harness registration.

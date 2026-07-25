@@ -28,7 +28,7 @@ Two extra keyless tools cover what general web search does not:
 
 ### Engines, out of the box, no keys
 
-Search works the moment you install it. The default engine is the keyless [`ddgs`](https://github.com/deedy5/ddgs) metasearch library, which by itself spans **Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, and Wikipedia**. Each query is served by whichever of those respond fastest. No API key, no account, no service to run, and no engine flags: the agent surface (`web-search`) is plug-and-play. Picking a subset of underlying engines (or adding Bing by name) is a power-user knob on the lower-level `search` command via `--ddgs-backends google,brave,mojeek`, not on `web-search`.
+Search works the moment you install it. The default engine is the keyless [`ddgs`](https://github.com/deedy5/ddgs) metasearch library, which by itself spans **Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, and Grokipedia**. Each query is served by whichever of those respond. No API key, no account, no service to run, and no engine flags: the agent surface (`web-search`) is plug-and-play. Picking a subset is a power-user knob on the lower-level `search` command via `--ddgs-backends google,brave,mojeek`, not on `web-search`. Which of them actually answer from your connection today is a question `websearch doctor` answers per provider, and it varies.
 
 For broader and more reliable search you can run your own SearXNG (~280 engines, your own server, still no keys), and the router fuses it with `ddgs` and de-correlates the engines they share. A one-command Docker setup is in [`docker/searxng/`](docker/searxng/), including a probe that enables every engine that answers on your connection; see Self-hosting SearXNG below. Public SearXNG instances are deliberately not a default: most disable the JSON API and rate-limit automated clients, so depending on them would break on a fresh install.
 
@@ -45,12 +45,13 @@ Among 2026 agentic-search APIs the top tier is statistically tied on result qual
 | Layer 2B: Format + Store | Paginated Markdown + JSON sidecar, progressive-disclosure index/resolver, MinHash dedup, ephemeral SQLite-FTS5 store | Built |
 | Layer 3: Agent I/O | Consolidated `web_search`/`web_fetch`/`web_open`, untrusted-content fence, optional MCP stdio server, `SKILL.md` | Built |
 | Extra tools | Keyless `arxiv` (paper search) and `github` (repo search), standalone over the same Envelope | Built |
+| Doctor | `websearch doctor`: per-capability self-test of the optional layers, every engine, the tools, both fetch tiers, and MCP | Built |
 
-Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.1.0`, `fetch@1.2.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.1.0`, `arxiv@1.1.0`, `github@1.1.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
+Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.1.0`, `fetch@1.2.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.1.0`, `arxiv@1.1.0`, `github@1.1.0`, `doctor@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
 
 ## Layer 1: Search
 
-A thin router fans a normalized request out to per-engine adapters behind an `EngineAdapter` port, canonicalizes URLs, dedups with provenance merge, and fuses results with provenance-aware weighted Reciprocal Rank Fusion (RRF, k=60). The keyless default is `ddgs`, a metasearch library that is itself multi-engine (Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, with Bing and others selectable). On this lower-level `search` command, `--ddgs-backends` forces a subset and `--engines` picks which adapters (ddgs, searxng) run; the agent-facing `web-search` command takes none of those and just uses the keyless default. Point `WEBSEARCH_SEARXNG_URL` at a self-hosted SearXNG to add it as a second, broader engine, and the router fuses both. Keyed engines (Brave, Exa, Tavily, and others) are a planned drop-in behind the same port.
+A thin router fans a normalized request out to per-engine adapters behind an `EngineAdapter` port, canonicalizes URLs, dedups with provenance merge, and fuses results with provenance-aware weighted Reciprocal Rank Fusion (RRF, k=60). The keyless default is `ddgs`, a metasearch library that is itself multi-engine (Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, Grokipedia). On this lower-level `search` command, `--ddgs-backends` forces a subset and `--engines` picks which adapters (ddgs, searxng) run; the agent-facing `web-search` command takes none of those and just uses the keyless default. Point `WEBSEARCH_SEARXNG_URL` at a self-hosted SearXNG to add it as a second, broader engine, and the router fuses both. Keyed engines (Brave, Exa, Tavily, and others) are a planned drop-in behind the same port.
 
 `ddgs` and SearXNG do the same job (query many engines and merge) in different forms: `ddgs` is a keyless Python library that runs in-process, while SearXNG is a separate server you host that covers far more engines. They are interchangeable adapters behind this port; run either, or both fused. SearXNG only overlaps with this search layer, it does not fetch or extract pages, so it never replaces the rest of the tool.
 
@@ -196,6 +197,9 @@ uv run websearch github "llm agent framework" --language Python --sort stars
 
 # or run as an MCP server (FastMCP stdio; bundled, no extra needed)
 uv run websearch mcp
+
+# check what actually works on this machine, engine by engine
+uv run websearch doctor
 ```
 
 Every command prints a compact human view by default, or the raw JSON `Envelope` with `--json` (exit 0 on success, 1 on a request-level error). For the fetch command, `--output-format {markdown,text,json}` selects the body representation the human view prints (`text` emits the plain-text rendering), and `--quiet` prints only the extracted body, for piping. For the open command, `--mode {auto,index,full}` controls progressive disclosure, `--no-truncate` inlines every full body, `--search QUERY` runs a BM25 passage search over the opened pages, and `--anthropic-blocks` adds the Anthropic search_result view to the sidecar. The agent-facing `web-search` takes `--max-results`, `--detail`, `--freshness`, `--site`, `--language`, `--country`, `--safesearch`, `--offset`, and `--searxng-url`; the engine-selection flags (`--engines`, `--ddgs-backends`, `--no-ddgs`) live only on the lower-level `search` command, alongside `--searxng-url` (or `WEBSEARCH_SEARXNG_URL`). See `uv run websearch <command> --help` for the full flag list.
@@ -256,9 +260,21 @@ index.add([PageInput(url="https://x.test/a", markdown="# A ...")])
 hits = index.search(SearchPageRequest(query="borrow checker"))
 ```
 
-## Self-hosting SearXNG (optional)
+## Optional layers (all off by default)
 
-You never need this; the keyless `ddgs` engines work out of the box. Run your own SearXNG when you want the broadest, most reliable search: every engine SearXNG can reach, your own server, no public rate limits, and still no API keys.
+The base install searches the keyless engines over a direct connection. Three switches add to that, each off until you set it, each verified by `websearch doctor`:
+
+| Layer | Switch | What it adds |
+|---|---|---|
+| VPN | `WEBSEARCH_VPN=nordvpn` or `any` | declares that egress should be tunneled, so the doctor verifies it instead of assuming it. It routes nothing on its own: the tunnel is your VPN app's job |
+| Egress proxy | `WEBSEARCH_PROXY=<url>` or `nordvpn` | one proxy for every network path the tool opens |
+| SearXNG | `WEBSEARCH_SEARXNG_URL=<url>` | a self-hosted metasearch instance joins the Layer-1 fanout |
+
+All three read from a gitignored `.env` in the working directory if you have one (copy `.env.example`), which keeps NordVPN service credentials out of your shell history. An exported variable always beats the file, and `--vpn` / `--proxy` / `--searxng-url` beat both for a single run.
+
+### Self-hosting SearXNG
+
+You never need this; the keyless `ddgs` engines work out of the box. Run your own SearXNG when you want the broadest, most reliable search: every engine SearXNG can reach, your own server, no public rate limits, and still no API keys. It is also the tool's second opinion: `websearch doctor` uses it to tell a stale `ddgs` parser apart from a provider blocking your IP.
 
 ```bash
 ./docker/searxng/searxng.sh up                # generates a per-machine secret, waits for health
@@ -270,9 +286,9 @@ One container, nothing installed on the host. SearXNG ships ~280 engines but lea
 
 The container is kept in its box: config mounted read-only, runtime state in a Docker volume rather than the repo, all capabilities dropped, loopback-only by default, and no secret committed. Torrent trackers and shadow libraries stay out of the default fanout (still queryable by name). Details and the checklist for exposing it beyond localhost are in [`docker/searxng/`](docker/searxng/).
 
-## Egress proxy (optional)
+### Egress proxy
 
-Off by default. One switch, `WEBSEARCH_PROXY`, routes every network path (search engines, fetch tiers, arxiv, github, and the MCP tools) through a proxy:
+One switch, `WEBSEARCH_PROXY`, routes every network path (search engines, fetch tiers, arxiv, github, and the MCP tools) through a proxy:
 
 ```bash
 export WEBSEARCH_PROXY=socks5h://user:pass@host:1080   # any proxy URL (http:// works too)
@@ -285,6 +301,34 @@ The `nordvpn` shorthand builds the SOCKS5 URL for you from `NORDVPN_USER` and `N
 Every network command also takes `--proxy <url|nordvpn|off>`, which overrides the variable for that run, so `--proxy off` gets you a direct connection without unsetting anything. Prefer `socks5h://` over `socks5://`: it resolves DNS through the proxy, so hostnames never hit your local resolver. A per-request `fetch --proxy` still wins over the process-wide default.
 
 With a self-hosted SearXNG there are two hops and the proxy applies to the one that matters. The client's hop to `127.0.0.1` is never proxied, because asking a remote exit node to reach `127.0.0.1` gets you its localhost, not yours. The hop that actually reaches Google and Bing is SearXNG's own, out of the container, and `docker/searxng/searxng.sh up` routes that one through the same `WEBSEARCH_PROXY` (expanding the `nordvpn` shorthand for you). `searxng.sh egress` prints both IPs so you can see it. Set `SEARXNG_OUTGOING_PROXY=off` for direct container egress; a SearXNG on a public address still goes through the proxy on the client hop too.
+
+### VPN
+
+`WEBSEARCH_VPN` does not route anything. It records what you expect, so a tunnel that silently drops fails a check instead of quietly leaking your real IP. `nordvpn` is verified against NordVPN's own keyless connection endpoint, which reports whether the caller is inside their network; `any` only asserts that a tunnel interface is up, because no third party can confirm an arbitrary provider by name. The doctor checks the path the tool actually uses: through the egress proxy when one is set, direct otherwise.
+
+## websearch doctor
+
+One command that says what works right now, capability by capability:
+
+```bash
+uv run websearch doctor                          # everything
+uv run websearch doctor --quick                  # skip the engine fanout, tools, and fetch tiers
+uv run websearch doctor --check engines --check proxy
+uv run websearch doctor --json                   # the same run as an Envelope
+```
+
+It prints the three optional layers' state, then checks Python and the dependency closure, direct internet and the exit IP, the egress proxy and whether the exit IP actually moved, the declared VPN, a self-hosted SearXNG (health, active engine count, live JSON query), each `ddgs` provider on its own, arXiv and GitHub, both fetch tiers, and the MCP tool registration. Exit code is 1 only when something failed: an optional layer that is off is skipped, and one rate-limited provider is a warning. Proxy credentials never reach the output, including inside HTTP client error text.
+
+The part worth having is the cross-check. `ddgs` reports "No results found" for a CAPTCHA, for a rate limit, and for an HTTP 200 whose markup its parser no longer reads, and those need opposite fixes. With SearXNG running, the doctor asks it about exactly the providers that went quiet, and SearXNG's scrapers are maintained separately:
+
+```
+warn  engine:ddgs:google     No results found. (SearXNG reached it: 260 results)
+                             -> ddgs's parser, not a block on your IP. Query it through SearXNG.
+warn  engine:ddgs:startpage  No results found. (SearXNG got nothing from it either)
+                             -> startpage is refusing this IP. Only a different egress exit changes that.
+```
+
+Measured on one home connection in July 2026: of ten `ddgs` providers, Brave, Grokipedia, Yahoo, and Yandex answered directly; Google, DuckDuckGo, and Mojeek were silent through `ddgs` but returned results through SearXNG; Startpage and Wikipedia were empty in both. Through NordVPN's shared SOCKS exit, DuckDuckGo dropped out as well. Your numbers will differ, which is the reason the command exists.
 
 ## Security
 

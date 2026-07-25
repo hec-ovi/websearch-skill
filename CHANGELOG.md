@@ -8,6 +8,33 @@ semantic versioning.
 
 ### Added
 
+- `websearch doctor`: a per-capability self-test of one installation, over the new
+  `doctor@1.0.0` contract. It reports the state of the three optional layers, then
+  checks the interpreter and dependency closure, direct internet and the exit IP, the
+  egress proxy and whether the exit IP actually moved, the declared VPN, a self-hosted
+  SearXNG (health, active engine count, live JSON query), every `ddgs` provider on its
+  own, the arXiv and GitHub tools, both fetch tiers, and the MCP tool registration.
+  `--check NAME` narrows to a name prefix or a group, `--quick` drops the query-heavy
+  groups, `--json` emits the Envelope. Exit code is 1 only when a check failed; an
+  optional layer that is off is skipped, and one rate-limited provider is a warning.
+  `Envelope.ok` reports that the diagnostic ran, not that the install is healthy, which
+  is `data.summary.fail == 0` (mirrored on `meta.healthy`).
+- The doctor tells a stale parser apart from a blocked IP. `ddgs` reports "No results
+  found" for a CAPTCHA, a rate limit, and an HTTP 200 whose markup its parser no longer
+  reads, and those need opposite fixes, so with SearXNG running the doctor asks it about
+  exactly the providers that went quiet. Results there mean the provider is up and
+  `ddgs` cannot read it; nothing there means the provider is refusing this IP.
+- `WEBSEARCH_VPN` (`nordvpn`, `any`, or off): declares that egress should be tunneled so
+  the doctor verifies it rather than assuming it. It routes nothing itself. `nordvpn` is
+  checked against NordVPN's keyless connection endpoint, along the path the tool
+  actually uses, which is the egress proxy when one is configured.
+- `websearch.optional_layers`: one module for the three optional layers (VPN, egress
+  proxy, SearXNG), each off unless its variable is set, with credential redaction that
+  every display path goes through. Proxy userinfo never reaches output, including inside
+  HTTP client error text.
+- A gitignored `.env` in the working directory is read at CLI startup, so NordVPN
+  service credentials and a proxy URL stay out of shell history. An exported variable
+  still wins over the file. See `.env.example`.
 - `docker/searxng/searxng.sh`: one entry point for the local SearXNG (`up`, `down`,
   `status`, `verify`, `engines`, `restart`, `logs`). `up` generates a per-machine
   secret into a gitignored `.env`, starts the container, and waits for `/healthz`.

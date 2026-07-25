@@ -31,6 +31,7 @@ collides with roughly everything.
 | `searxng.sh up` | generate the secret if missing, start, wait for health |
 | `searxng.sh status` | container state, engine counts, and a live query |
 | `searxng.sh verify` | run a real search through the `websearch` CLI |
+| `websearch doctor --check searxng` | health, active engines, and a live JSON query, as a check |
 | `searxng.sh egress` | show where SearXNG's engine requests leave from |
 | `searxng.sh engines` | re-probe every engine and regenerate `settings.yml` |
 | `searxng.sh restart` | apply a `settings.yml` change |
@@ -146,3 +147,10 @@ SearXNG is one engine behind the same Layer 1 search port as `ddgs`. With
 `WEBSEARCH_SEARXNG_URL` set, the router queries both and fuses them with de-correlated
 RRF (so the engines they share, like Google and Bing, are not double counted). Unset it
 and the tool falls back to `ddgs` alone. Nothing else changes.
+
+It has a second job: it is the tool's independent parser for the same providers. `ddgs`
+says "No results found" whether an engine served a CAPTCHA, rate-limited you, or just
+changed its HTML, and those need opposite fixes. With this instance running, `websearch
+doctor` asks it about exactly the providers that went quiet through `ddgs`. Results here
+mean the provider is fine and `ddgs` cannot read it; nothing here means the provider is
+refusing your IP, and only a different egress exit changes that.
