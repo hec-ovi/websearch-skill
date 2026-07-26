@@ -7,7 +7,7 @@ Open-source multi-engine web search and content extraction for AI agents, built 
 [![tests](https://img.shields.io/badge/tests-748%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
-> **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). The keyless search, the clean-Markdown reader, the five agent commands, the self-hosted SearXNG, and the opt-in egress proxy work today and are covered by the test suite. **0.3.0 removed the MCP server**; the CLI plus the skill is the whole surface now (see No MCP below). The hard anti-bot tiers and local rerank are not built yet (see Roadmap). Pin a version and try it in a sandbox before wiring it into anything sensitive.
+> **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). The keyless search, the clean-Markdown reader, the five agent commands, the self-hosted SearXNG, and the opt-in egress proxy work today and are covered by the test suite. **There is no MCP server**; the CLI plus the skill is the whole surface (see No MCP below). The hard anti-bot tiers and local rerank are not built yet (see Roadmap). Pin a version and try it in a sandbox before wiring it into anything sensitive.
 
 ## What it is
 
@@ -118,11 +118,7 @@ uv run websearch web-search "frontier model release" --site x.com
 
 ## No MCP (since 0.3.0)
 
-0.3.0 removed the MCP server. Up to 0.2.6 the same three tools shipped twice, as a CLI and as a FastMCP stdio server, and the second copy is what kept getting in the way of the two features this tool actually needs to be good: a self-hosted SearXNG and a real egress proxy.
-
-The MCP server is one long-lived process. It reads its configuration once at startup and builds its engine fanout once, on the first search. `websearch searxng up` runs in a different, short-lived process: it starts SearXNG and writes `WEBSEARCH_SEARXNG_URL` into the env file, which cannot reach into the memory of a server that is already running. So the server kept searching on the keyless engines only, reported `all_engines_failed` when those were blocked, and there was no honest way for it to tell you why. The same staleness applied to `WEBSEARCH_PROXY`: a proxy configured after startup was invisible until the client restarted the server.
-
-A CLI has none of that. Every command is its own process, so the env file, the proxy, and the SearXNG URL are read fresh on every call, and a change takes effect on the next command instead of the next restart. Dropping the server also deleted about 500 lines, the `fastmcp` dependency, the per-harness registration, and the registry manifest, which is the leaner skill this was supposed to be. What replaced it is one command: `websearch init` brings everything up and reports what works.
+MCP is not worth it for this tool. The whole point here is retuning the harness per call: proxy on or off, self-hosted SearXNG on or off, a different engine set, a different env file. An MCP server is one long-lived process that reads its configuration at startup and caches its engine fanout, so every one of those switches would wait for a client restart. The CLI is a process per command, so the env file, the proxy, and the SearXNG URL are read fresh every time, and `websearch init` brings the whole thing up in one call.
 
 If you were pointing an MCP client at `websearch mcp`, use the skill instead: `npx skills add hec-ovi/websearch-skill` gives the agent the same tools through its shell.
 

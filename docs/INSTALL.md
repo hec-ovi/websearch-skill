@@ -14,8 +14,8 @@ Two facts that recur:
   websearch-skill ...` works as-is. To run a specific commit instead, use the git form
   `uvx --from git+https://github.com/hec-ovi/websearch-skill@<ref> websearch ...`.
 
-There is no MCP server. 0.3.0 removed it: the agent drives the `websearch` CLI through its
-own shell, and the skill file tells it how. The reason is in the README under "No MCP".
+There is no MCP server: the agent drives the `websearch` CLI through its own shell, and the
+skill file tells it how. The reason is in the README under "No MCP".
 Whatever your harness, the first call in a session should be `websearch init`.
 
 ## Route summary

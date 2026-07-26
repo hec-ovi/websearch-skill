@@ -182,10 +182,10 @@ least privilege, and cutting exfiltration paths.
 
 **One face.** The `websearch` CLI is the whole surface, and a portable `SKILL.md` (Agent Skills
 standard, name plus description) documents the command grammar so an agent drives it by shell and
-reads stdout. 0.3.0 removed the second face, a FastMCP stdio server: a long-lived server reads its
-configuration once and caches its engine fanout, so a SearXNG or a proxy configured afterwards was
-invisible to it until the client restarted the server, which is the opposite of what the optional
-layers need. A process per command reads the environment fresh every time. The lower-level `search`
+reads stdout. There is no MCP server (0.3.0 dropped the FastMCP stdio face): a long-lived server reads
+its configuration once and caches its engine fanout, so a SearXNG or a proxy switched on afterwards
+stays invisible to it until the client restarts, which defeats the optional layers. A process per
+command reads the environment fresh every time. The lower-level `search`
 / `fetch` / `open` commands remain as the per-layer surfaces for debugging and composition.
 
 **Bring-up.** Because state lives in the environment and on disk rather than in a resident process,
