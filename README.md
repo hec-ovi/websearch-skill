@@ -1,39 +1,39 @@
 # websearch-skill
 
-Open-source multi-engine web search and content extraction for AI agents, built as isolated layers connected only by versioned JSON Schema contracts.
+Open-source multi-engine web search and content extraction for AI agents. Internal layers communicate through versioned JSON Schema contracts.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![tests](https://img.shields.io/badge/tests-748%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
-> **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). The keyless search, the clean-Markdown reader, the five agent commands, the self-hosted SearXNG, and the opt-in egress proxy work today and are covered by the test suite. **There is no MCP server**; the CLI plus the skill is the whole surface (see No MCP below). The hard anti-bot tiers and local rerank are not built yet (see Roadmap). Pin a version and try it in a sandbox before wiring it into anything sensitive.
+> **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). Available now: keyless search, Markdown extraction, five agent commands, self-hosted SearXNG, and an opt-in egress proxy. These are covered by the test suite. **There is no MCP server**; use the CLI directly or install the skill (see No MCP below). Hard anti-bot tiers and local reranking remain on the roadmap. Pin a version and test it in a sandbox before using it with sensitive data.
 
 ## What it is
 
-A self-hosted web search and page reader for AI agents, with no API keys and no paywall. Point it at a query and it fans out across many search engines, fuses and dedups the results, then fetches and extracts pages into clean Markdown. Everything runs locally; queries do not go to a vendor.
+A self-hosted web search and page reader for AI agents, with no API keys or paid search service. It queries multiple engines, combines and deduplicates the results, then fetches pages as clean Markdown. The CLI runs locally and sends queries directly to the configured engines.
 
-One command brings it online and three do the work:
+Core commands:
 
-- **`init`** starts everything (env file, local SearXNG) and reports what actually works, in one call. Run it once at the start of a session instead of probing by hand.
+- **`init`** reads the env file, starts local SearXNG, and reports available capabilities.
 - **`web_search`** finds pages: ranked, deduplicated results across engines, each with a reusable `handle`.
 - **`web_fetch`** reads a page: clean Markdown, fenced as untrusted, paginated so a long page never overflows context.
 - **`web_open`** pages back through a document you already fetched, from cache, without hitting the network again.
 
-Two extra keyless tools cover what general web search does not:
+Additional keyless commands:
 
 - **`arxiv`** searches arXiv papers and returns structured metadata (authors, abstract, categories, abstract and PDF links).
 - **`github`** searches GitHub repositories and returns typed fields you can sort on (stars, language, topics).
 
 ### Engines, out of the box, no keys
 
-Search works the moment you install it. The default engine is the keyless [`ddgs`](https://github.com/deedy5/ddgs) metasearch library, which by itself spans **Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, and Grokipedia**. Each query is served by whichever of those respond. No API key, no account, no service to run, and no engine flags: the agent surface (`web-search`) is plug-and-play. Picking a subset is a power-user knob on the lower-level `search` command via `--ddgs-backends google,brave,mojeek`, not on `web-search`. Which of them actually answer from your connection today is a question `websearch doctor` answers per provider, and it varies.
+The default engine is the keyless [`ddgs`](https://github.com/deedy5/ddgs) metasearch library, which spans **Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, and Grokipedia**. Each query uses the providers that respond. The agent-facing `web-search` command requires no account, service, or engine flags. The lower-level `search` command can restrict providers with `--ddgs-backends google,brave,mojeek`. Provider availability varies by network; `websearch doctor` reports it per provider.
 
 For broader and more reliable search you can run your own SearXNG (~280 engines, your own server, still no keys), and the router fuses it with `ddgs` and de-correlates the engines they share. `websearch searxng up` sets one up and starts it on any machine with git and Python; on a Docker host, [`docker/searxng/`](docker/searxng/) is the curated stack, including a probe that enables every engine that answers on your connection. See Self-hosting SearXNG below. Public SearXNG instances are deliberately not a default: most disable the JSON API and rate-limit automated clients, so depending on them would break on a fresh install.
 
-It is MIT-licensed and open source. On top of the keyless default you can add a self-hosted SearXNG, keyed engines (Brave, Exa, Tavily), or a paid egress adapter, all behind the same contracts, none of them required.
+The project is MIT-licensed. Optional integrations include self-hosted SearXNG, keyed engines (Brave, Exa, Tavily), and a paid egress adapter.
 
-Among 2026 agentic-search APIs the top tier is statistically tied on result quality, so cost and latency are the real differentiators; the scorecard below is how I measure that, axis by axis. Where this helps is cost (about zero at the software layer), privacy and self-hosting, multi-engine recall plus dedup, clean extraction, and the unprotected majority of the web. Hard anti-bot at scale is out of scope: it stays a swappable paid egress adapter, because residential proxies and captcha solving have no reliable free equivalent.
+The scorecard below compares result quality, latency, cost, privacy, and retrieval limits. The software layer is free and self-hosted, with multi-engine search, deduplication, and Markdown extraction. Protected sites may require the planned paid egress adapter; residential proxies and CAPTCHA solving have no reliable free equivalent.
 
 ## Layer status
 
@@ -45,25 +45,25 @@ Among 2026 agentic-search APIs the top tier is statistically tied on result qual
 | Layer 3: Agent I/O | Consolidated `web_search`/`web_fetch`/`web_open`, untrusted-content fence, `SKILL.md` | Built |
 | Extra tools | Keyless `arxiv` (paper search) and `github` (repo search), standalone over the same Envelope | Built |
 | Doctor | `websearch doctor`: per-capability self-test of the optional layers, every engine, the tools, and both fetch tiers | Built |
-| Init | `websearch init`: one call that reads the env file, starts SearXNG, runs the sweep, and answers "can I search now" | Built |
+| Init | `websearch init`: reads the env file, starts SearXNG, runs diagnostics, and reports capability state | Built |
 
 Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.1.0`, `fetch@1.2.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.1.0`, `arxiv@1.1.0`, `github@1.1.0`, `doctor@2.0.0`, `searxng@1.0.0`, `init@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
 
 ## Layer 1: Search
 
-A thin router fans a normalized request out to per-engine adapters behind an `EngineAdapter` port, canonicalizes URLs, dedups with provenance merge, and fuses results with provenance-aware weighted Reciprocal Rank Fusion (RRF, k=60). The keyless default is `ddgs`, a metasearch library that is itself multi-engine (Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, Grokipedia). On this lower-level `search` command, `--ddgs-backends` forces a subset and `--engines` picks which adapters (ddgs, searxng) run; the agent-facing `web-search` command takes none of those and just uses the keyless default. Point `WEBSEARCH_SEARXNG_URL` at a self-hosted SearXNG to add it as a second, broader engine, and the router fuses both. Keyed engines (Brave, Exa, Tavily, and others) are a planned drop-in behind the same port.
+Search normalizes a request, sends it to each configured `EngineAdapter`, canonicalizes and deduplicates URLs, and combines the rankings with weighted Reciprocal Rank Fusion (RRF, k=60). The keyless default is `ddgs`, a metasearch library for Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, and Grokipedia. On the lower-level `search` command, `--ddgs-backends` selects a provider subset and `--engines` selects the ddgs and SearXNG adapters. The agent-facing `web-search` command uses the defaults. Set `WEBSEARCH_SEARXNG_URL` to add a self-hosted SearXNG instance. Keyed engines such as Brave, Exa, and Tavily are planned.
 
-`ddgs` and SearXNG do the same job (query many engines and merge) in different forms: `ddgs` is a keyless Python library that runs in-process, while SearXNG is a separate server you host that covers far more engines. They are interchangeable adapters behind this port; run either, or both fused. SearXNG only overlaps with this search layer, it does not fetch or extract pages, so it never replaces the rest of the tool.
+`ddgs` is a keyless Python library that runs in-process. SearXNG is a separate self-hosted server with a larger engine catalog. Search can use either adapter or combine both. SearXNG provides search results only; page fetching and extraction remain in Layer 2A.
 
-The load-bearing decision is **de-correlation**. SearXNG and ddgs both lean on the same upstream crawlers (Google, Bing), so a naive union lets a consensus bonus amplify the same crawler agreeing with itself, and the fused ranking can end up worse than a single well-tuned engine. The fix: a result's sources are grouped by `correlation_group`, each group contributes one RRF term at its best rank, and the consensus bonus scales only with the number of distinct groups. SearXNG and ddgs agreeing counts as one independent vote; SearXNG and a neural index agreeing counts as two. The router records the de-correlation in a warning.
+De-correlation prevents duplicate upstream data from distorting the ranking. SearXNG and ddgs both use crawlers such as Google and Bing, so a naive union can count the same source twice. Results are grouped by `correlation_group`; each group contributes one RRF term at its best rank, and the consensus bonus uses only the number of distinct groups. SearXNG and ddgs agreeing counts as one independent vote; SearXNG and a neural index agreeing counts as two. The response includes a warning when de-correlation is applied.
 
-Every result carries full per-engine provenance (which engine returned it, at what rank), so the ranking is auditable.
+Each result records which engines returned it and its rank within each engine.
 
 ## Layer 2A: Fetch + Extract
 
-Two decoupled sub-ports, each independently swappable.
+Fetching and extraction use separate interfaces and can be replaced independently.
 
-**Fetch** escalates by tier and escalates only when it detects an anti-bot block. Tier 0 is plain httpx; on a detected challenge it escalates to curl_cffi (browser TLS/JA3 impersonation). It does not escalate on a 404 or on a terminal block (rate limit, auth required, legal/geo block), since a stealthier client from the same egress will not help. Block detection reads header markers first, then gated body markers for Cloudflare, DataDome, PerimeterX, Akamai, and Imperva (Imperva can return a block with HTTP 200, so its body markers are scanned on any status). Browser and stealth tiers (Crawl4AI, nodriver) are named in the contract enum but stay opt-in, not in the base install.
+**Fetch** starts with httpx and retries with curl_cffi browser impersonation only when it detects an anti-bot challenge. It does not retry 404s, rate limits, authentication failures, or legal and geographic blocks because the same network address is unlikely to change the result. Detection checks response headers, then known body markers for Cloudflare, DataDome, PerimeterX, Akamai, and Imperva. Imperva body markers are checked on every status because its blocks can return HTTP 200. Browser and stealth tiers (Crawl4AI, nodriver) are present in the contract but are not part of the base install.
 
 **Extract** defaults to **Trafilatura**, a heuristic extractor. Per the May 2026 WCXB benchmark, heuristic extractors beat neural extractors on both quality and cost (neural runs tens to hundreds of times more expensive), and Trafilatura lands at about 0.79 F1 on CPU in roughly 100ms; article pages saturate around 0.93 F1. The adapter parses the raw HTML once with lxml to recover the raw schema.org JSON-LD blocks and `og:type` (Trafilatura folds JSON-LD into metadata and never exposes the raw blocks), runs Trafilatura for the Markdown body and plain text plus metadata, then computes:
 
@@ -72,44 +72,44 @@ Two decoupled sub-ports, each independently swappable.
 
 Neural extract engines (`crawl4ai`, `jina_readerlm`, and others) are named in the contract enum but stay opt-in. The default dependency closure is permissive: Apache-2.0 (trafilatura) plus MIT/BSD/MPL deps.
 
-There is **no output-length cap anywhere**. `content_markdown` is never truncated; `--max-bytes` is a transport guard only, not a content cap, and `--max-bytes 0` lifts even that. The same convention runs through every knob: `--max-results 0`, `--page-size-tokens 0`, and `--per-page 0` mean "no limit" (or the provider's own maximum where one exists, like GitHub's 100 per page and arXiv's 2000 per request).
+Extraction does not truncate `content_markdown`. `--max-bytes` limits the downloaded response size, and `--max-bytes 0` disables that transport limit. A value of `0` also disables `--max-results`, `--page-size-tokens`, and `--per-page`, subject to provider limits such as GitHub's 100 results per page and arXiv's 2,000 results per request.
 
 ## Layer 2B: Format + Store
 
-Two decoupled sub-ports that turn results into something an agent can actually read, and keep the full pages around for follow-up.
+This layer formats results for agents and stores full pages for later access.
 
-**Format** takes vendor-neutral results (the union of what Layer 1 and Layer 2A produce) and renders one layout-stable Markdown document plus a parallel JSON sidecar holding the same data. Results are ordered by descending relevance and paginated, because lost-in-the-middle is still real in 2026 even on long-context models. Near-duplicate dedup runs first: byte-exact (normalized SHA-256), then a pure-Python MinHash over word 4-gram shingles (128 permutations, Jaccard 0.9) clustered with union-find. The best-scored page in a cluster is kept and the rest are recorded as `dropped_duplicates`, so the fold is auditable. The 0.9 threshold is deliberately conservative: it folds genuinely near-identical pages (mirrors, syndication), not merely topically similar ones, so two pages that just read alike will not collapse at the default. Lower `jaccard_threshold` for boilerplate-heavy corpora. Dedup is pure Python by design (no `datasketch`), so the default install stays dependency-light. Progressive disclosure chooses how much to inline:
+**Format** takes vendor-neutral results from Layers 1 and 2A and renders a layout-stable Markdown document plus a JSON sidecar containing the same data. Results are ordered by relevance and paginated according to the configured token budget. Near-duplicate deduplication runs first: byte-exact (normalized SHA-256), then pure-Python MinHash over word 4-gram shingles (128 permutations, Jaccard 0.9) clustered with union-find. The highest-scored page in each cluster is kept and the rest are listed in `dropped_duplicates`. The default threshold merges near-identical pages such as mirrors and syndicated copies, while keeping pages that are only topically similar. Lower `jaccard_threshold` for boilerplate-heavy corpora. The implementation does not depend on `datasketch`. Progressive disclosure controls how much to inline:
 
 - **`auto`** (default) inlines full bodies when the page fits a token budget, otherwise switches to an index (a preview plus a stable `id`).
 - **`index`** always shows a preview and a resolve hint; **`full`** always inlines.
 
-The optional `anthropic_search_result_blocks` view maps 1:1 onto Anthropic search_result content blocks (`source` as a bare string, at least one non-empty text block, citations all-or-nothing). It is off by default and is a derived view, not the canonical shape, so installing into a non-Anthropic harness costs nothing.
+The optional `anthropic_search_result_blocks` view maps 1:1 onto Anthropic search_result content blocks (`source` as a bare string, at least one non-empty text block, citations all-or-nothing). It is off by default and separate from the canonical response shape.
 
-There is **no output-length cap here either**. The sidecar carries the full body verbatim in every mode, and the store keeps the full Markdown. `body_char_budget` only offloads the rendered Markdown view to the resolver (with a hint), and `--no-truncate` turns even that off. Nothing is summarized or discarded.
+The sidecar and store retain the full body in every mode. `body_char_budget` moves content from the rendered Markdown view into the resolver and adds a lookup hint; it does not modify the stored content. `--no-truncate` keeps the full body inline.
 
-**Store** is an ephemeral page index behind a `PageIndex` port (`add` / `search` / `get` / `resolve_index`). There is no database for the per-query result set, which is tens of rows of plain Python; the store is used only as the progressive-disclosure index over fetched pages. The default adapter is SQLite FTS5 over an in-memory connection: it ships in the Python stdlib with BM25 and needs no third-party package. FTS5 is not compiled into every SQLite build, so the adapter probes for it at runtime and falls back to a pure-Python BM25 index that returns the identical shapes. Adds are idempotent on url plus content hash, an arbitrary query is escaped so FTS5 operators never raise a syntax error, and persistence is just passing a file path. A vector or Rust backend (`sqlite-vec`, `tantivy`) plugs in behind the same port, opt-in.
+**Store** indexes fetched pages behind a `PageIndex` interface (`add` / `search` / `get` / `resolve_index`). Per-query result sets remain as plain Python objects; only fetched pages enter the index. The default adapter uses SQLite FTS5 with BM25 and requires no third-party package. If the local SQLite build lacks FTS5, it falls back to a pure-Python BM25 index with the same response shape. Adds are idempotent by URL and content hash, queries are escaped before reaching FTS5, and a file path enables persistence. Optional vector or Rust backends can implement the same interface.
 
 ## Layer 3: Agent I/O
 
-One consolidated surface over Layers 1, 2A, and 2B: `web_search` (find), `web_fetch` (read a URL), and `web_open` (page through an already-fetched document). Each returns the same `Envelope`. It is exposed two ways over one implementation: the `websearch web-search` / `web-fetch` / `web-open` CLI, and a portable `SKILL.md` written to the Agent Skills standard (name plus description, so it loads in Claude Code, Codex, OpenCode, and others) that tells an agent how to drive it.
+Layer 3 exposes `web_search` (find), `web_fetch` (read a URL), and `web_open` (page through an already-fetched document). Each returns the same `Envelope`. The CLI and portable `SKILL.md` use the same implementation. The skill follows the Agent Skills format and can be installed in Claude Code, Codex, OpenCode, and other compatible agents.
 
-The cross-layer key is a human-readable **handle** (`site~shorthash`, for example `en.wikipedia.org~3a1f9c2b5e6f`), never an opaque UUID. `web_fetch` indexes the full page into the Layer 2B store and returns one token-budget page; `web_open` pages through the rest from that store, by handle, without re-fetching. Every command is its own process, so that store is written to a file by default (beside your env file, or the XDG cache); `--persist-path off` keeps a run in memory and leaves nothing behind. The split is **lossless**: pagination is progressive disclosure, not a cap, and the whole body stays reachable page by page. The lower-level `search` / `fetch` / `open` commands remain as the per-layer surfaces for debugging and composition.
+Commands refer to pages with a human-readable **handle** (`site~shorthash`, for example `en.wikipedia.org~3a1f9c2b5e6f`). `web_fetch` indexes the full page in the Layer 2B store and returns one token-budget page; `web_open` reads later pages from that store without fetching the URL again. Because each command runs in a new process, the store uses a file by default beside the env file or in the XDG cache. `--persist-path off` keeps it in memory. Pagination does not discard content; the full body remains available page by page. The lower-level `search` / `fetch` / `open` commands remain available for debugging and composition.
 
-Fetched page text is untrusted, so `web_fetch` and `web_open` wrap each page in a fence (see Security). It also reaches the model as tool output rather than as a turn, which models are trained to treat with skepticism.
+Fetched page text is untrusted, so `web_fetch` and `web_open` wrap each page in a fence (see Security). The fenced content is returned as tool output, separate from user instructions.
 
 ## Extra keyless tools
 
 Two standalone tools cover sources that general web search handles poorly, both keyless and over the same Envelope:
 
 - **`arxiv`** searches arXiv via the official Atom API and returns structured papers (title, authors, abstract, categories, abstract and PDF links). It supports field-targeted search (`--field title|author|abstract`) and sorting by date or relevance, uses GET so it benefits from arXiv's cache, and backs off on the 2026 rate limiting.
-- **`github`** searches GitHub repositories via the unauthenticated REST API and returns typed fields (full name, stars, forks, language, topics, updated date). Unauthenticated search is about 10 requests per minute; on a rate limit it returns a clean `rate_limited` error instead of hammering. Code search needs a token and is intentionally left out of the keyless path.
+- **`github`** searches GitHub repositories via the unauthenticated REST API and returns typed fields (full name, stars, forks, language, topics, updated date). Unauthenticated search is about 10 requests per minute; rate-limited requests return a `rate_limited` error. Code search needs a token and is not included in the keyless path.
 
 ```bash
 uv run websearch arxiv "diffusion models for protein design" --max-results 5 --sort-by submittedDate
 uv run websearch github "vector database" --language Rust --sort stars --per-page 10
 ```
 
-Reddit and X (Twitter) have no keyless, terms-clean search path in 2026 (Reddit's anonymous JSON endpoints return 403 as of May 2026; X needs a paid API or a logged-in account), so there is deliberately no dedicated tool for them. Search the open web with a site filter instead:
+There are no dedicated Reddit or X tools because neither has a keyless search API compatible with its terms in 2026 (Reddit's anonymous JSON endpoints return 403 as of May 2026; X requires a paid API or a logged-in account). Use an open-web site filter:
 
 ```bash
 uv run websearch web-search "rust async" --site reddit.com
@@ -118,9 +118,9 @@ uv run websearch web-search "frontier model release" --site x.com
 
 ## No MCP (since 0.3.0)
 
-MCP is not worth it for this tool. The whole point here is retuning the harness per call: proxy on or off, self-hosted SearXNG on or off, a different engine set, a different env file. An MCP server is one long-lived process that reads its configuration at startup and caches its engine fanout, so every one of those switches would wait for a client restart. The CLI is a process per command, so the env file, the proxy, and the SearXNG URL are read fresh every time, and `websearch init` brings the whole thing up in one call.
+Version 0.3.0 removed the MCP server. The server was a long-lived process that read configuration at startup and cached its engine set. Changes to the proxy, self-hosted SearXNG, engine selection, or env file required a client restart. CLI commands start a new process and read that configuration on every call. `websearch init` handles setup and reports the resulting capabilities.
 
-If you were pointing an MCP client at `websearch mcp`, use the skill instead: `npx skills add hec-ovi/websearch-skill` gives the agent the same tools through its shell.
+For an existing `websearch mcp` installation, install the skill with `npx skills add hec-ovi/websearch-skill`; it exposes the commands through the agent's shell.
 
 ## Install
 
@@ -175,14 +175,14 @@ uv run websearch search "rust ownership" --engines searxng,ddgs
 # Layer 2A: fetch + extract one page to clean Markdown
 uv run websearch fetch "https://en.wikipedia.org/wiki/Rust_(programming_language)" --json
 
-# Layer 2B: open several pages into one paginated, deduped, LLM-ready document,
+# Layer 2B: open several pages into one paginated, deduplicated Markdown document,
 # and full-text search the passages across them
 uv run websearch open \
   "https://en.wikipedia.org/wiki/Rust_(programming_language)" \
   "https://doc.rust-lang.org/book/ch04-00-understanding-ownership.html" \
   --search "ownership borrow checker"
 
-# Layer 3: the consolidated, fenced, handle-keyed agent face
+# Layer 3: the fenced, handle-keyed agent interface
 uv run websearch web-search "rust ownership" --json
 uv run websearch web-fetch "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html" \
   --page-size-tokens 4000
@@ -194,10 +194,10 @@ uv run websearch web-open "doc.rust-lang.org~<hash>" --page 2
 uv run websearch arxiv "mixture of experts scaling laws" --max-results 5
 uv run websearch github "llm agent framework" --language Python --sort stars
 
-# bring everything online and report what works (start here)
+# initialize local services and report available capabilities
 uv run websearch init
 
-# check what actually works on this machine, engine by engine
+# check configured capabilities and providers
 uv run websearch doctor
 ```
 
@@ -236,7 +236,7 @@ for r in envelope.data["results"]:
     print(r["fused_score"], r["url"], [s["engine"] for s in r["sources"]])
 ```
 
-Layer 2B (format + store) the same way. `run` returns an `Envelope`; its `data` is the JSON `FormatPayload`, so `markdown` and the lossless `sidecar` are plain dict access:
+Use Layer 2B (format + store) the same way. `run` returns an `Envelope`; its `data` is the JSON `FormatPayload`, so `markdown` and the full sidecar use normal dictionary access:
 
 ```python
 from websearch.layer2_format import (
@@ -251,7 +251,7 @@ env = build_format_pipeline().run(
     )
 )
 document = env.data["markdown"]       # the layout-stable document
-sidecar = env.data["sidecar"]         # identical data; full bodies verbatim, never capped
+sidecar = env.data["sidecar"]         # identical data with full page bodies
 
 # an ephemeral page index for passage search and resolve-by-id
 index = build_page_index(StoreConfig())          # in-memory SQLite FTS5 (BM25)
@@ -261,7 +261,7 @@ hits = index.search(SearchPageRequest(query="borrow checker"))
 
 ## Optional layers (all off by default)
 
-The base install searches the keyless engines over a direct connection. Three switches add to that, each off until you set it, each verified by `websearch doctor`:
+The base install searches keyless engines over a direct connection. Three optional settings add VPN verification, proxy routing, or self-hosted SearXNG. `websearch doctor` verifies each configured setting:
 
 | Layer | Switch | What it adds |
 |---|---|---|
@@ -273,9 +273,9 @@ All three read from a gitignored `.env` in the working directory if you have one
 
 ### Self-hosting SearXNG
 
-You never need this; the keyless `ddgs` engines work out of the box. Run your own SearXNG when you want the broadest, most reliable search: every engine SearXNG can reach, your own server, no public rate limits, and still no API keys. It is also the tool's second opinion: `websearch doctor` uses it to tell a stale `ddgs` parser apart from a provider blocking your IP.
+SearXNG is optional; the keyless `ddgs` engines work without it. A self-hosted SearXNG adds more engines without relying on a public instance or API keys. `websearch doctor` can compare its results with `ddgs` to distinguish a parser failure from a provider blocking your IP.
 
-Two ways to run one. Pick by whether the machine has Docker.
+Choose the setup based on Docker availability.
 
 **No Docker (works anywhere, including an agent sandbox):**
 
@@ -298,7 +298,7 @@ uv run websearch web-search "your query"
 
 One container, nothing installed on the host, and it can route SearXNG's own engine requests through your egress proxy. SearXNG ships ~280 engines but leaves most of them off, so a stock instance answers a general query from about six of them (and on a home connection Brave and Startpage return a CAPTCHA). `searxng.sh engines` probes every engine from your own connection and enables the ones that answer, recording the reason next to each one it skips. Measured here: a general query went from 26 results across 2 engines to 155-240 across 21-29, in 3 to 4 seconds.
 
-The container is kept in its box: config mounted read-only, runtime state in a Docker volume rather than the repo, all capabilities dropped, loopback-only by default, and no secret committed. Torrent trackers and shadow libraries stay out of the default fanout (still queryable by name). Details and the checklist for exposing it beyond localhost are in [`docker/searxng/`](docker/searxng/).
+The container mounts its configuration read-only, stores runtime state in a Docker volume, drops all capabilities, and binds to loopback by default. No secret is committed. Torrent trackers and shadow libraries are excluded from the default engine set but remain queryable by name. See [`docker/searxng/`](docker/searxng/) before exposing it beyond localhost.
 
 Both bind to loopback and turn the JSON API on. The difference is the engine list: the no-Docker path runs upstream defaults (83 engines enabled of 278 here), while the Docker stack's probe enables everything that answers from your own connection (213 of 279 on the same machine, same day). The Docker stack also routes SearXNG's own engine requests through your egress proxy. Use it when you have Docker; use `websearch searxng up` when you do not.
 
@@ -316,24 +316,23 @@ The `nordvpn` shorthand builds the SOCKS5 URL for you from `NORDVPN_USER` and `N
 
 Every network command also takes `--proxy <url|nordvpn|off>`, which overrides the variable for that run, so `--proxy off` gets you a direct connection without unsetting anything. Prefer `socks5h://` over `socks5://`: it resolves DNS through the proxy, so hostnames never hit your local resolver. A per-request `fetch --proxy` still wins over the process-wide default.
 
-**Nothing bypasses it.** With `WEBSEARCH_PROXY` set, every path that leaves the machine goes through it: both fetch tiers, the `ddgs` engines, arXiv, GitHub, and the doctor's own probes. Two consequences that are easy to get wrong and are tested for:
+With `WEBSEARCH_PROXY` set, all outbound paths use it: both fetch tiers, the `ddgs` engines, arXiv, GitHub, and the doctor's probes. Tests cover two important behaviors:
+- **DNS resolution.** With a proxy configured, the SSRF guard does not resolve hostnames locally. `socks5h://` resolves them at the exit node. Literal IPs are still refused without a lookup, including `http://127.0.0.1` and the `169.254.169.254` metadata endpoint.
+- **Failure behavior.** If the proxy is unavailable, every component returns an error instead of retrying over a direct connection. This includes `ddgs` (Rust) and `curl_cffi` (libcurl), which open sockets outside Python.
 
-- **No DNS leak.** The SSRF guard used to resolve every hostname locally before fetching, which showed your resolver, and therefore your ISP, every site you visited while the traffic itself was tunneled. Behind a proxy it no longer resolves: `socks5h://` resolves at the exit node, so the local lookup never decided the route anyway, and skipping it removes the leak. Literal IPs are still refused without any lookup, so `http://127.0.0.1` and the `169.254.169.254` metadata endpoint stay blocked.
-- **Fail closed.** Point the proxy at a dead port and every component errors rather than falling back to a direct connection. That includes the two that open sockets in native code, `ddgs` (Rust) and `curl_cffi` (libcurl), which a Python-level check cannot see.
+The opt-in `websearch doctor --baseline` check makes one direct request to compare the direct and proxied exit IPs. It is disabled by default because it sends the direct IP to an echo service.
 
-The one deliberate exception is opt-in: `websearch doctor --baseline` makes a single direct request to learn your own exit IP so the proxied one can be compared against it. It is off by default, because handing your real address to an echo service while paying for a VPN to hide it is the wrong trade.
-
-With a self-hosted SearXNG there are two hops and the proxy applies to the one that matters. The client's hop to `127.0.0.1` is never proxied, because asking a remote exit node to reach `127.0.0.1` gets you its localhost, not yours. The hop that actually reaches Google and Bing is SearXNG's own, out of the container, and `docker/searxng/searxng.sh up` routes that one through the same `WEBSEARCH_PROXY` (expanding the `nordvpn` shorthand for you). `searxng.sh egress` prints both IPs so you can see it. Set `SEARXNG_OUTGOING_PROXY=off` for direct container egress; a SearXNG on a public address still goes through the proxy on the client hop too.
+A self-hosted SearXNG request has two hops. The client connects directly to local SearXNG at `127.0.0.1`; proxying that address would target the proxy server's localhost. SearXNG then connects to upstream engines from its container, and `docker/searxng/searxng.sh up` routes that hop through `WEBSEARCH_PROXY` (including the `nordvpn` shorthand). `searxng.sh egress` prints both IPs. Set `SEARXNG_OUTGOING_PROXY=off` for direct container egress. A remote SearXNG address still uses the client proxy.
 
 ### VPN
 
-`WEBSEARCH_VPN` does not route anything. It records what you expect, so a tunnel that silently drops fails a check instead of quietly leaking your real IP. `nordvpn` is verified against NordVPN's own keyless connection endpoint, which reports whether the caller is inside their network; `any` only asserts that a tunnel interface is up, because no third party can confirm an arbitrary provider by name. The doctor checks the path the tool actually uses: through the egress proxy when one is set, direct otherwise.
+`WEBSEARCH_VPN` records the expected tunnel state but does not configure routing. If the tunnel drops, the doctor reports a failure. `nordvpn` is verified against NordVPN's keyless connection endpoint, which reports whether the caller is inside its network. `any` checks only for an active tunnel interface because there is no provider-specific endpoint. The doctor checks through the egress proxy when one is set and directly otherwise.
 
 `nordvpn` works on every platform, since it is an HTTP check. `any` reads interface names, which are meaningful on Linux (`tun`, `wg`, `nordlynx`) and macOS (`utun`) but not on Windows, where they look like `ethernet_32770`; there it reports the tunnel as unconfirmed rather than guessing.
 
 ## websearch init
 
-The first thing an agent should run. One call reads the configured env file, starts the local SearXNG (skip it with `--skip-searxng`), then runs the full doctor sweep and answers the question the caller actually has:
+`websearch init` reads the configured env file, starts local SearXNG unless `--skip-searxng` is set, and runs the doctor checks:
 
 ```bash
 uv run websearch init                # bring everything up, then report
@@ -358,13 +357,11 @@ capabilities
 ready: search online (5 of 9 keyless providers + SearXNG, 83 engines); fetch, arxiv, github ok; egress through socks5h://***:***@nl.socks.nordhold.net:1080
 ```
 
-`data.ready` is the flag to wait on. `data.state` is `ready`, `degraded` (search works, something asked for is missing), or `broken` (search does not work); `data.capabilities` says what to use, `data.next_actions` says what to do about the rest, and the whole doctor payload rides along in `data.doctor`, so nothing needs a second call. Exit code is 0 when search works and 1 only when it does not, so a `degraded` run does not read as a failure.
-
-It exists because the alternative is an agent probing the install by hand: twenty shell calls, a wrong conclusion, and a lot of tokens spent to learn what one command measures.
+Wait for `data.ready`. `data.state` is `ready`, `degraded` (search works but a requested capability is missing), or `broken` (search does not work). `data.capabilities` lists available commands, `data.next_actions` lists remediation steps, and `data.doctor` contains the full diagnostic payload. The exit code is 0 when search works, including a `degraded` result, and 1 when it does not.
 
 ## websearch doctor
 
-One command that says what works right now, capability by capability:
+`websearch doctor` checks current capability and provider status:
 
 ```bash
 uv run websearch doctor                          # everything
@@ -375,7 +372,7 @@ uv run websearch doctor --json                   # the same run as an Envelope
 
 It prints the three optional layers' state, then checks Python and the dependency closure, direct internet and the exit IP, the egress proxy and whether the exit IP actually moved, the declared VPN, a self-hosted SearXNG (health, active engine count, live JSON query), each `ddgs` provider on its own, arXiv and GitHub, and both fetch tiers. Exit code is 1 only when something failed: an optional layer that is off is skipped, and one rate-limited provider is a warning. Proxy credentials never reach the output, including inside HTTP client error text.
 
-The part worth having is the cross-check. `ddgs` reports "No results found" for a CAPTCHA, for a rate limit, and for an HTTP 200 whose markup its parser no longer reads, and those need opposite fixes. With SearXNG running, the doctor asks it about exactly the providers that went quiet, and SearXNG's scrapers are maintained separately:
+The SearXNG cross-check helps classify `ddgs` failures. `ddgs` reports "No results found" for CAPTCHAs, rate limits, and successful responses whose markup its parser cannot read. With SearXNG running, the doctor queries the same provider through SearXNG's separately maintained scraper:
 
 ```
 warn  engine:ddgs:google     No results found. (SearXNG reached it: 260 results)
@@ -384,14 +381,14 @@ warn  engine:ddgs:startpage  No results found. (SearXNG got nothing from it eith
                              -> startpage is refusing this IP. Only a different egress exit changes that.
 ```
 
-Two runs on one home connection in July 2026, minutes apart, over the nine `ddgs` providers: Brave, Yahoo, and Yandex answered both times. Google and Mojeek were silent through `ddgs` both times and returned 181 and 10 results through SearXNG, so `ddgs` cannot read their pages any more. Startpage and Wikipedia were empty in both parsers, which is a block, not a parser. DuckDuckGo and Grokipedia flipped between the two runs, and moving the client onto NordVPN's shared SOCKS exit cost one more provider. None of that is stable enough to write into a table, which is why it is a command.
+Two runs on one home connection in July 2026, minutes apart, produced different results across the nine `ddgs` providers. Brave, Yahoo, and Yandex answered both times. Google and Mojeek were silent through `ddgs` but returned 181 and 10 results through SearXNG, indicating `ddgs` parser failures. Startpage and Wikipedia were empty through both paths, indicating a block. DuckDuckGo and Grokipedia changed between runs, and NordVPN's shared SOCKS exit lost one additional provider. Run the doctor for current results.
 
 ## Security
 
-A fetch tool an agent can point anywhere is an SSRF and prompt-injection surface, so:
+Fetch accepts arbitrary URLs and page content, so it includes SSRF and prompt-injection controls:
 
 - **SSRF guard (built):** fetch enforces an http(s) scheme allowlist and resolves every host, refusing private, loopback, link-local (the `169.254.169.254` cloud-metadata endpoint), reserved, and multicast addresses. Redirects are followed manually with the same check on each hop, so a public URL cannot redirect into the internal network. Override per request with `--allow-private-hosts` for deliberate internal fetches.
-- **Untrusted content (built, Layer 3):** fetched page text is untrusted input and is never presented as instructions. `web_fetch` and `web_open` wrap each page in a fence built from the 2026 primary-source guidance: a per-instance 128-bit random nonce in the open and close markers (so injected text cannot forge the close), a data-only directive, and neutralization of any copy of the marker inside the body, with optional datamarking (`--datamark`) for higher resistance. This reduces, but does not eliminate, indirect prompt injection: it prevents the boundary breakout, not persuasion. The real guarantees are channel separation (page text reaches the model as tool output, never as a turn), least privilege, and cutting exfiltration paths. The lower-level `fetch` command still returns the clean body unmodified, so piping and composition stay clean.
+- **Untrusted content (built, Layer 3):** fetched page text is never presented as instructions. `web_fetch` and `web_open` wrap each page in a fence based on 2026 primary-source guidance: a per-instance 128-bit random nonce in the opening and closing markers, a data-only directive, and neutralization of marker copies inside the body. Optional datamarking (`--datamark`) adds resistance. The fence prevents boundary breakout but cannot prevent persuasion. Tool-output separation, least privilege, and blocked exfiltration paths are still required. The lower-level `fetch` command returns the extracted body without the fence for piping and composition.
 
 ## Architecture
 
@@ -399,29 +396,29 @@ Each layer is a folder with a port (a capability-named interface) and one or mor
 
 ## The 7-axis scorecard
 
-Rather than a single claim that it is better, here is how I measure it, axis by axis, including where it is only at parity or behind:
+The scorecard separates retrieval quality, cost, latency, and operational limits:
 
 | Axis | This tool | Notes |
 |---|---|---|
-| Retrieval quality | At top-tier parity on the common case | 2026 leaders are statistically tied on quality |
+| Retrieval quality | Comparable to leading APIs for common queries | 2026 leaders are statistically tied on quality |
 | Freshness | On-demand recency filter | per-engine, best-effort |
 | Extraction recall / noise | Competitive (Trafilatura ~0.79 F1, articles ~0.93) | heuristic beats neural on quality and cost |
-| Anti-bot success | About 70 to 90% without paid proxies | near-cloud with a plugged-in residential adapter |
-| End-to-end latency | The unprotected common case (where leaders actually differ) | multi-engine + fuse adds some cost |
+| Anti-bot success | About 70 to 90% without paid proxies | protected sites require residential egress |
+| End-to-end latency | Varies with responsive engines | multi-engine fanout and fusion add latency |
 | Cost | About zero at the software layer | infra documented separately |
 | Citation accuracy | Source-anchored, deduped results | no fabricated URLs |
 
-Top agentic-search APIs are tied on quality, and hard anti-bot at scale is irreducibly paid (even Firecrawl scores about 34% on independently tested protected sites). This project concedes the protected long tail to a swappable paid egress adapter and does not claim to beat everything. The built-in proxy egress is scoped to search geo-targeting and rate-limit rotation, not anti-bot for page fetches (commercial VPNs use datacenter IPs that anti-bot systems flag); the paid residential adapter for the long tail is the planned piece.
+Protected sites usually require paid residential egress (even Firecrawl scores about 34% on independently tested protected sites). The built-in proxy supports search geo-targeting and rate-limit rotation. It does not bypass page-level anti-bot systems because commercial VPNs use datacenter IPs that those systems commonly flag. A residential egress adapter is planned.
 
 ## Benchmark
 
-A same-query, same-moment head-to-head against the web search built into Claude Code (a hosted, paid baseline) is written up in [`docs/BENCHMARK.md`](docs/BENCHMARK.md), with the exact commands so you can rerun it. The short version: on finding relevant, fresh pages the two are comparable; this tool adds clean on-demand extraction, multi-engine fusion, the `arxiv` and `github` tools, and runs free and locally, while the hosted search is frictionless and writes a summary in one call. It wins on cost, privacy, and control; on raw retrieval the gap is small.
+[`docs/BENCHMARK.md`](docs/BENCHMARK.md) compares the same queries at the same time against the hosted web search in Claude Code and includes commands for reproduction. Both found comparable relevant and recent pages. This project adds local extraction, multi-engine fusion, and the `arxiv` and `github` commands; the hosted search returns a summary in one call.
 
 ## Roadmap
 
-Built: harness packaging ships the `SKILL.md` plus the bundled tool via `npx skills add`, a Claude Code plugin and marketplace, and PyPI/uvx, with per-harness install routes documented in [`docs/INSTALL.md`](docs/INSTALL.md).
+Current distribution options include `npx skills add`, a Claude Code plugin and marketplace, and PyPI/uvx. See [`docs/INSTALL.md`](docs/INSTALL.md) for each supported agent.
 
-Also built: the opt-in egress proxy (`WEBSEARCH_PROXY`, `--proxy`, NordVPN shorthand) covering every network path.
+The opt-in egress proxy (`WEBSEARCH_PROXY`, `--proxy`, NordVPN shorthand) covers every outbound network path.
 
 Planned, not built yet:
 
