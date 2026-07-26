@@ -60,7 +60,6 @@ BASE_DEPENDENCIES = (
     ("ddgs", "the keyless search engines"),
     ("trafilatura", "HTML to Markdown extraction"),
     ("curl_cffi", "the browser-impersonation fetch tier"),
-    ("fastmcp", "the MCP server"),
     ("pydantic", "every contract model"),
 )
 
@@ -226,32 +225,6 @@ def probe_dependencies() -> Outcome:
         )
     listed = ", ".join(f"{k} {v}" for k, v in found.items())
     return Outcome(OK, listed, detail)
-
-
-def probe_mcp() -> Outcome:
-    """Can the MCP face start, and does it register the tools it advertises?"""
-    import asyncio
-
-    try:
-        from ..layer3_agentio import mcp_server
-    except Exception as exc:
-        return Outcome(
-            FAIL,
-            f"the MCP server does not import: {_err(exc)}",
-            {},
-            hint="fastmcp ships in the base install; reinstall with uv sync.",
-        )
-    try:
-        tools = asyncio.run(mcp_server.mcp.list_tools())
-        names = sorted(t.name for t in tools)
-    except Exception as exc:
-        return Outcome(
-            WARN,
-            f"the MCP server imports but its tools could not be listed: {_err(exc)}",
-            {},
-            hint="Start it directly to see the real error: websearch mcp",
-        )
-    return Outcome(OK, f"{len(names)} tools: {', '.join(names)}", {"tools": names})
 
 
 # --- egress -------------------------------------------------------------------------

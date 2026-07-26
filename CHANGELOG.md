@@ -6,6 +6,58 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-25
+
+### Removed
+
+- **The MCP server.** `websearch mcp`, the `fastmcp` dependency, the `[mcp]` extra, the
+  root `.mcp.json`, the registry manifest `server.json`, and the per-harness registration
+  in `docs/INSTALL.md` are gone. The CLI plus the skill is the whole surface.
+
+  The reason is that a resident server is the wrong shape for the two optional layers this
+  tool leans on. An MCP server reads its configuration once at startup and builds its
+  engine fanout once, on the first search. `websearch searxng up` runs in a different,
+  short-lived process: it starts SearXNG and writes `WEBSEARCH_SEARXNG_URL` into the env
+  file, which cannot reach into the memory of a server that is already running. The server
+  kept searching on the keyless engines only, returned `all_engines_failed` when those were
+  blocked, and had no honest way to say why. `WEBSEARCH_PROXY` had the same problem. A
+  process per command reads the env file, the proxy, and the SearXNG URL fresh every time,
+  so a setting takes effect on the next command instead of the next restart.
+
+  If you registered `uvx websearch-skill mcp` with a client, install the skill instead
+  (`npx skills add hec-ovi/websearch-skill`): the agent gets the same capabilities through
+  its own shell.
+
+- The doctor's `mcp` check and its `mcp` group, with it. That is a breaking contract
+  change, so `doctor` goes to **2.0.0** (an enum member was removed).
+
+### Added
+
+- **`websearch init`: one call that brings everything online and says what works.** It
+  reads the configured env file, starts the local SearXNG (`--skip-searxng` opts out),
+  points this process at it, then runs the full doctor sweep. The response answers the
+  question directly: `data.ready` (the flag to wait on), `data.state`
+  (`ready`/`degraded`/`broken`), `data.capabilities` (per capability: `ok`, `degraded`,
+  `down`, `off`, or `unknown`), `data.engines`, `data.next_actions`, and the whole doctor
+  payload in `data.doctor` so nothing needs a second call. Exit code is 0 when search
+  works and 1 only when it does not, so a degraded run does not read as a failure. Over
+  the new `init@1.0.0` contract.
+
+  It exists because the alternative is an agent probing the install by hand: twenty shell
+  calls, a wrong conclusion drawn from a half-configured environment, and a lot of tokens
+  spent to learn what one command measures. The skill now tells the agent to run it once
+  at the start of a session and to read three fields.
+
+### Changed
+
+- **The page index behind `web-open` persists by default.** With no resident process to
+  hold it, an in-memory store made `web-open` unusable across commands: the handle
+  `web-fetch` had just returned resolved to nothing. It now writes to the tool's state
+  directory (beside `WEBSEARCH_ENV_FILE`, else the XDG cache; `WEBSEARCH_STATE_DIR`
+  overrides), so `web-fetch` then `web-open` works with no flags on either side. Pass
+  `--persist-path off` (or `WEBSEARCH_PERSIST_PATH=off`) to keep a run in memory and leave
+  nothing on disk.
+
 ## [0.2.6] - 2026-07-25
 
 ### Added

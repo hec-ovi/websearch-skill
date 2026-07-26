@@ -246,19 +246,23 @@ def test_store_total_reflects_true_match_count_beyond_top_k():
     assert res.total >= 6  # but total is the honest match count, not the capped pool
 
 
-# --- mcp-2: a tool whose body raises returns a clean internal_error -------------------
+# --- a command whose body raises returns a clean internal_error ----------------------
 
 
-def test_mcp_tool_internal_error_is_clean(monkeypatch):
-    pytest.importorskip("fastmcp")
-    from websearch.layer3_agentio import mcp_server
+def test_command_internal_error_is_clean(monkeypatch, capsys):
+    import json
+
+    from websearch import cli
 
     class _Boom:
         def web_open(self, req):
             raise RuntimeError("store exploded")
 
-    monkeypatch.setattr(mcp_server, "_AGENT", _Boom())
-    out = mcp_server.web_open(handle="x.test~deadbeefdead", page=1)
+    monkeypatch.setattr("websearch.cli.build_agent_io", lambda **kwargs: _Boom())
+    rc = cli.main(["web-open", "x.test~deadbeefdead", "--json"])
+    assert rc == 1
+    out = json.loads(capsys.readouterr().out)
     assert out["ok"] is False
     assert out["error"]["code"] == errors.INTERNAL_ERROR
     assert "store exploded" in out["error"]["message"]
+    assert "Traceback" not in out["error"]["message"]

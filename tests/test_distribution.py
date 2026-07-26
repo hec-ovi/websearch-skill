@@ -2,9 +2,9 @@
 
 These validate the packaging and harness manifests so the install routes documented in
 ``docs/INSTALL.md`` cannot silently rot: every manifest parses, the versions stay in
-lockstep, the launch strings reference real CLI subcommands, the MCP-registry PyPI-ownership
-marker matches ``server.json``, the release workflow uses tokenless Trusted Publishing, and
-no doc carries a Unicode em/en dash.
+lockstep, the launch strings reference real CLI subcommands, no MCP surface creeps back
+in, the release workflow uses tokenless Trusted Publishing, and no doc carries a Unicode
+em/en dash.
 """
 
 from __future__ import annotations
@@ -35,11 +35,15 @@ def _version() -> str:
 # --- packaging -------------------------------------------------------------------------
 
 
-def test_fastmcp_is_a_base_dependency():
-    # The MCP-registry runner and bare `uvx websearch-skill mcp` cannot pass an extra, so
-    # fastmcp must be a base dependency, not only the back-compat [mcp] extra.
-    deps = _pyproject()["project"]["dependencies"]
-    assert any(d.replace("_", "-").lower().startswith("fastmcp") for d in deps), deps
+def test_no_mcp_dependency_or_extra_remains():
+    # 0.3.0 dropped the MCP face: the CLI is the only surface. fastmcp must not come back
+    # as a dependency or an extra, and nothing may declare an [mcp] install route.
+    project = _pyproject()["project"]
+    deps = project["dependencies"] + [
+        d for group in project.get("optional-dependencies", {}).values() for d in group
+    ]
+    assert not [d for d in deps if "mcp" in d.replace("_", "-").lower()], deps
+    assert "mcp" not in project.get("optional-dependencies", {})
 
 
 def test_both_console_scripts_point_at_the_cli():
@@ -61,7 +65,9 @@ def test_sdist_uses_an_allowlist_that_excludes_local_state():
 # --- launch strings reference real subcommands -----------------------------------------
 
 
-@pytest.mark.parametrize("subcommand", ["mcp", "web-search", "web-fetch", "web-open"])
+@pytest.mark.parametrize(
+    "subcommand", ["init", "doctor", "searxng", "web-search", "web-fetch", "web-open"]
+)
 def test_manifest_launch_subcommands_exist(subcommand):
     # argparse prints help and exits 0 for a real subcommand, before any dispatch/server.
     with pytest.raises(SystemExit) as exc:
@@ -69,10 +75,14 @@ def test_manifest_launch_subcommands_exist(subcommand):
     assert exc.value.code == 0
 
 
-def test_root_mcp_json_launches_the_stdio_server():
-    server = _json(".mcp.json")["mcpServers"]["web-search"]
-    assert server["command"] == "uvx"
-    assert server["args"] == ["websearch-skill", "mcp"]
+def test_no_mcp_surface_ships():
+    # The stdio server, the client config that launched it, and the registry manifest all
+    # went with 0.3.0. A file coming back means half a face returned with it.
+    for gone in (".mcp.json", "server.json", "src/websearch/layer3_agentio/mcp_server.py"):
+        assert not (ROOT / gone).exists(), gone
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["mcp", "--help"])
+    assert exc.value.code != 0  # argparse: invalid choice
 
 
 # --- Claude plugin + marketplace -------------------------------------------------------
@@ -96,40 +106,6 @@ def test_claude_marketplace_manifest():
     assert (ROOT / ".claude-plugin" / "plugin.json").is_file()
 
 
-# --- MCP registry server.json ----------------------------------------------------------
-
-
-def test_server_json_shape_and_pypi_mapping():
-    srv = _json("server.json")
-    # reverse-DNS name, exactly one slash, GitHub namespace for the hec-ovi owner.
-    assert srv["name"] == "io.github.hec-ovi/web-search"
-    assert srv["name"].count("/") == 1
-    assert srv["$schema"].startswith("https://static.modelcontextprotocol.io/schemas/")
-    (pkg,) = srv["packages"]
-    assert pkg["registryType"] == "pypi"
-    assert pkg["identifier"] == _pyproject()["project"]["name"]  # websearch-skill
-    assert pkg["runtimeHint"] == "uvx"
-    assert pkg["transport"]["type"] == "stdio"
-    # the runner appends the positional subcommand -> `uvx websearch-skill mcp`
-    args = pkg.get("packageArguments", [])
-    assert any(a.get("type") == "positional" and a.get("value") == "mcp" for a in args)
-
-
-def test_server_json_text_fields_within_registry_limits():
-    # The 2025-12-11 registry schema caps description and title at maxLength 100; a longer
-    # value is rejected at publish time. Guard both.
-    srv = _json("server.json")
-    assert 1 <= len(srv["description"]) <= 100, len(srv["description"])
-    assert 1 <= len(srv.get("title", "x")) <= 100
-
-
-def test_server_json_keys_are_camelcase_not_snake_case():
-    # the registry rejects snake_case; guard against a regression to registry_type etc.
-    raw = (ROOT / "server.json").read_text(encoding="utf-8")
-    for forbidden in ("registry_type", "runtime_hint", "package_arguments", "website_url"):
-        assert forbidden not in raw
-
-
 # --- version lockstep ------------------------------------------------------------------
 
 
@@ -139,27 +115,13 @@ def test_all_manifest_versions_match_pyproject():
     v = _version()
     plugin = _json(".claude-plugin/plugin.json")
     mkt = _json(".claude-plugin/marketplace.json")
-    srv = _json("server.json")
     assert plugin["version"] == v
     assert mkt["metadata"]["version"] == v
     assert mkt["plugins"][0]["version"] == v
-    assert srv["version"] == v
-    assert srv["packages"][0]["version"] == v
     # __version__ is derived from the installed distribution metadata; if it reports a
     # different version than pyproject, the environment is stale (re-sync) or the
     # derivation broke. It must never be a hardcoded string again.
     assert websearch.__version__ == v
-
-
-# --- MCP registry PyPI-ownership marker ------------------------------------------------
-
-
-def test_readme_carries_the_mcp_name_marker_matching_server_json():
-    # The registry proves PyPI ownership by finding `mcp-name: <server name>` in the
-    # published README (which is the PyPI long description). It must match server.json.
-    name = _json("server.json")["name"]
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    assert f"mcp-name: {name}" in readme
 
 
 # --- release workflow uses tokenless Trusted Publishing --------------------------------
@@ -194,8 +156,6 @@ def test_no_em_or_en_dashes_in_docs_and_manifests():
     for pattern in ("*.md", "docs/*.md", "contracts/*.md", "skills/**/SKILL.md", "docker/**/*.md"):
         targets.extend(ROOT.glob(pattern))
     targets += [
-        ROOT / ".mcp.json",
-        ROOT / "server.json",
         ROOT / ".claude-plugin" / "plugin.json",
         ROOT / ".claude-plugin" / "marketplace.json",
         ROOT / ".github" / "workflows" / "release.yml",

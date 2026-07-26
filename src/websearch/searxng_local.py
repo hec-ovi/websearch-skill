@@ -117,18 +117,17 @@ class Paths:
 def home_dir() -> Path:
     """Where the checkout, the venv, and the runtime state live.
 
-    An explicit ``WEBSEARCH_SEARXNG_HOME`` wins. Otherwise the state goes beside the env
-    file the tool was pointed at, so a container that mounts its config directory keeps
-    the install across runs; with no env file, the XDG cache is the fallback.
+    An explicit ``WEBSEARCH_SEARXNG_HOME`` wins; otherwise it is a ``searxng`` directory
+    in the tool's state directory (see ``state.state_dir``), which is beside the
+    configured env file when there is one, so a container that mounts its config
+    directory keeps the install across runs.
     """
     explicit = os.environ.get(HOME_VAR)
     if explicit:
         return Path(explicit).expanduser().resolve()
-    env_file = os.environ.get(ENV_FILE_VAR)
-    if env_file:
-        return (Path(env_file).expanduser().resolve().parent / "searxng").resolve()
-    cache = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
-    return (Path(cache) / "websearch" / "searxng").resolve()
+    from .state import state_dir
+
+    return (state_dir() / "searxng").resolve()
 
 
 def port() -> int:

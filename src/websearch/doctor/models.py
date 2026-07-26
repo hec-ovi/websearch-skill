@@ -6,10 +6,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-DOCTOR_CONTRACT_VERSION = "1.1.0"
+DOCTOR_CONTRACT_VERSION = "2.0.0"
 
 Status = Literal["ok", "warn", "fail", "skipped"]
-Group = Literal["runtime", "egress", "vpn", "searxng", "engines", "tools", "fetch", "mcp"]
+Group = Literal["runtime", "egress", "vpn", "searxng", "engines", "tools", "fetch"]
 
 OK = "ok"
 WARN = "warn"
@@ -26,7 +26,6 @@ GROUP_ORDER: tuple[Group, ...] = (
     "engines",
     "tools",
     "fetch",
-    "mcp",
 )
 
 DEFAULT_QUERY = "rust ownership"

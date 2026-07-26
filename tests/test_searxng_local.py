@@ -478,27 +478,6 @@ def test_an_off_contract_request_is_refused(bad):
         sx.SearxngRequest(**bad)
 
 
-def test_the_mcp_tool_and_the_cli_share_one_path(monkeypatch, tmp_path, free_port, assert_valid):
-    """Two faces, one implementation: whatever the CLI reports, the MCP tool reports."""
-    from websearch.layer3_agentio import mcp_server
-
-    monkeypatch.setenv(sx.HOME_VAR, str(tmp_path))
-    monkeypatch.setenv(sx.PORT_VAR, str(free_port))
-    envelope = mcp_server.searxng_setup(action="status")
-
-    assert_valid(envelope, ENVELOPE_REF)
-    assert envelope["meta"]["layer"] == "searxng"
-    assert envelope["data"] == sx.control(sx.SearxngRequest(action="status")).data
-
-
-def test_the_mcp_tool_refuses_an_unknown_action():
-    from websearch.layer3_agentio import mcp_server
-
-    envelope = mcp_server.searxng_setup(action="explode")
-    assert envelope["ok"] is False
-    assert envelope["error"]["code"] == "invalid_request"
-
-
 def test_down_with_nothing_running_says_so_and_succeeds(capsys, monkeypatch, tmp_path):
     monkeypatch.setenv(sx.HOME_VAR, str(tmp_path))
     assert main(["searxng", "down"]) == 0

@@ -216,23 +216,6 @@ def test_cli_github_invalid_per_page(capsys):
     assert out["error"]["code"] == errors.INVALID_REQUEST
 
 
-def test_mcp_github_search(monkeypatch):
-    import pytest
-
-    pytest.importorskip("fastmcp")
-    from websearch.layer3_agentio import mcp_server
-
-    monkeypatch.setattr(mcp_server, "_GITHUB", build_github_tool(http_get=_static_get(BODY)))
-    out = mcp_server.github_search(query="fastapi", per_page=2)
-    assert out["ok"] is True
-    assert out["meta"]["layer"] == "github"
-    assert out["data"]["repos"][0]["full_name"] == "tiangolo/fastapi"
-
-    bad = mcp_server.github_search(query="x", per_page=999)
-    assert bad["ok"] is False
-    assert bad["error"]["code"] == errors.INVALID_REQUEST
-
-
 def test_cli_github_rate_limited_exit_1(monkeypatch, capsys):
     monkeypatch.setattr(
         cli_mod,

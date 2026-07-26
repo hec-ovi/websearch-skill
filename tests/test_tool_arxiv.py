@@ -245,21 +245,6 @@ def test_cli_arxiv_rate_limited_exit_1(monkeypatch, capsys):
     assert out["error"]["code"] == errors.RATE_LIMITED
 
 
-def test_mcp_arxiv_search(monkeypatch):
-    pytest.importorskip("fastmcp")
-    from websearch.layer3_agentio import mcp_server
-
-    monkeypatch.setattr(mcp_server, "_ARXIV", build_arxiv_tool(http_get=_static_get(ATOM)))
-    out = mcp_server.arxiv_search(query="transformers", max_results=2)
-    assert out["ok"] is True
-    assert out["meta"]["layer"] == "arxiv"
-    assert len(out["data"]["papers"]) == 2
-
-    bad = mcp_server.arxiv_search(query="x", max_results=9999)
-    assert bad["ok"] is False
-    assert bad["error"]["code"] == errors.INVALID_REQUEST
-
-
 @pytest.mark.parametrize("field", ["title", "author", "abstract"])
 def test_cli_arxiv_field_passthrough(monkeypatch, capsys, field):
     record: list = []

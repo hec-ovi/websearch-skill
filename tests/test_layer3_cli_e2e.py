@@ -1,6 +1,6 @@
 """End-to-end Layer 3 through the real CLI entry point.
 
-web-search / web-fetch / web-open / mcp, with the engine boundary faked (ddgs) or mocked
+web-search / web-fetch / web-open, with the engine boundary faked (ddgs) or mocked
 (SearXNG via pytest-httpx) and the fetch boundary stubbed (pytest-httpx). Output is
 validated against the agent-io response contract.
 """
@@ -112,9 +112,21 @@ def test_cli_web_open_unknown_handle_is_error(capsys):
 
 def test_cli_more_hint_carries_a_nondefault_page_size(httpx_mock, capsys):
     # The suggested next-page command must reproduce the same pagination geometry, or it
-    # would silently skip content fetched with a non-default page size.
+    # would silently skip content fetched with a non-default page size. web-fetch persists
+    # to the default store, so the suggestion is a web-open with no path to repeat.
     httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
     rc = cli.main(["web-fetch", FETCH_URL, "--page-size-tokens", "20"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "--page 2 --page-size-tokens 20)" in out
+    assert "(more: web-open " in out
+    assert "--persist-path" not in out
+
+
+def test_cli_more_hint_without_a_store_can_only_suggest_a_refetch(httpx_mock, capsys):
+    # --persist-path off leaves nothing on disk, so the handle cannot be reopened later.
+    httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
+    rc = cli.main(["web-fetch", FETCH_URL, "--page-size-tokens", "20", "--persist-path", "off"])
     assert rc == 0
     out = capsys.readouterr().out
     assert f'(more: web-fetch "{FETCH_URL}" --page 2 --page-size-tokens 20)' in out
@@ -170,16 +182,3 @@ def test_cli_proxy_config_error_carries_the_commands_contract_version(monkeypatc
     env = json.loads(capsys.readouterr().out)
     assert env["error"]["code"] == "invalid_request"
     assert env["contract_version"] == ARXIV_CONTRACT_VERSION
-
-
-def test_cli_mcp_command_without_fastmcp_is_actionable(monkeypatch, capsys):
-    # Simulate the optional dependency being absent: the import helper raises ImportError,
-    # and the command must surface an actionable error, not a traceback or a blocking run.
-    def boom():
-        raise ImportError("No module named 'fastmcp'")
-
-    monkeypatch.setattr(cli, "_load_mcp_server", boom)
-    rc = cli.main(["mcp"])
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "dependency_missing" in err and "fastmcp" in err

@@ -1,14 +1,12 @@
-"""Layer 3 facade + MCP server: web_search / web_fetch / web_open.
+"""Layer 3 facade: web_search / web_fetch / web_open.
 
 Drives the real AgentIO with the engine boundary faked (ddgs) and the fetch boundary
 stubbed (pytest-httpx). Validates the agent-io response contract, the fence, lossless
-pagination, handle resolution (in-process and from a persisted store), and the FastMCP
-tool registration + dispatch.
+pagination, and handle resolution (in-process and from a persisted store).
 """
 
 from __future__ import annotations
 
-import asyncio
 import threading
 from datetime import datetime
 
@@ -369,42 +367,3 @@ def test_fetch_many_all_fail_preserves_the_cause(agent, httpx_mock):
     assert not env.ok and env.error.code == "fetch_failed"
     # The specific per-URL reason survives, not a generic "all 1 url(s) failed".
     assert "dead.test" in env.error.message
-
-
-# --- MCP server --------------------------------------------------------------------
-
-
-@pytest.fixture
-def mcp_with_agent(agent):
-    """Injects the faked AgentIO into the MCP module and restores the previous singleton,
-    so no test leaks a module-global _AGENT into the rest of the session."""
-    pytest.importorskip("fastmcp")
-    from websearch.layer3_agentio import mcp_server
-
-    prev = mcp_server._AGENT
-    mcp_server.set_agent(agent)
-    yield mcp_server
-    mcp_server._AGENT = prev
-
-
-def test_mcp_server_registers_and_dispatches(httpx_mock, mcp_with_agent):
-    mcp_server = mcp_with_agent
-    httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
-
-    async def check():
-        for name in ("web_search", "web_fetch", "web_open"):
-            tool = await mcp_server.mcp.get_tool(name)
-            assert tool is not None and tool.name == name
-        result = await mcp_server.mcp.call_tool("web_fetch", {"url": FETCH_URL})
-        structured = getattr(result, "structured_content", None) or getattr(result, "data", None)
-        assert structured and structured["ok"]
-        assert structured["meta"]["layer"] == "agentio"
-        assert structured["data"]["pages"][0]["untrusted"] is True
-
-    asyncio.run(check())
-
-
-def test_mcp_tool_invalid_argument_returns_error_envelope(mcp_with_agent):
-    out = mcp_with_agent.web_search(query="x", detail="not-a-mode")
-    assert out["ok"] is False
-    assert out["error"]["code"] == "invalid_request"

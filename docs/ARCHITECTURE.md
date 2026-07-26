@@ -9,7 +9,7 @@ its contract, regardless of language or process.
 ## Layers
 
 ```
-        Layer 3  AGENT I/O   CLI-first core (+ bundled MCP stdio adapter)
+        Layer 3  AGENT I/O   one CLI core, driven by the skill
                    |   web_search / web_fetch / web_open(resolve)
                    |   doc_handle is the only cross-layer key
        +-----------+------------------------+
@@ -28,10 +28,11 @@ its contract, regardless of language or process.
 ```
 
 Status: Layers 1 (search), 2A (fetch + extract), 2B (format + store), and 3 (agent I/O,
-including the untrusted-content fence, the FastMCP server, and `SKILL.md`) are implemented,
-plus two standalone keyless tools (`arxiv`, `github`). Harness packaging is also built:
-the `skills/` directory, the Claude Code plugin manifests, the MCP registry `server.json`,
-and the PyPI release workflow all ship in this repo (see `docs/INSTALL.md`).
+including the untrusted-content fence and `SKILL.md`) are implemented, plus two standalone
+keyless tools (`arxiv`, `github`), the `doctor` self-test, the local SearXNG lifecycle, and
+`init` (one call that brings the whole tool online and reports what works). Harness
+packaging is also built: the `skills/` directory, the Claude Code plugin manifests, and the
+PyPI release workflow all ship in this repo (see `docs/INSTALL.md`).
 
 ## Ports and adapters
 
@@ -175,24 +176,29 @@ so each fetched page is wrapped in a fence built from the 2026 primary-source gu
 per-instance 128-bit random nonce in the open and close markers (so injected text cannot forge the
 close), a data-only directive, and neutralization of any in-body copy of the marker, with optional
 datamarking. This is an input-layer mitigation: it prevents the boundary breakout, not persuasion,
-and does not eliminate indirect prompt injection. The real guarantees are channel separation (the
-MCP face delivers content through the tool-result channel, which models are trained to distrust),
+and does not eliminate indirect prompt injection. The real guarantees are channel separation (page text
+reaches the model as tool output rather than as a turn, which models are trained to distrust),
 least privilege, and cutting exfiltration paths.
 
-**Faces.** One core, three faces over identical payloads: the `websearch web-search` / `web-fetch`
-/ `web-open` CLI; a FastMCP stdio server (`websearch mcp`, bundled in the base install) whose tools
-return the same Envelope JSON the CLI emits; and a portable `SKILL.md` (Agent Skills standard, name
-plus description) documenting the command grammar so a non-MCP agent can drive the CLI by shell and
-read stdout. The lower-level `search` / `fetch` / `open` commands remain as the per-layer surfaces
-for debugging and composition.
+**One face.** The `websearch` CLI is the whole surface, and a portable `SKILL.md` (Agent Skills
+standard, name plus description) documents the command grammar so an agent drives it by shell and
+reads stdout. 0.3.0 removed the second face, a FastMCP stdio server: a long-lived server reads its
+configuration once and caches its engine fanout, so a SearXNG or a proxy configured afterwards was
+invisible to it until the client restarted the server, which is the opposite of what the optional
+layers need. A process per command reads the environment fresh every time. The lower-level `search`
+/ `fetch` / `open` commands remain as the per-layer surfaces for debugging and composition.
+
+**Bring-up.** Because state lives in the environment and on disk rather than in a resident process,
+something has to establish it. `init` (contract `init@1.0.0`) is that step: read the env file, start
+the local SearXNG, run the doctor sweep, and return one `ready` flag plus a capability map, so an
+agent asks once instead of probing the installation by hand.
 
 ## Extra tools: arxiv and github
 
 Two standalone keyless tools sit beside the pipeline, not inside it, behind their own
 contracts (`arxiv`, `github`). They are not search engines that feed RRF fusion (their
 results are domain-specific: papers, repositories), so they keep their own shapes and
-emit the same `Envelope` (meta.layer `arxiv` / `github`) consumed uniformly by the CLI
-and MCP faces. `arxiv` queries the official export.arxiv.org Atom API (GET, with 429
+emit the same `Envelope` (meta.layer `arxiv` / `github`) the CLI consumes uniformly. `arxiv` queries the official export.arxiv.org Atom API (GET, with 429
 backoff); `github` queries the unauthenticated GitHub REST search API (repository search
 only, with clean rate-limit handling). Both inject their HTTP boundary, so tests feed
 canned responses. They exist because a self-hosted SearXNG would also cover these via its

@@ -332,7 +332,7 @@ def test_injected_http_get_is_not_wrapped(monkeypatch):
     assert env.ok and calls  # the injected transport ran untouched
 
 
-# --- entry points: CLI and MCP ------------------------------------------------------
+# --- entry point: the CLI -----------------------------------------------------------
 
 
 def test_cli_web_search_passes_env_proxy_to_builder(monkeypatch, capsys):
@@ -371,14 +371,18 @@ def test_cli_nordvpn_without_creds_is_clean_invalid_request(capsys):
     assert "Traceback" not in err
 
 
-def test_mcp_safe_maps_proxy_config_error_to_invalid_request():
-    from websearch.layer3_agentio import mcp_server
-    from websearch.layer3_agentio.models import AGENTIO_CONTRACT_VERSION
+def test_a_proxy_config_error_escaping_a_command_is_mapped_to_invalid_request(monkeypatch, capsys):
+    import json
 
-    def boom():
+    # main()'s ProxyConfigError arm: a misconfigured proxy that only surfaces deep in a
+    # command is the caller's environment, not an internal failure.
+    def boom(**kwargs):
         raise ProxyConfigError("proxy 'nordvpn' needs NORDVPN_USER and NORDVPN_PASS")
 
-    out = mcp_server._safe(boom, contract=AGENTIO_CONTRACT_VERSION, layer="agentio", backend="ddgs")
-    assert out["ok"] is False
-    assert out["error"]["code"] == "invalid_request"
-    assert "NORDVPN_USER" in out["error"]["message"]
+    monkeypatch.setattr("websearch.cli.build_agent_io", boom)
+    rc = cli.main(["web-search", "q", "--json"])
+    assert rc == 1
+    env = json.loads(capsys.readouterr().out)
+    assert env["ok"] is False
+    assert env["error"]["code"] == "invalid_request"
+    assert "NORDVPN_USER" in env["error"]["message"]

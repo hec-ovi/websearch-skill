@@ -175,27 +175,17 @@ def test_a_missing_env_file_is_not_an_error(tmp_path):
     assert load_env_file(str(tmp_path / "nope.env")) == []
 
 
-def test_both_entry_points_read_the_env_file(tmp_path, monkeypatch):
-    """`websearch mcp` and `fastmcp run mcp_server.py:mcp` must behave the same."""
+def test_the_cli_reads_the_env_file(tmp_path, monkeypatch):
+    """Every command is its own process, so main() reads the file before anything else."""
     env = tmp_path / "custom.env"
     env.write_text(f"{SEARXNG_ENV}=http://127.0.0.1:7777\n")
     monkeypatch.setenv("WEBSEARCH_ENV_FILE", str(env))
-
-    import importlib
+    monkeypatch.delenv(SEARXNG_ENV, raising=False)
 
     from websearch import cli
-    from websearch.layer3_agentio import mcp_server
 
-    for reload_target, invoke in (
-        (None, lambda: cli.main(["doctor", "--check", "runtime"])),
-        (mcp_server, lambda: None),
-    ):
-        monkeypatch.delenv(SEARXNG_ENV, raising=False)
-        if reload_target is not None:
-            importlib.reload(reload_target)
-        else:
-            invoke()
-        assert searxng_state().value == "http://127.0.0.1:7777"
+    cli.main(["doctor", "--check", "runtime"])
+    assert searxng_state().value == "http://127.0.0.1:7777"
 
 
 def test_the_env_file_path_is_overridable(tmp_path, monkeypatch):

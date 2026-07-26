@@ -78,6 +78,12 @@ DOCTOR_LAYER_REF = f"{DOCTOR_ID}#/$defs/OptionalLayer"
 DOCTOR_PAYLOAD_REF = f"{DOCTOR_ID}#/$defs/DoctorPayload"
 DOCTOR_RESPONSE_REF = f"{DOCTOR_ID}#/$defs/DoctorResponse"
 
+INIT_ID = "https://github.com/hec-ovi/websearch-skill/contracts/init.schema.json"
+INIT_REQUEST_REF = f"{INIT_ID}#/$defs/InitRequest"
+INIT_STEP_REF = f"{INIT_ID}#/$defs/InitStep"
+INIT_PAYLOAD_REF = f"{INIT_ID}#/$defs/InitPayload"
+INIT_RESPONSE_REF = f"{INIT_ID}#/$defs/InitResponse"
+
 
 def _build_registry() -> Registry:
     pairs = []

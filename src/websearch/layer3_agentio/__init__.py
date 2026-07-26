@@ -8,9 +8,9 @@ Three capabilities, all over the cross-cutting Envelope (meta.layer "agentio"):
 - ``web_open``   -> paginate an already-fetched page from the store by handle, no re-fetch.
 
 ``build_agent_io`` wires the default closure; the router, pipeline, and store are
-swappable behind their ports. ``mcp_server`` (using the base ``fastmcp`` dependency) exposes
-the same three as MCP tools; it is imported lazily so the non-MCP commands do not pay the
-fastmcp import at startup.
+swappable behind their ports. The CLI is the only face: every command is its own process,
+which is what keeps the engine fanout and the optional layers read fresh from the
+environment on every call.
 """
 
 from __future__ import annotations

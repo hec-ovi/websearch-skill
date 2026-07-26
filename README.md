@@ -1,22 +1,21 @@
 # websearch-skill
 
-<!-- mcp-name: io.github.hec-ovi/web-search -->
-
 Open-source multi-engine web search and content extraction for AI agents, built as isolated layers connected only by versioned JSON Schema contracts.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-578%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-748%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
-> **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). The keyless search, the clean-Markdown reader, the five agent tools, and the opt-in egress proxy work today and are covered by the test suite. The hard anti-bot tiers and local rerank are not built yet (see Roadmap). Pin a version and try it in a sandbox before wiring it into anything sensitive.
+> **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). The keyless search, the clean-Markdown reader, the five agent commands, the self-hosted SearXNG, and the opt-in egress proxy work today and are covered by the test suite. **0.3.0 removed the MCP server**; the CLI plus the skill is the whole surface now (see No MCP below). The hard anti-bot tiers and local rerank are not built yet (see Roadmap). Pin a version and try it in a sandbox before wiring it into anything sensitive.
 
 ## What it is
 
 A self-hosted web search and page reader for AI agents, with no API keys and no paywall. Point it at a query and it fans out across many search engines, fuses and dedups the results, then fetches and extracts pages into clean Markdown. Everything runs locally; queries do not go to a vendor.
 
-Three commands are the whole surface:
+One command brings it online and three do the work:
 
+- **`init`** starts everything (env file, local SearXNG) and reports what actually works, in one call. Run it once at the start of a session instead of probing by hand.
 - **`web_search`** finds pages: ranked, deduplicated results across engines, each with a reusable `handle`.
 - **`web_fetch`** reads a page: clean Markdown, fenced as untrusted, paginated so a long page never overflows context.
 - **`web_open`** pages back through a document you already fetched, from cache, without hitting the network again.
@@ -43,11 +42,12 @@ Among 2026 agentic-search APIs the top tier is statistically tied on result qual
 | Layer 1: Search | Multi-engine router (keyless `ddgs` across many engines, optional self-hosted SearXNG), canonicalize, dedup, de-correlated RRF fusion | Built |
 | Layer 2A: Fetch + Extract | Tiered fetch (httpx, curl_cffi impersonation), Trafilatura extraction to Markdown + metadata | Built |
 | Layer 2B: Format + Store | Paginated Markdown + JSON sidecar, progressive-disclosure index/resolver, MinHash dedup, ephemeral SQLite-FTS5 store | Built |
-| Layer 3: Agent I/O | Consolidated `web_search`/`web_fetch`/`web_open`, untrusted-content fence, optional MCP stdio server, `SKILL.md` | Built |
+| Layer 3: Agent I/O | Consolidated `web_search`/`web_fetch`/`web_open`, untrusted-content fence, `SKILL.md` | Built |
 | Extra tools | Keyless `arxiv` (paper search) and `github` (repo search), standalone over the same Envelope | Built |
-| Doctor | `websearch doctor`: per-capability self-test of the optional layers, every engine, the tools, both fetch tiers, and MCP | Built |
+| Doctor | `websearch doctor`: per-capability self-test of the optional layers, every engine, the tools, and both fetch tiers | Built |
+| Init | `websearch init`: one call that reads the env file, starts SearXNG, runs the sweep, and answers "can I search now" | Built |
 
-Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.1.0`, `fetch@1.2.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.1.0`, `arxiv@1.1.0`, `github@1.1.0`, `doctor@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
+Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.1.0`, `fetch@1.2.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.1.0`, `arxiv@1.1.0`, `github@1.1.0`, `doctor@2.0.0`, `searxng@1.0.0`, `init@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
 
 ## Layer 1: Search
 
@@ -91,11 +91,11 @@ There is **no output-length cap here either**. The sidecar carries the full body
 
 ## Layer 3: Agent I/O
 
-One consolidated surface over Layers 1, 2A, and 2B: `web_search` (find), `web_fetch` (read a URL), and `web_open` (page through an already-fetched document). Each returns the same `Envelope`. The identical core is exposed three ways: the `websearch web-search` / `web-fetch` / `web-open` CLI, a FastMCP stdio server (`websearch mcp`, bundled in the base install), and a portable `SKILL.md` written to the Agent Skills standard (name plus description, so it loads in Claude Code, Codex, OpenCode, and others).
+One consolidated surface over Layers 1, 2A, and 2B: `web_search` (find), `web_fetch` (read a URL), and `web_open` (page through an already-fetched document). Each returns the same `Envelope`. It is exposed two ways over one implementation: the `websearch web-search` / `web-fetch` / `web-open` CLI, and a portable `SKILL.md` written to the Agent Skills standard (name plus description, so it loads in Claude Code, Codex, OpenCode, and others) that tells an agent how to drive it.
 
-The cross-layer key is a human-readable **handle** (`site~shorthash`, for example `en.wikipedia.org~3a1f9c2b5e6f`), never an opaque UUID. `web_fetch` indexes the full page into the Layer 2B store and returns one token-budget page; `web_open` pages through the rest from that store, by handle, without re-fetching. The split is **lossless**: pagination is progressive disclosure, not a cap, and the whole body stays reachable page by page. The lower-level `search` / `fetch` / `open` commands remain as the per-layer surfaces for debugging and composition.
+The cross-layer key is a human-readable **handle** (`site~shorthash`, for example `en.wikipedia.org~3a1f9c2b5e6f`), never an opaque UUID. `web_fetch` indexes the full page into the Layer 2B store and returns one token-budget page; `web_open` pages through the rest from that store, by handle, without re-fetching. Every command is its own process, so that store is written to a file by default (beside your env file, or the XDG cache); `--persist-path off` keeps a run in memory and leaves nothing behind. The split is **lossless**: pagination is progressive disclosure, not a cap, and the whole body stays reachable page by page. The lower-level `search` / `fetch` / `open` commands remain as the per-layer surfaces for debugging and composition.
 
-Fetched page text is untrusted, so `web_fetch` and `web_open` wrap each page in a fence (see Security). On the MCP face the page also rides the tool-result channel, which models are trained to treat with skepticism.
+Fetched page text is untrusted, so `web_fetch` and `web_open` wrap each page in a fence (see Security). It also reaches the model as tool output rather than as a turn, which models are trained to treat with skepticism.
 
 ## Extra keyless tools
 
@@ -116,9 +116,19 @@ uv run websearch web-search "rust async" --site reddit.com
 uv run websearch web-search "frontier model release" --site x.com
 ```
 
+## No MCP (since 0.3.0)
+
+0.3.0 removed the MCP server. Up to 0.2.6 the same three tools shipped twice, as a CLI and as a FastMCP stdio server, and the second copy is what kept getting in the way of the two features this tool actually needs to be good: a self-hosted SearXNG and a real egress proxy.
+
+The MCP server is one long-lived process. It reads its configuration once at startup and builds its engine fanout once, on the first search. `websearch searxng up` runs in a different, short-lived process: it starts SearXNG and writes `WEBSEARCH_SEARXNG_URL` into the env file, which cannot reach into the memory of a server that is already running. So the server kept searching on the keyless engines only, reported `all_engines_failed` when those were blocked, and there was no honest way for it to tell you why. The same staleness applied to `WEBSEARCH_PROXY`: a proxy configured after startup was invisible until the client restarted the server.
+
+A CLI has none of that. Every command is its own process, so the env file, the proxy, and the SearXNG URL are read fresh on every call, and a change takes effect on the next command instead of the next restart. Dropping the server also deleted about 500 lines, the `fastmcp` dependency, the per-harness registration, and the registry manifest, which is the leaner skill this was supposed to be. What replaced it is one command: `websearch init` brings everything up and reports what works.
+
+If you were pointing an MCP client at `websearch mcp`, use the skill instead: `npx skills add hec-ovi/websearch-skill` gives the agent the same tools through its shell.
+
 ## Install
 
-Pick the route that matches how you use it. Everything is keyless and needs internet; the only hard requirement is [uv](https://docs.astral.sh/uv/). Full per-harness instructions (Claude Code, Codex, OpenCode, Cursor, Hermes, OpenClaw, the MCP registry, and PyPI publishing) are in [`docs/INSTALL.md`](docs/INSTALL.md).
+Pick the route that matches how you use it. Everything is keyless and needs internet; the only hard requirement is [uv](https://docs.astral.sh/uv/). Full per-harness instructions (Claude Code, Codex, OpenCode, Cursor, Hermes, OpenClaw, and PyPI publishing) are in [`docs/INSTALL.md`](docs/INSTALL.md).
 
 **As a CLI tool, no install** (`uvx` builds an ephemeral env and runs it):
 
@@ -135,20 +145,12 @@ npx skills add hec-ovi/websearch-skill            # all detected agents
 npx skills add hec-ovi/websearch-skill -a claude-code -a codex -s web-search
 ```
 
-**As a Claude Code plugin** (bundles the skill and the MCP server in one install):
+**As a Claude Code plugin**:
 
 ```text
 /plugin marketplace add hec-ovi/websearch-skill
 /plugin install web-search@websearch-skill
 ```
-
-**As an MCP server** (FastMCP stdio, bundled in the base install). Point any MCP client at:
-
-```json
-{ "mcpServers": { "web-search": { "command": "uvx", "args": ["websearch-skill", "mcp"] } } }
-```
-
-It is also published in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.hec-ovi/web-search`, so registry-aware clients can discover and install it by name.
 
 **From source** (development, uv-native):
 
@@ -187,16 +189,17 @@ uv run websearch open \
 # Layer 3: the consolidated, fenced, handle-keyed agent face
 uv run websearch web-search "rust ownership" --json
 uv run websearch web-fetch "https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html" \
-  --page-size-tokens 4000 --persist-path /tmp/idx.sqlite
-# page through the rest of a fetched doc by its handle, from cache (no refetch)
-uv run websearch web-open "doc.rust-lang.org~<hash>" --page 2 --persist-path /tmp/idx.sqlite
+  --page-size-tokens 4000
+# page through the rest of a fetched doc by its handle, from cache (no refetch, no flags:
+# the page index is on disk by default, so a later command resolves the same handle)
+uv run websearch web-open "doc.rust-lang.org~<hash>" --page 2
 
 # extra keyless tools: arXiv papers and GitHub repos
 uv run websearch arxiv "mixture of experts scaling laws" --max-results 5
 uv run websearch github "llm agent framework" --language Python --sort stars
 
-# or run as an MCP server (FastMCP stdio; bundled, no extra needed)
-uv run websearch mcp
+# bring everything online and report what works (start here)
+uv run websearch init
 
 # check what actually works on this machine, engine by engine
 uv run websearch doctor
@@ -287,7 +290,7 @@ websearch searxng status                      # where it lives, whether it answe
 websearch searxng down                        # stop it
 ```
 
-The first `up` clones upstream SearXNG and builds a virtualenv beside it, about 15 to 30 seconds and a few hundred MB; later ones only start it. Everything lands in one state directory (`WEBSEARCH_SEARXNG_HOME`, defaulting beside `WEBSEARCH_ENV_FILE` or in the XDG cache), and `WEBSEARCH_SEARXNG_URL` is written into your env file for you, so the next search picks it up with nothing else to do. The server is started in its own session rather than as a child of the command, which is what lets it survive an agent CLI killing the process group of every shell command it runs. `WEBSEARCH_SEARXNG_PORT` moves it off 8888. The same thing is on the MCP face as `searxng_setup`, so an agent that only speaks MCP can set it up itself.
+The first `up` clones upstream SearXNG and builds a virtualenv beside it, about 15 to 30 seconds and a few hundred MB; later ones only start it. Everything lands in one state directory (`WEBSEARCH_SEARXNG_HOME`, defaulting beside `WEBSEARCH_ENV_FILE` or in the XDG cache), and `WEBSEARCH_SEARXNG_URL` is written into your env file for you, so the next search picks it up with nothing else to do. The server is started in its own session rather than as a child of the command, which is what lets it survive an agent CLI killing the process group of every shell command it runs. `WEBSEARCH_SEARXNG_PORT` moves it off 8888. `websearch init` does this step for you as part of bringing everything up.
 
 **With Docker:**
 
@@ -305,7 +308,7 @@ Both bind to loopback and turn the JSON API on. The difference is the engine lis
 
 ### Egress proxy
 
-One switch, `WEBSEARCH_PROXY`, routes every network path (search engines, fetch tiers, arxiv, github, and the MCP tools) through a proxy:
+One switch, `WEBSEARCH_PROXY`, routes every network path (search engines, fetch tiers, arxiv, github) through a proxy:
 
 ```bash
 export WEBSEARCH_PROXY=socks5h://user:pass@host:1080   # any proxy URL (http:// works too)
@@ -317,7 +320,7 @@ The `nordvpn` shorthand builds the SOCKS5 URL for you from `NORDVPN_USER` and `N
 
 Every network command also takes `--proxy <url|nordvpn|off>`, which overrides the variable for that run, so `--proxy off` gets you a direct connection without unsetting anything. Prefer `socks5h://` over `socks5://`: it resolves DNS through the proxy, so hostnames never hit your local resolver. A per-request `fetch --proxy` still wins over the process-wide default.
 
-**Nothing bypasses it.** With `WEBSEARCH_PROXY` set, every path that leaves the machine goes through it: both fetch tiers, the `ddgs` engines, arXiv, GitHub, the MCP tools, and the doctor's own probes. Two consequences that are easy to get wrong and are tested for:
+**Nothing bypasses it.** With `WEBSEARCH_PROXY` set, every path that leaves the machine goes through it: both fetch tiers, the `ddgs` engines, arXiv, GitHub, and the doctor's own probes. Two consequences that are easy to get wrong and are tested for:
 
 - **No DNS leak.** The SSRF guard used to resolve every hostname locally before fetching, which showed your resolver, and therefore your ISP, every site you visited while the traffic itself was tunneled. Behind a proxy it no longer resolves: `socks5h://` resolves at the exit node, so the local lookup never decided the route anyway, and skipping it removes the leak. Literal IPs are still refused without any lookup, so `http://127.0.0.1` and the `169.254.169.254` metadata endpoint stay blocked.
 - **Fail closed.** Point the proxy at a dead port and every component errors rather than falling back to a direct connection. That includes the two that open sockets in native code, `ddgs` (Rust) and `curl_cffi` (libcurl), which a Python-level check cannot see.
@@ -332,6 +335,37 @@ With a self-hosted SearXNG there are two hops and the proxy applies to the one t
 
 `nordvpn` works on every platform, since it is an HTTP check. `any` reads interface names, which are meaningful on Linux (`tun`, `wg`, `nordlynx`) and macOS (`utun`) but not on Windows, where they look like `ethernet_32770`; there it reports the tunnel as unconfirmed rather than guessing.
 
+## websearch init
+
+The first thing an agent should run. One call reads the configured env file, starts the local SearXNG (skip it with `--skip-searxng`), then runs the full doctor sweep and answers the question the caller actually has:
+
+```bash
+uv run websearch init                # bring everything up, then report
+uv run websearch init --json         # the same run as an Envelope
+uv run websearch init --quick        # skip the slow sweep; unprobed capabilities read "unknown"
+```
+
+```
+  ok    env       read /config/websearch.env
+  ok    searxng   SearXNG 2026.7.25 answering at http://127.0.0.1:8888, 83 of 278 engines
+  warn  doctor    18 ok, 4 warn, 0 fail, 3 skipped
+
+capabilities
+  web_search  ok
+  web_fetch   ok
+  arxiv       ok
+  github      ok
+  searxng     ok
+  proxy       ok
+  vpn         off
+
+ready: search online (5 of 9 keyless providers + SearXNG, 83 engines); fetch, arxiv, github ok; egress through socks5h://***:***@nl.socks.nordhold.net:1080
+```
+
+`data.ready` is the flag to wait on. `data.state` is `ready`, `degraded` (search works, something asked for is missing), or `broken` (search does not work); `data.capabilities` says what to use, `data.next_actions` says what to do about the rest, and the whole doctor payload rides along in `data.doctor`, so nothing needs a second call. Exit code is 0 when search works and 1 only when it does not, so a `degraded` run does not read as a failure.
+
+It exists because the alternative is an agent probing the install by hand: twenty shell calls, a wrong conclusion, and a lot of tokens spent to learn what one command measures.
+
 ## websearch doctor
 
 One command that says what works right now, capability by capability:
@@ -343,7 +377,7 @@ uv run websearch doctor --check engines --check proxy
 uv run websearch doctor --json                   # the same run as an Envelope
 ```
 
-It prints the three optional layers' state, then checks Python and the dependency closure, direct internet and the exit IP, the egress proxy and whether the exit IP actually moved, the declared VPN, a self-hosted SearXNG (health, active engine count, live JSON query), each `ddgs` provider on its own, arXiv and GitHub, both fetch tiers, and the MCP tool registration. Exit code is 1 only when something failed: an optional layer that is off is skipped, and one rate-limited provider is a warning. Proxy credentials never reach the output, including inside HTTP client error text.
+It prints the three optional layers' state, then checks Python and the dependency closure, direct internet and the exit IP, the egress proxy and whether the exit IP actually moved, the declared VPN, a self-hosted SearXNG (health, active engine count, live JSON query), each `ddgs` provider on its own, arXiv and GitHub, and both fetch tiers. Exit code is 1 only when something failed: an optional layer that is off is skipped, and one rate-limited provider is a warning. Proxy credentials never reach the output, including inside HTTP client error text.
 
 The part worth having is the cross-check. `ddgs` reports "No results found" for a CAPTCHA, for a rate limit, and for an HTTP 200 whose markup its parser no longer reads, and those need opposite fixes. With SearXNG running, the doctor asks it about exactly the providers that went quiet, and SearXNG's scrapers are maintained separately:
 
@@ -361,7 +395,7 @@ Two runs on one home connection in July 2026, minutes apart, over the nine `ddgs
 A fetch tool an agent can point anywhere is an SSRF and prompt-injection surface, so:
 
 - **SSRF guard (built):** fetch enforces an http(s) scheme allowlist and resolves every host, refusing private, loopback, link-local (the `169.254.169.254` cloud-metadata endpoint), reserved, and multicast addresses. Redirects are followed manually with the same check on each hop, so a public URL cannot redirect into the internal network. Override per request with `--allow-private-hosts` for deliberate internal fetches.
-- **Untrusted content (built, Layer 3):** fetched page text is untrusted input and is never presented as instructions. `web_fetch` and `web_open` wrap each page in a fence built from the 2026 primary-source guidance: a per-instance 128-bit random nonce in the open and close markers (so injected text cannot forge the close), a data-only directive, and neutralization of any copy of the marker inside the body, with optional datamarking (`--datamark`) for higher resistance. This reduces, but does not eliminate, indirect prompt injection: it prevents the boundary breakout, not persuasion. The real guarantees are channel separation (the MCP face delivers content through the tool-result channel), least privilege, and cutting exfiltration paths. The lower-level `fetch` command still returns the clean body unmodified, so piping and composition stay clean.
+- **Untrusted content (built, Layer 3):** fetched page text is untrusted input and is never presented as instructions. `web_fetch` and `web_open` wrap each page in a fence built from the 2026 primary-source guidance: a per-instance 128-bit random nonce in the open and close markers (so injected text cannot forge the close), a data-only directive, and neutralization of any copy of the marker inside the body, with optional datamarking (`--datamark`) for higher resistance. This reduces, but does not eliminate, indirect prompt injection: it prevents the boundary breakout, not persuasion. The real guarantees are channel separation (page text reaches the model as tool output, never as a turn), least privilege, and cutting exfiltration paths. The lower-level `fetch` command still returns the clean body unmodified, so piping and composition stay clean.
 
 ## Architecture
 
@@ -389,7 +423,7 @@ A same-query, same-moment head-to-head against the web search built into Claude 
 
 ## Roadmap
 
-Built: harness packaging ships the `SKILL.md` plus the bundled tool via `npx skills add`, a Claude Code plugin and marketplace, the MCP registry (`server.json`), and PyPI/uvx, with per-harness MCP registration documented in [`docs/INSTALL.md`](docs/INSTALL.md).
+Built: harness packaging ships the `SKILL.md` plus the bundled tool via `npx skills add`, a Claude Code plugin and marketplace, and PyPI/uvx, with per-harness install routes documented in [`docs/INSTALL.md`](docs/INSTALL.md).
 
 Also built: the opt-in egress proxy (`WEBSEARCH_PROXY`, `--proxy`, NordVPN shorthand) covering every network path.
 
@@ -403,7 +437,7 @@ Planned, not built yet:
 
 ```bash
 uv sync          # install deps (including the dev group)
-uv run pytest    # 667 tests, no network
+uv run pytest    # 748 tests, no network
 uv run ruff check .
 ```
 

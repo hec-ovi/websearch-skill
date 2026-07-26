@@ -149,7 +149,7 @@ def test_a_skipped_layer_never_touches_the_network():
 def test_quick_drops_the_slow_groups():
     names = set(checks_by_name(doctor_with().run(DoctorRequest(quick=True))))
     assert not any(n.startswith(("engine", "tool:", "fetch:")) for n in names)
-    assert {"runtime", "dependencies", "internet", "mcp"} <= names
+    assert {"runtime", "dependencies", "internet"} <= names
 
 
 # --- internet -------------------------------------------------------------------------

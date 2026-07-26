@@ -110,7 +110,6 @@ class Doctor:
         plan: list[tuple[str, Group, str | None]] = [
             ("runtime", "runtime", None),
             ("dependencies", "runtime", None),
-            ("mcp", "mcp", None),
             ("internet", "egress", None),
             ("baseline", "egress", None),
             ("proxy", "egress", "proxy"),
@@ -190,7 +189,6 @@ class Doctor:
             {
                 "runtime": probes.probe_runtime,
                 "dependencies": probes.probe_dependencies,
-                "mcp": probes.probe_mcp,
             }
         )
 

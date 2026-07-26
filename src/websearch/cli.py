@@ -2,11 +2,11 @@
 
 Per-layer commands (``search``, ``fetch``, ``open``), the consolidated Layer-3 agent
 face (``web-search``, ``web-fetch``, ``web-open``), the keyless ``arxiv``/``github``
-tools, ``doctor`` (the installation self-test), and ``mcp`` (the FastMCP stdio server).
-``--json`` emits the raw Envelope (the contract surface); the default is a compact human
-view. Exit code is 0 on success, 1 on an error Envelope. Each command imports its own
-layer inside its handler, so ``arxiv`` or ``github`` never pays the search/fetch stack's
-import cost.
+tools, ``init`` (bring everything online), ``doctor`` (the installation self-test), and
+``searxng`` (the local instance's lifecycle). ``--json`` emits the raw Envelope (the
+contract surface); the default is a compact human view. Exit code is 0 on success, 1 on
+an error Envelope. Each command imports its own layer inside its handler, so ``arxiv`` or
+``github`` never pays the search/fetch stack's import cost.
 """
 
 from __future__ import annotations
@@ -574,11 +574,11 @@ def _print_open_human(env: dict, search: dict | None, quiet: bool = False) -> No
             )
 
 
-# --- Layer 3: the consolidated agent face (web-search / web-fetch / web-open / mcp) --
+# --- Layer 3: the consolidated agent face (web-search / web-fetch / web-open) -------
 #
-# These emit the agentio Envelope: fenced, paginated, handle-keyed. They are what a
-# SKILL.md or the MCP tools drive. The bare search/fetch/open commands above stay as the
-# lower-level per-layer surfaces (debugging, composition, raw contracts).
+# These emit the agentio Envelope: fenced, paginated, handle-keyed. They are what the
+# SKILL drives. The bare search/fetch/open commands above stay as the lower-level
+# per-layer surfaces (debugging, composition, raw contracts).
 
 
 def _add_websearch_command(sub: Any) -> None:
@@ -684,7 +684,10 @@ def _add_webfetch_command(sub: Any) -> None:
     fp.add_argument("--timeout-ms", type=int, default=20000)
     fp.add_argument("--allow-private-hosts", action="store_true")
     fp.add_argument(
-        "--persist-path", help="Persist the page index so web-open resolves handles across runs."
+        "--persist-path",
+        help="The page-index file web-open reads back. Defaults to a file in the tool's "
+        "state directory, which is what makes a later web-open resolve this handle; pass "
+        "'off' to keep the run in memory and leave nothing on disk.",
     )
     _add_proxy_arg(fp)
     fp.add_argument("--quiet", action="store_true", help="Print only the fenced content.")
@@ -694,6 +697,7 @@ def _add_webfetch_command(sub: Any) -> None:
 def _cmd_webfetch(args: argparse.Namespace) -> int:
     from .layer2_format import StoreConfig
     from .layer3_agentio import AGENTIO_CONTRACT_VERSION, AgentFetchRequest
+    from .state import persist_path
 
     for u in args.urls:
         if not u.startswith(("http://", "https://")):
@@ -725,9 +729,10 @@ def _cmd_webfetch(args: argparse.Namespace) -> int:
             layer="agentio",
             as_json=args.json,
         )
+    store = persist_path(args.persist_path)
     aio = _builder("build_agent_io")(
         enable_ddgs=False,
-        store_config=StoreConfig(persist_path=args.persist_path),
+        store_config=StoreConfig(persist_path=store),
         proxy=resolve_proxy(args.proxy),
     )
     env = aio.web_fetch_many(
@@ -746,7 +751,7 @@ def _cmd_webfetch(args: argparse.Namespace) -> int:
         _print_agent_pages_human(
             payload,
             quiet=args.quiet,
-            persist_path=args.persist_path,
+            persist_path=store,
             page_size_tokens=args.page_size_tokens,
         )
     return 0 if env.ok else 1
@@ -756,7 +761,7 @@ def _add_webopen_command(sub: Any) -> None:
     op = sub.add_parser(
         "web-open",
         help="Paginate an already-fetched page from the store by handle (Layer 3); never "
-        "re-fetches. Needs --persist-path matching the web-fetch run (or the same process).",
+        "re-fetches. Reads the same page index web-fetch wrote.",
     )
     op.add_argument("handle", help="A handle (site~shorthash) or the page URL.")
     op.add_argument("--page", type=int, default=1)
@@ -767,7 +772,11 @@ def _add_webopen_command(sub: Any) -> None:
         help="Per-page token budget; 0 = the whole document as one page.",
     )
     op.add_argument("--datamark", action="store_true")
-    op.add_argument("--persist-path", help="The page-index file written by web-fetch.")
+    op.add_argument(
+        "--persist-path",
+        help="The page-index file written by web-fetch. Defaults to the same file web-fetch "
+        "defaults to, so handles resolve with no flag on either side.",
+    )
     op.add_argument("--quiet", action="store_true", help="Print only the fenced content.")
     op.add_argument("--json", action="store_true", help="Emit the raw agentio Envelope.")
 
@@ -775,6 +784,7 @@ def _add_webopen_command(sub: Any) -> None:
 def _cmd_webopen(args: argparse.Namespace) -> int:
     from .layer2_format import StoreConfig
     from .layer3_agentio import AGENTIO_CONTRACT_VERSION, AgentOpenRequest
+    from .state import persist_path
 
     try:
         req = AgentOpenRequest(
@@ -791,8 +801,9 @@ def _cmd_webopen(args: argparse.Namespace) -> int:
             layer="agentio",
             as_json=args.json,
         )
+    store = persist_path(args.persist_path)
     aio = _builder("build_agent_io")(
-        enable_ddgs=False, store_config=StoreConfig(persist_path=args.persist_path)
+        enable_ddgs=False, store_config=StoreConfig(persist_path=store)
     )
     env = aio.web_open(req)
     payload = env.model_dump(mode="json")
@@ -802,7 +813,7 @@ def _cmd_webopen(args: argparse.Namespace) -> int:
         _print_agent_pages_human(
             payload,
             quiet=args.quiet,
-            persist_path=args.persist_path,
+            persist_path=store,
             page_size_tokens=args.page_size_tokens,
         )
     return 0 if env.ok else 1
@@ -811,20 +822,20 @@ def _cmd_webopen(args: argparse.Namespace) -> int:
 def _more_hint(
     p: dict, persist_path: str | None, page_size_tokens: int = _DEFAULT_PAGE_SIZE_TOKENS
 ) -> str:
-    """The copy-paste-correct next-page command. web-open resolves a handle only against a
-    shared store, so it is suggested only with the --persist-path the user already passed;
-    otherwise suggest re-running web-fetch on the URL (always works, re-fetches). A
-    non-default page size is carried over, else the suggested command would re-paginate
-    with different geometry and silently skip content."""
+    """The copy-paste-correct next-page command. web-open resolves a handle only against
+    the store the page was written to: the default file needs no flag, a custom one is
+    repeated, and a run that persisted nothing can only re-fetch. A non-default page size
+    is carried over, else the suggested command would re-paginate with different geometry
+    and silently skip content."""
+    from .state import default_persist_path
+
     nxt = (p.get("page") or 1) + 1
     size = ""
     if page_size_tokens != _DEFAULT_PAGE_SIZE_TOKENS:
         size = f" --page-size-tokens {page_size_tokens}"
     if persist_path:
-        return (
-            f"   (more: web-open {p.get('handle')} --page {nxt}{size}"
-            f" --persist-path {persist_path})"
-        )
+        where = "" if persist_path == default_persist_path() else f" --persist-path {persist_path}"
+        return f"   (more: web-open {p.get('handle')} --page {nxt}{size}{where})"
     return f'   (more: web-fetch "{p.get("url")}" --page {nxt}{size})'
 
 
@@ -1034,7 +1045,7 @@ def _add_doctor_command(sub: Any) -> None:
     dp = sub.add_parser(
         "doctor",
         help="Self-test the installation: the optional layers (VPN, egress proxy, "
-        "SearXNG), every search engine, the extra tools, both fetch tiers, and MCP.",
+        "SearXNG), every search engine, the extra tools, and both fetch tiers.",
         epilog=(
             "exit codes: 0 when nothing failed (warnings and skipped checks are fine), "
             "1 when at least one check failed. An optional layer that is off is skipped, "
@@ -1047,7 +1058,7 @@ def _add_doctor_command(sub: Any) -> None:
         default=[],
         metavar="NAME",
         help="Run only checks matching this name prefix or group, repeatable. Groups: "
-        "runtime, egress, vpn, searxng, engines, tools, fetch, mcp. Examples: "
+        "runtime, egress, vpn, searxng, engines, tools, fetch. Examples: "
         "--check proxy, --check engines, --check engine:ddgs:google.",
     )
     dp.add_argument(
@@ -1164,6 +1175,102 @@ def _print_doctor_human(env: dict) -> None:
         print(f"[note] {w}", file=sys.stderr)
 
 
+# --- init: one call that brings everything online -----------------------------------
+
+
+def _add_init_command(sub: Any) -> None:
+    ip = sub.add_parser(
+        "init",
+        help="Bring the whole tool online in one call: read the env file, start the local "
+        "SearXNG, then run a full doctor sweep and report what works.",
+        epilog=(
+            "exit codes: 0 when search works (ready or degraded), 1 when it does not. Run "
+            "this once at the start of a session instead of probing the install by hand; "
+            "the first run can take a minute while SearXNG is installed."
+        ),
+    )
+    ip.add_argument(
+        "--skip-searxng",
+        action="store_true",
+        help="Do not start the local SearXNG. An already-configured WEBSEARCH_SEARXNG_URL "
+        "is still used and still checked.",
+    )
+    ip.add_argument(
+        "--quick",
+        action="store_true",
+        help="Quick doctor sweep: no per-engine fanout, extra tools, or fetch tiers. The "
+        "capabilities those checks decide come back 'unknown'.",
+    )
+    ip.add_argument("--timeout-ms", type=int, help="Per-check network timeout (default 15000).")
+    ip.add_argument("--json", action="store_true", help="Emit the raw JSON Envelope.")
+
+
+def _cmd_init(args: argparse.Namespace) -> int:
+    from .initialize import INIT_CONTRACT_VERSION, InitRequest, run
+
+    fields: dict[str, Any] = {
+        "searxng": "skip" if args.skip_searxng else "up",
+        "quick": args.quick,
+    }
+    if args.timeout_ms:  # an omitted flag keeps InitRequest's contract default
+        fields["timeout_ms"] = args.timeout_ms
+    try:
+        request = InitRequest(**fields)
+    except ValidationError as exc:
+        return _emit_error(
+            INIT_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=f"invalid init request: {exc}",
+            layer="init",
+            as_json=args.json,
+        )
+
+    if not args.json and request.searxng == "up":
+        # The first run clones SearXNG and builds a virtualenv, which is otherwise a
+        # minute of silence. Said before the work, not after.
+        print(
+            "initializing websearch (first run installs SearXNG; this can take a minute)...",
+            flush=True,
+        )
+    envelope = run(request)
+    payload = envelope.model_dump(mode="json")
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        _print_init_human(payload)
+    data = payload.get("data") or {}
+    return 1 if data.get("state") == "broken" else 0
+
+
+_INIT_GLYPH = {"ok": "ok  ", "warn": "warn", "fail": "FAIL", "skipped": "skip"}
+
+
+def _print_init_human(env: dict) -> None:
+    if not env.get("ok"):
+        err = env.get("error") or {}
+        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+        return
+    data = env.get("data") or {}
+
+    for step in data.get("steps") or []:
+        glyph = _INIT_GLYPH.get(step.get("status"), "?   ")
+        print(f"  {glyph}  {step.get('name'):<9} {step.get('summary')}")
+
+    print("\ncapabilities")
+    for name, status in (data.get("capabilities") or {}).items():
+        print(f"  {name:<11} {status}")
+
+    engines = data.get("engines") or {}
+    if engines.get("silent"):
+        print(f"\nsilent providers: {', '.join(engines['silent'])}")
+        if engines.get("reached_via_searxng"):
+            print(f"reachable through SearXNG: {', '.join(engines['reached_via_searxng'])}")
+
+    print(f"\n{data.get('headline')}")
+    for action in data.get("next_actions") or []:
+        print(f"  - {action}")
+
+
 def _add_searxng_command(sub: Any) -> None:
     sp = sub.add_parser(
         "searxng",
@@ -1277,38 +1384,6 @@ def _print_searxng_wiring(url: str, wired: str | None) -> None:
         print(f"point this tool at it: export {SEARXNG_ENV}={url}")
 
 
-def _add_mcp_command(sub: Any) -> None:
-    sub.add_parser(
-        "mcp",
-        help="Start the FastMCP stdio server (web_search/web_fetch/web_open/arxiv_search/"
-        "github_search/searxng_setup). fastmcp ships in the base install.",
-    )
-
-
-def _load_mcp_server():
-    """Import the FastMCP server module (a base dependency; imported lazily to keep the
-    other subcommands' startup free of the MCP import)."""
-    from .layer3_agentio import mcp_server
-
-    return mcp_server
-
-
-def _cmd_mcp(args: argparse.Namespace) -> int:
-    try:
-        mcp_server = _load_mcp_server()
-    except ImportError as exc:
-        # fastmcp is a base dependency, so this only fires if the install was stripped.
-        print(
-            f"error: {errors.DEPENDENCY_MISSING}: the MCP server needs 'fastmcp', which ships "
-            f"with this package. Reinstall it, e.g. pip install 'websearch-skill' "
-            f"(or uv sync). [{exc}]",
-            file=sys.stderr,
-        )
-        return 1
-    mcp_server.run()  # blocks: stdio server until the client disconnects
-    return 0
-
-
 def _contract_version_for(command: str) -> str:
     """The contract version stamped on a cross-layer 'cli' error envelope: the active
     command's own contract, so a `websearch github` failure carries github@x.y.z rather
@@ -1341,7 +1416,15 @@ def _contract_version_for(command: str) -> str:
         from .doctor import DOCTOR_CONTRACT_VERSION
 
         return DOCTOR_CONTRACT_VERSION
-    # mcp (serves several contracts) or an unknown command: the cross-cutting envelope.
+    if command == "init":
+        from .initialize import INIT_CONTRACT_VERSION
+
+        return INIT_CONTRACT_VERSION
+    if command == "searxng":
+        from .searxng_local import SEARXNG_CONTRACT_VERSION
+
+        return SEARXNG_CONTRACT_VERSION
+    # An unknown command: the cross-cutting envelope.
     return ENVELOPE_CONTRACT_VERSION
 
 
@@ -1374,8 +1457,8 @@ def main(argv: list[str] | None = None) -> int:
     _add_arxiv_command(sub)
     _add_github_command(sub)
     _add_doctor_command(sub)
+    _add_init_command(sub)
     _add_searxng_command(sub)
-    _add_mcp_command(sub)
     args = parser.parse_args(argv)
     dispatch = {
         "search": _cmd_search,
@@ -1387,8 +1470,8 @@ def main(argv: list[str] | None = None) -> int:
         "arxiv": _cmd_arxiv,
         "github": _cmd_github,
         "doctor": _cmd_doctor,
+        "init": _cmd_init,
         "searxng": _cmd_searxng,
-        "mcp": _cmd_mcp,
     }
     handler = dispatch.get(args.command)
     if handler is None:

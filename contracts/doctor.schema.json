@@ -2,8 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/hec-ovi/websearch-skill/contracts/doctor.schema.json",
   "title": "Doctor - environment and integration diagnostics contract",
-  "description": "A full self-test of one installation: the three optional layers (VPN, egress proxy, self-hosted SearXNG), every search engine the tool integrates, the keyless extra tools, both fetch tiers, and the MCP face. Each check is independent and carries its own status, so one dead engine reads as one warn rather than a blanket failure. A standalone diagnostic, not part of the search-fetch-format pipeline; it emits the same Envelope (meta.layer \"doctor\") so a CLI or MCP face handles it uniformly.",
-  "x-contract-version": "1.1.0",
+  "description": "A full self-test of one installation: the three optional layers (VPN, egress proxy, self-hosted SearXNG), every search engine the tool integrates, the keyless extra tools, and both fetch tiers. Each check is independent and carries its own status, so one dead engine reads as one warn rather than a blanket failure. A standalone diagnostic, not part of the search-fetch-format pipeline; it emits the same Envelope (meta.layer \"doctor\") as every other command.",
+  "x-contract-version": "2.0.0",
   "$defs": {
     "DoctorRequest": {
       "type": "object",
@@ -18,7 +18,7 @@
         "quick": {
           "type": "boolean",
           "default": false,
-          "description": "Skip the per-engine fanout, the extra tools, and the fetch tiers; keep runtime, connectivity, the optional layers, and MCP."
+          "description": "Skip the per-engine fanout, the extra tools, and the fetch tiers; keep runtime, connectivity, and the optional layers."
         },
         "baseline": {
           "type": "boolean",
@@ -81,7 +81,7 @@
       "additionalProperties": false,
       "properties": {
         "name": { "type": "string", "minLength": 1, "description": "Stable check id, e.g. 'proxy', 'engine:ddgs:google', 'tool:arxiv'." },
-        "group": { "enum": ["runtime", "egress", "vpn", "searxng", "engines", "tools", "fetch", "mcp"] },
+        "group": { "enum": ["runtime", "egress", "vpn", "searxng", "engines", "tools", "fetch"] },
         "status": { "enum": ["ok", "warn", "fail", "skipped"] },
         "summary": { "type": "string", "description": "One line, safe to print: never carries credentials." },
         "detail": {

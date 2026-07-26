@@ -1,7 +1,7 @@
 [project]
 name = "websearch-skill"
-version = "0.2.6"
-description = "Open-source multi-engine web search + extraction SKILL and TOOL for AI agents (uv-native, contract-driven, harness-portable)"
+version = "0.3.0"
+description = "Open-source multi-engine web search + extraction SKILL and CLI for AI agents (uv-native, contract-driven, harness-portable, self-hosted SearXNG and egress proxy)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -14,8 +14,7 @@ keywords = [
     "agent-skills",
     "searxng",
     "ddgs",
-    "mcp",
-    "fastmcp",
+    "nordvpn",
     "claude-skill",
     "rank-fusion",
     "uvx",
@@ -36,19 +35,11 @@ dependencies = [
     # Layer 2A default closure (all permissive: Apache-2.0 + MIT/BSD/MPL deps).
     "trafilatura>=2.1",
     "curl_cffi>=0.15",
-    # Layer 3 MCP face, bundled in the base install so `websearch mcp`, `uvx websearch-skill
-    # mcp`, and the MCP-registry runner all start the stdio server with one command and no
-    # extra. Standalone FastMCP 3.x (not the mcp SDK's bundled FastMCP 1.0); pin <4 because
-    # minor releases can carry breaking changes.
-    "fastmcp>=3.4,<4",
 ]
 
 [project.optional-dependencies]
 # Contract validation at runtime (always available in dev; optional at install).
 schema = ["jsonschema>=4.21"]
-# Back-compat alias only. fastmcp is now a base dependency (above), so this extra is a no-op
-# kept so older install commands like `pip install 'websearch-skill[mcp]'` keep resolving.
-mcp = ["fastmcp>=3.4,<4"]
 
 [project.scripts]
 # Two names for one entrypoint: `websearch` is the canonical command; `websearch-skill`

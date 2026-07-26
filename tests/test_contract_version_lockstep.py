@@ -14,6 +14,7 @@ import pytest
 
 from websearch.doctor import DOCTOR_CONTRACT_VERSION
 from websearch.envelope import ENVELOPE_CONTRACT_VERSION
+from websearch.initialize import INIT_CONTRACT_VERSION
 from websearch.layer1_search import SEARCH_CONTRACT_VERSION
 from websearch.layer2_extract import EXTRACT_CONTRACT_VERSION, FETCH_CONTRACT_VERSION
 from websearch.layer2_format.models import FORMAT_CONTRACT_VERSION, STORE_CONTRACT_VERSION
@@ -36,6 +37,7 @@ PAIRS = [
     ("github.schema.json", GITHUB_CONTRACT_VERSION),
     ("doctor.schema.json", DOCTOR_CONTRACT_VERSION),
     ("searxng.schema.json", SEARXNG_CONTRACT_VERSION),
+    ("init.schema.json", INIT_CONTRACT_VERSION),
 ]
 
 
