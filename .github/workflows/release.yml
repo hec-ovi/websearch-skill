@@ -1,9 +1,7 @@
-# Publishes websearch-skill on a v* tag push: first to PyPI via Trusted
-# Publishing (OIDC), then to the official MCP Registry via GitHub OIDC. One tag
-# updates both, so the registry can never lag PyPI again. No API token is stored
-# anywhere: `id-token: write` lets each target mint a short-lived credential for
-# this exact workflow (PyPI's is registered once, see docs/INSTALL.md; the MCP
-# Registry trusts the repo-owner identity for the io.github.hec-ovi/* namespace).
+# Publishes websearch-skill to PyPI on a v* tag push, via Trusted Publishing
+# (OIDC). No API token is stored anywhere: `id-token: write` lets the job mint a
+# short-lived credential for this exact workflow, registered once on the PyPI
+# project (see docs/INSTALL.md).
 #
 # Build is uv-native (`uv build`), delegating to the hatchling backend declared
 # in pyproject.toml, and writes both sdist and wheel to dist/.
@@ -60,33 +58,3 @@ jobs:
 
       - name: Publish to PyPI (Trusted Publishing, OIDC)
         uses: pypa/gh-action-pypi-publish@release/v1
-
-  mcp-registry:
-    name: Publish to the MCP Registry
-    needs: publish
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write # GitHub OIDC login to the registry; no secret needed
-      contents: read
-    steps:
-      - name: Check out the tag (for server.json)
-        uses: actions/checkout@v4
-
-      - name: Install mcp-publisher
-        run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
-
-      - name: Authenticate to the MCP Registry (GitHub OIDC)
-        run: ./mcp-publisher login github-oidc
-
-      # The registry validates the PyPI release (mcp-name marker in the long
-      # description), which can lag the publish by a moment; retry briefly
-      # instead of failing the whole release on propagation delay.
-      - name: Publish server.json to the MCP Registry
-        run: |
-          for i in 1 2 3 4 5; do
-            ./mcp-publisher publish && exit 0
-            echo "publish attempt $i failed; retrying in 30s" >&2
-            sleep 30
-          done
-          exit 1
