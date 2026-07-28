@@ -135,5 +135,5 @@ trusted publisher configured on the PyPI project.
 
 To release: set the version in `pyproject.toml` and the two `.claude-plugin` manifests
 (the test suite enforces the lockstep), commit, then tag and push a `v*` tag (`git tag
-v0.3.0 && git push origin v0.3.0`). The workflow builds with `uv build` and publishes via
+v0.4.0 && git push origin v0.4.0`). The workflow builds with `uv build` and publishes via
 OIDC. Verify at `https://pypi.org/project/websearch-skill/`.

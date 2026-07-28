@@ -6,6 +6,8 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-28
+
 ### Added
 
 - **A Tor layer, off by default.** `websearch tor up|status|down` runs Tor on this machine
