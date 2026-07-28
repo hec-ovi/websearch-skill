@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from pathlib import Path
 
 from ..ids import passage_id
 from ..models import (
@@ -55,6 +56,12 @@ class SqliteFts5Index:
     def __init__(self, config: StoreConfig | None = None):
         self._config = config or StoreConfig()
         target = self._config.persist_path or ":memory:"
+        if self._config.persist_path:
+            # sqlite will not create a missing directory, and the default path lives in
+            # the XDG cache, which on a fresh machine nobody has made yet. Without this
+            # the index silently falls back to nothing: web_fetch reports "page index
+            # failed" and the handle it just printed cannot be opened.
+            Path(target).expanduser().parent.mkdir(parents=True, exist_ok=True)
         self._con = sqlite3.connect(target, check_same_thread=False)
         self._con.row_factory = sqlite3.Row
         # One sqlite3.Connection is shared across threads (check_same_thread=False).

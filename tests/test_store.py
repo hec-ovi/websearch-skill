@@ -311,3 +311,18 @@ def test_chunk_overlap_must_stay_below_chunk_max_chars():
     with pytest.raises(ValidationError):
         StoreConfig(chunk_max_chars=100, chunk_overlap=250)
     assert StoreConfig(chunk_max_chars=100, chunk_overlap=99).chunk_overlap == 99
+
+
+def test_a_persisted_index_creates_its_directory(tmp_path):
+    """The default path is in the XDG cache, which on a fresh machine does not exist yet.
+    sqlite will not create it, and without this every web-fetch loses the index it just
+    printed a handle for."""
+    from websearch.layer2_format.models import PageInput, StoreConfig
+    from websearch.layer2_format.store import build_page_index
+
+    target = tmp_path / "never" / "made" / "pages.json"
+    index = build_page_index(StoreConfig(persist_path=str(target)))
+    index.add([PageInput(url="https://x.test/a", markdown="# A\n\nsome words here")])
+
+    assert target.exists()
+    assert index.resolve_index().total == 1

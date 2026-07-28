@@ -51,6 +51,14 @@ semantic versioning.
 - **`web-search-tor` skill**, covering the layer, onion search, and what Tor does not give
   you. The base skill points at it.
 
+### Fixed
+
+- The persisted page index now creates its own directory. sqlite does not, and the default
+  path lives in the XDG cache, which a fresh machine has never made, so every `web-fetch`
+  reported "page index failed" and then `web-open` could not resolve the handle it had just
+  printed. Only installs with no `WEBSEARCH_ENV_FILE` were affected, which is why a
+  container never saw it.
+
 ### Changed
 
 - The generated SearXNG `settings.yml` is regenerated on `up` while it carries its managed
