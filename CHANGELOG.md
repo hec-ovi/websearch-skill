@@ -51,6 +51,17 @@ semantic versioning.
 - **`web-search-tor` skill**, covering the layer, onion search, and what Tor does not give
   you. The base skill points at it.
 
+- **Onion page bodies are indexed separately** (`pages-onion.json` beside the ordinary
+  index), so nothing read over Tor lands in the clearnet store and onion reading history
+  can be deleted on its own. `web-open` still pages through an onion document, because the
+  handle carries its site and picks the same index going in and coming out.
+  `--persist-path off` still means nothing is written for either.
+
+- **The fence names an onion source.** A page from a `.onion` address gets one extra line
+  in the untrusted-content directive: it is an onion service, accountable to nobody, and
+  should be treated as hostile by default. Fencing is an input-layer mitigation either
+  way, but the reader now knows which pages carry the higher risk.
+
 ### Fixed
 
 - The persisted page index now creates its own directory. sqlite does not, and the default

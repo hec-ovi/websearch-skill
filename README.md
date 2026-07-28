@@ -362,7 +362,9 @@ With the layer on, every path goes through Tor: search, fetch, arXiv, GitHub. `.
 
 Put your own Tor directives in `torrc.local` beside the generated `torrc`; it is included and survives regeneration. `WEBSEARCH_TOR_SOCKS` points at a Tor you already run (`socks5h://127.0.0.1:9150` is Tor Browser's), `WEBSEARCH_TOR_PORT` moves the port, `WEBSEARCH_TOR_BINARY` skips the download, and `WEBSEARCH_TOR_VERSION` pins the bundle release.
 
-This is Tor, not Tor Browser. It hides where your requests come from; it does not resist fingerprinting, isolate circuits per site, or make what you send anonymous.
+Onion pages are indexed in their own file (`pages-onion.json` beside the ordinary index), so nothing read over Tor mixes into the clearnet store and that history can be deleted on its own, and the untrusted-content fence gains a line naming the source as an onion service: unattributable by design, so nobody behind one can be reported or blocked, which makes it the likeliest place to meet a payload written for an agent rather than a person.
+
+This is Tor, not Tor Browser. It hides where your requests come from; it does not isolate circuits per site, and it does not make what you send anonymous. There is no browser fingerprint surface here (no JS, no canvas, no cookie jar between fetches), but every request does carry the same client signature from every exit, which is linkable across them.
 
 ### VPN
 

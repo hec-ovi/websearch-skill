@@ -311,3 +311,117 @@ class _Stub:
             layer="agentio",
             backend="none",
         )
+
+
+# --- keeping onion content out of the clearnet store ----------------------------------
+
+
+def _agent_io(tmp_path, markdown="# Onion page\n\n" + "words " * 200):
+    """A facade whose fetch boundary is canned, so this exercises storage, not network."""
+    from websearch.envelope import ok_envelope
+    from websearch.layer2_extract import EXTRACT_CONTRACT_VERSION
+    from websearch.layer2_format import StoreConfig
+    from websearch.layer3_agentio import build_agent_io
+
+    class FakePipeline:
+        def run(self, request, **kwargs):
+            return ok_envelope(
+                EXTRACT_CONTRACT_VERSION,
+                {
+                    "source": {"final_url": request.url, "status": 200, "fetched_via": "http"},
+                    "result": {"title": "Onion page", "markdown": markdown, "word_count": 200},
+                },
+                layer="extract",
+                backend="fake",
+            )
+
+    return build_agent_io(
+        pipeline=FakePipeline(),
+        router=object(),
+        store_config=StoreConfig(persist_path=str(tmp_path / "pages.json")),
+    )
+
+
+def test_an_onion_page_is_indexed_in_its_own_file(tmp_path):
+    from websearch.layer3_agentio import AgentFetchRequest
+
+    aio = _agent_io(tmp_path)
+    aio.web_fetch(AgentFetchRequest(url=ONION, page_size_tokens=50))
+    aio.web_fetch(AgentFetchRequest(url="https://example.com/", page_size_tokens=50))
+
+    onion_index = tmp_path / "pages-onion.json"
+    assert onion_index.exists()
+    clearnet = {e.url for e in aio.store.resolve_index().docs}
+    onion = {e.url for e in aio.onion_store.resolve_index().docs}
+    assert clearnet == {"https://example.com/"}
+    assert onion == {ONION}
+
+
+def test_an_onion_handle_still_opens_from_its_own_store(tmp_path):
+    """Isolation must not cost the paging that makes a long onion page usable."""
+    from websearch.layer3_agentio import AgentFetchRequest, AgentOpenRequest
+
+    aio = _agent_io(tmp_path)
+    fetched = aio.web_fetch(AgentFetchRequest(url=ONION, page_size_tokens=50))
+    handle = fetched.data["pages"][0]["handle"]
+
+    opened = aio.web_open(AgentOpenRequest(handle=handle, page=2, page_size_tokens=50))
+
+    assert opened.ok, opened.error
+    assert opened.data["pages"][0]["source"] == "cache"
+
+
+def test_an_in_memory_run_writes_no_onion_file(tmp_path):
+    """`--persist-path off` means off for both indexes, not off for one of them."""
+    from websearch.envelope import ok_envelope
+    from websearch.layer2_extract import EXTRACT_CONTRACT_VERSION
+    from websearch.layer2_format import StoreConfig
+    from websearch.layer3_agentio import AgentFetchRequest, build_agent_io
+
+    class FakePipeline:
+        def run(self, request, **kwargs):
+            return ok_envelope(
+                EXTRACT_CONTRACT_VERSION,
+                {
+                    "source": {"final_url": request.url, "status": 200, "fetched_via": "http"},
+                    "result": {"title": "t", "markdown": "# t\n\nbody", "word_count": 2},
+                },
+                layer="extract",
+                backend="fake",
+            )
+
+    aio = build_agent_io(pipeline=FakePipeline(), router=object(), store_config=StoreConfig())
+    aio.web_fetch(AgentFetchRequest(url=ONION))
+
+    assert list(tmp_path.iterdir()) == []
+
+
+# --- the fence names an onion source --------------------------------------------------
+
+
+def test_the_fence_marks_an_onion_page_as_one():
+    from websearch.layer3_agentio import fence_untrusted
+
+    text, _ = fence_untrusted("body", source_url=ONION)
+
+    assert "ONION SERVICE" in text
+    assert "accountable to nobody" in text
+    assert "hostile by default" in text
+
+
+def test_the_fence_does_not_say_that_about_a_clearnet_page():
+    from websearch.layer3_agentio import fence_untrusted
+
+    text, _ = fence_untrusted("body", source_url="https://example.com/")
+
+    assert "ONION SERVICE" not in text
+    assert "UNTRUSTED DATA" in text  # the ordinary fence is unchanged
+
+
+def test_the_onion_note_reaches_a_fetched_page(tmp_path):
+    from websearch.layer3_agentio import AgentFetchRequest
+
+    aio = _agent_io(tmp_path)
+    page = aio.web_fetch(AgentFetchRequest(url=ONION, page_size_tokens=50)).data["pages"][0]
+
+    assert "ONION SERVICE" in page["content"]

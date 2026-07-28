@@ -18,6 +18,7 @@ import hashlib
 import threading
 import time
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
@@ -28,6 +29,7 @@ from ..layer2_extract import FetchRequest, build_pipeline
 from ..layer2_format import PageInput, StoreConfig, build_page_index
 from ..layer2_format.ids import site_of
 from ..layer2_format.tokens import estimate_tokens
+from ..state import onion_variant
 from .fence import fence_untrusted
 from .models import (
     AGENTIO_CONTRACT_VERSION,
@@ -70,6 +72,7 @@ class AgentIO:
         self._pipeline = pipeline
         self._store_config = store_config or StoreConfig()
         self._store = None  # lazily built so a search-only run never touches the store
+        self._onion_store = None
         self._store_lock = threading.Lock()
         # handle -> the URLs this instance indexed under it, so web_open resolves without
         # recomputing make_handle over the whole store on every call.
@@ -84,6 +87,34 @@ class AgentIO:
                 if self._store is None:
                     self._store = build_page_index(self._store_config)
         return self._store
+
+    @property
+    def onion_store(self):
+        """The page index for onion services, which is never the clearnet one.
+
+        Built only if an onion page is actually fetched or opened, so a run that never
+        touches Tor never creates the file.
+        """
+        if self._onion_store is None:
+            with self._store_lock:
+                if self._onion_store is None:
+                    config = self._store_config.model_copy(
+                        update={"persist_path": onion_variant(self._store_config.persist_path)}
+                    )
+                    self._onion_store = build_page_index(config)
+        return self._onion_store
+
+    def _store_for(self, url_or_handle: str):
+        """The index that owns this URL or handle.
+
+        A handle carries its own site (``site~shorthash``), and for an onion page that
+        site is the .onion address, so which store to read is decided by the same rule
+        going in and coming out.
+        """
+        site = url_or_handle.split("~", 1)[0]
+        if url_or_handle.startswith(("http://", "https://")):
+            site = urlsplit(url_or_handle).hostname or ""
+        return self.onion_store if site.lower().endswith(".onion") else self.store
 
     # --- web_search ----------------------------------------------------------------
 
@@ -370,13 +401,13 @@ class AgentIO:
         # store failure must not lose the fetched content, so it degrades to a warning.
         fetched_at = datetime.now(UTC).isoformat()
         try:
-            self.store.add(
-                [
-                    PageInput(url=u, markdown=markdown, title=title, fetched_at=fetched_at)
-                    for u in index_urls
-                ]
-            )
+            # Per URL, not per call: a redirect can cross the boundary (an onion service
+            # answering with a clearnet address, or the reverse), and each body belongs to
+            # the index for the address it was served from.
             for u in index_urls:
+                self._store_for(u).add(
+                    [PageInput(url=u, markdown=markdown, title=title, fetched_at=fetched_at)]
+                )
                 self._handles.setdefault(make_handle(u), set()).add(u)
         except Exception as exc:
             page_warnings.append(f"page index failed: {type(exc).__name__}: {exc}")
@@ -459,8 +490,9 @@ class AgentIO:
         reports not_opened rather than silently serving the wrong page (the agent can then
         pass the exact URL).
         """
+        store = self._store_for(handle)
         if handle.startswith(("http://", "https://")):
-            return self.store.get(handle)
+            return store.get(handle)
         # Fast path: the handles this instance indexed. The full scan (recomputing the
         # sha1 handle over every stored URL) only runs for a persisted store written by
         # another process, whose entries this instance never saw.
@@ -468,12 +500,12 @@ class AgentIO:
         if matches is None:
             matches = {
                 entry.url
-                for entry in self.store.resolve_index().docs
+                for entry in store.resolve_index().docs
                 if make_handle(entry.url) == handle
             }
         if len(matches) != 1:
             return None
-        return self.store.get(next(iter(matches)))
+        return store.get(next(iter(matches)))
 
     # --- shared --------------------------------------------------------------------
 
