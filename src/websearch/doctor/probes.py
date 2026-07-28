@@ -320,6 +320,58 @@ def probe_proxy(
     return Outcome(OK, f"exit {ip} through {shown} (not compared to a direct exit)", detail)
 
 
+def probe_tor(state: LayerState, *, timeout_s: float, direct_ip: str | None) -> Outcome:
+    """Is Tor actually carrying the traffic, or is something merely listening on the port?
+
+    Reachability alone is not the answer worth reporting: any process can accept a
+    connection on 9050, and a tool that said "tor: ok" for one would be telling you your
+    requests are anonymous when they are not. The verdict comes from Tor's own check
+    service, which is the same question SearXNG asks before it will use an onion engine.
+    """
+    if not state.enabled:
+        return Outcome(SKIPPED, state.detail)
+    if state.error:
+        return Outcome(
+            FAIL,
+            state.error,
+            {"source": state.source},
+            hint=f"Fix {state.source}, or set WEBSEARCH_TOR=off to leave the layer alone.",
+        )
+    from ..tor_local import CHECK_URL, is_reachable, verify
+
+    socks = state.value or "(unknown)"
+    detail: dict[str, Any] = {"socks_url": socks, "direct_ip": direct_ip, "check": CHECK_URL}
+    if not is_reachable(state.value):
+        return Outcome(
+            FAIL,
+            f"nothing is listening on {socks}",
+            detail,
+            hint="Start it with `websearch tor up`. Until then .onion is unreachable and "
+            "every request the layer was meant to route is going nowhere.",
+        )
+    result = verify(state.value, timeout_s=timeout_s)
+    detail.update({k: v for k, v in result.items() if k != "error"})
+    if result["is_tor"] is None:
+        return Outcome(
+            WARN,
+            f"{socks} answers but the exit could not be confirmed: {result['error']}",
+            detail,
+            hint="Tor may still be bootstrapping, or the check service is unreachable from "
+            "this exit. Re-run `websearch tor status`.",
+        )
+    if not result["is_tor"]:
+        return Outcome(
+            FAIL,
+            f"{socks} answers but the traffic is NOT leaving through Tor",
+            detail,
+            hint="Something else is bound to that port. Stop it, or move Tor with "
+            "WEBSEARCH_TOR_PORT.",
+        )
+    exit_ip = result.get("exit_ip") or "unknown"
+    changed = f" (direct was {direct_ip})" if direct_ip and direct_ip != exit_ip else ""
+    return Outcome(OK, f"Tor exit {exit_ip} through {socks}{changed}", detail)
+
+
 def _tunnel_interfaces() -> list[str] | None:
     """Tunnel-looking network interfaces, or None where the names carry no signal.
 
@@ -346,6 +398,7 @@ def probe_vpn(
     timeout_s: float,
     proxy_url: str | None,
     proxy_enabled: bool,
+    tor_enabled: bool = False,
 ) -> Outcome:
     """Is the tool's traffic really behind the VPN the operator declared?
 
@@ -357,6 +410,17 @@ def probe_vpn(
         return Outcome(SKIPPED, state.detail)
     if state.error:
         return Outcome(FAIL, state.error, {"source": state.source})
+    if tor_enabled:
+        # Everything now exits a Tor node, so every external check sees that node. A VPN
+        # hop in front of Tor is real and still doing its job (your ISP sees the VPN, not
+        # an entry guard), but nothing outside can confirm it, and reporting FAIL here
+        # would be calling a working configuration broken.
+        return Outcome(
+            SKIPPED,
+            "not checkable behind Tor: the tool's traffic exits a Tor node, so no external "
+            "service can see the VPN hop in front of it",
+            {"vpn": state.value, "tor": True},
+        )
 
     path_proxy = proxy_url if proxy_enabled else None
     via = "the egress proxy" if path_proxy else "the host connection"
@@ -587,7 +651,9 @@ def probe_github(tool, query: str) -> Outcome:
     return Outcome(OK if repos else WARN, f"{len(repos)} repos", {"repos": len(repos)})
 
 
-def probe_fetch(pipeline, url: str, *, timeout_ms: int, tier: str = "http") -> Outcome:
+def probe_fetch(
+    pipeline, url: str, *, timeout_ms: int, tier: str = "http", what: str = "http"
+) -> Outcome:
     """One fetch+extract round trip through the real Layer-2A pipeline."""
     from ..layer2_extract import FetchRequest
 
@@ -597,11 +663,19 @@ def probe_fetch(pipeline, url: str, *, timeout_ms: int, tier: str = "http") -> O
         return Outcome(FAIL, _err(exc), {"url": url})
     if not env.ok:
         err = env.error
+        # An onion failure is about the circuit, not the site: a healthy Tor reaches this
+        # address, so pointing at the site would send the reader to the wrong place.
+        hint = (
+            "The Tor circuit could not reach this onion service. Check `websearch tor "
+            "status`; a fresh Tor sometimes needs a second attempt."
+            if what == "onion"
+            else f"Try it directly for the full error: websearch fetch {url}"
+        )
         return Outcome(
             FAIL,
             f"{err.code}: {err.message}" if err else "fetch failed",
             {"url": url},
-            hint=f"Try it directly for the full error: websearch fetch {url}",
+            hint=hint,
         )
     data = env.data or {}
     src = data.get("source") or {}

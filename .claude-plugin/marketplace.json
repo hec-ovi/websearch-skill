@@ -11,7 +11,7 @@
     {
       "name": "web-search",
       "source": "./",
-      "description": "Keyless multi-engine web search, clean-Markdown fetch, and paginated read for AI agents, plus arxiv and github lookup. Bundles a portable SKILL, a websearch CLI with a one-call init, a self-hosted SearXNG that needs no Docker, an optional egress proxy (NordVPN SOCKS5), and a doctor that self-tests every engine. Needs internet; no API keys.",
+      "description": "Keyless multi-engine web search, clean-Markdown fetch, and paginated read for AI agents, plus arxiv and github lookup. Bundles two portable SKILLs (clearnet and Tor), a websearch CLI with a one-call init, a self-hosted SearXNG that needs no Docker, an optional egress proxy (NordVPN SOCKS5), an optional Tor layer for .onion search and fetch, and a doctor that self-tests every engine. Needs internet; no API keys.",
       "version": "0.3.0",
       "author": {
         "name": "Hector Oviedo"
@@ -20,7 +20,16 @@
       "repository": "https://github.com/hec-ovi/websearch-skill",
       "license": "MIT",
       "category": "productivity",
-      "keywords": ["web-search", "web-fetch", "ai-agents", "agent-skills", "searxng", "keyless"]
+      "keywords": [
+        "web-search",
+        "web-fetch",
+        "ai-agents",
+        "agent-skills",
+        "searxng",
+        "keyless",
+        "tor",
+        "onion-search"
+      ]
     }
   ]
 }

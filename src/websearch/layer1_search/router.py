@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from .. import errors
 from ..envelope import Envelope, error_envelope, ok_envelope
+from .capability import ONION_INDEX
 from .dedup import DedupedDoc, dedupe
 from .fusion import fuse
 from .models import (
@@ -70,7 +71,15 @@ class SearchRouter:
         return list(self._adapters)
 
     def _select(self, request: SearchRequest) -> list[EngineAdapter]:
-        enabled = [a for a in self._adapters if a.enabled()]
+        # Onion and clearnet engines never run in the same fanout. They index disjoint
+        # corpora, so mixing them would fuse two lists that cannot agree or disagree with
+        # each other, and half of every result set would be unreachable from the caller's
+        # egress. The request picks a side; this is where the other side is dropped.
+        enabled = [
+            a
+            for a in self._adapters
+            if a.enabled() and (a.correlation_group == ONION_INDEX) == request.onion
+        ]
         if request.engines is None:
             return enabled
         # Dedupe the requested set: a repeated name must not double-query the engine
@@ -126,8 +135,15 @@ class SearchRouter:
         request_id = str(uuid.uuid4())
         selected = self._select(request)
         backend_id = "+".join(a.name for a in selected) or None
-        known_names = sorted(a.name for a in self._adapters)
-        enabled_names = sorted(a.name for a in self._adapters if a.enabled())
+        side = ONION_INDEX if request.onion else None
+        known_names = sorted(
+            a.name for a in self._adapters if side is None or a.correlation_group == side
+        )
+        enabled_names = sorted(
+            a.name
+            for a in self._adapters
+            if a.enabled() and (side is None or a.correlation_group == side)
+        )
         unknown_requested = (
             [e for e in request.engines if e not in known_names]
             if request.engines is not None
@@ -141,6 +157,13 @@ class SearchRouter:
                 message = (
                     f"No engines matched the requested set {list(request.engines)}. "
                     f"Available engines: {enabled_names}."
+                )
+            elif request.onion:
+                # The onion engines are built with the Tor proxy or not at all, so an empty
+                # onion fanout means the layer is off rather than that an engine is down.
+                message = (
+                    "No onion search engines are available. Onion search runs over Tor: "
+                    "start it with `websearch tor up` and retry."
                 )
             elif not known_names:
                 message = "No search engines are configured (set a SearXNG URL or enable ddgs)."

@@ -9,10 +9,15 @@ keyless engines over a direct connection, and each of these adds one thing on to
                                            doctor`` to verify it rather than assume it.
 - ``proxy``   (``WEBSEARCH_PROXY``)        every network path in the tool leaves through
                                            one egress proxy URL. See ``proxy.py``.
+- ``tor``     (``WEBSEARCH_TOR``)          egress goes through a local Tor SOCKS port,
+                                           which is also what makes ``.onion`` reachable
+                                           and the onion engines selectable. When a proxy
+                                           is configured too, Tor dials out through it
+                                           rather than replacing it. See ``tor_local.py``.
 - ``searxng`` (``WEBSEARCH_SEARXNG_URL``)  a self-hosted SearXNG joins the Layer-1 fanout.
 
 Each is off when its variable is unset, empty, or one of the off words, so a fresh
-install has all three off and no way to be surprised by one. The variables can come from
+install has all four off and no way to be surprised by one. The variables can come from
 a gitignored ``.env`` (see ``load_env_file``) instead of your shell history.
 
 Credentials live in these values (a proxy URL carries user:pass), so every display path
@@ -23,21 +28,26 @@ never print a password.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from .proxy import ProxyConfigError, resolve_proxy
+from .proxy import (
+    OFF_WORDS,
+    ProxyConfigError,
+    resolve_proxy,
+    tor_enabled,
+    tor_socks_url,
+)
 
 VPN_ENV = "WEBSEARCH_VPN"
 PROXY_ENV = "WEBSEARCH_PROXY"
 SEARXNG_ENV = "WEBSEARCH_SEARXNG_URL"
+TOR_ENV = "WEBSEARCH_TOR"
 
-LAYER_NAMES = ("vpn", "proxy", "searxng")
+LAYER_NAMES = ("vpn", "proxy", "tor", "searxng")
 
-# Words that mean "off" in any of the three switches. `direct`/`none` are here because
-# proxy.py already accepts them, and one vocabulary across the three is less to remember.
-OFF_WORDS = {"", "off", "none", "no", "false", "0", "direct"}
 
 # WEBSEARCH_VPN values. `nordvpn` is verifiable (NordVPN publishes a keyless endpoint that
 # reports whether the caller is behind their network); `any` only asserts that egress is
@@ -49,19 +59,37 @@ _VPN_ANY_ALIASES = {"any", "on", "yes", "true", "1", "vpn"}
 
 ENV_FILE = ".env"
 ENV_FILE_VAR = "WEBSEARCH_ENV_FILE"
+CONFIG_DIR_NAME = "websearch"
 
 
-def load_env_file(path: str | None = None) -> list[str]:
-    """Read ``.env`` into the environment and return the names it set.
+def user_config_dir() -> Path:
+    """This user's config directory for the tool: ``$XDG_CONFIG_HOME/websearch``."""
+    base = os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config")
+    return Path(base).expanduser() / CONFIG_DIR_NAME
 
-    The credentials these layers need (NordVPN service credentials, a proxy URL) are the
-    kind you do not want in shell history or a systemd unit, and ``.env`` is already
-    gitignored. Real environment variables always win, so exporting one still overrides
-    the file. Stdlib only: a 30-line parser is cheaper than a dependency.
+
+def user_env_file() -> Path:
+    """The one settings file that does not depend on where you run the command from."""
+    return user_config_dir() / ENV_FILE
+
+
+def env_file_candidates(path: str | None = None) -> list[Path]:
+    """Every file ``load_env_file`` reads, most significant first.
+
+    An explicit path (or ``WEBSEARCH_ENV_FILE``) is the whole chain when it is set: a
+    caller that named a file means that file. Otherwise the working directory's ``.env``
+    comes first, for a project that keeps its own, and the user config file last, which
+    is the one place a setting survives changing directories.
     """
-    target = Path(path or os.environ.get(ENV_FILE_VAR) or ENV_FILE)
+    explicit = path or os.environ.get(ENV_FILE_VAR)
+    if explicit:
+        return [Path(explicit).expanduser()]
+    return [Path(ENV_FILE), user_env_file()]
+
+
+def _load_one(target: Path) -> list[str]:
     try:
-        lines = Path(target).read_text(encoding="utf-8").splitlines()
+        lines = target.read_text(encoding="utf-8").splitlines()
     except OSError:
         return []
     loaded: list[str] = []
@@ -78,11 +106,67 @@ def load_env_file(path: str | None = None) -> list[str]:
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
-        if key in os.environ:  # an exported variable beats the file
+        if key in os.environ:  # an exported variable, or an earlier file, beats this one
             continue
         os.environ[key] = value
         loaded.append(key)
     return loaded
+
+
+def load_env_file(path: str | None = None) -> list[str]:
+    """Read the settings files into the environment and return the names they set.
+
+    The credentials these layers need (NordVPN service credentials, a proxy URL) are the
+    kind you do not want in shell history or a systemd unit, and both candidate files are
+    outside the repo or gitignored. Precedence, highest first: an exported variable, then
+    ``WEBSEARCH_ENV_FILE`` when set, then ``./.env``, then ``~/.config/websearch/.env``.
+    Nothing already set is ever overwritten, so a file can only fill in a gap. Stdlib
+    only: a 30-line parser is cheaper than a dependency.
+    """
+    loaded: list[str] = []
+    for target in env_file_candidates(path):
+        loaded.extend(_load_one(target))
+    return loaded
+
+
+def _defines(path: Path, key: str) -> bool:
+    """Whether ``path`` sets ``key``, however it spells the assignment."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    pattern = re.compile(rf"^\s*(export\s+)?{re.escape(key)}\s*=", re.MULTILINE)
+    return bool(pattern.search(text))
+
+
+def write_env_setting(key: str, value: str) -> Path | None:
+    """Record ``key=value`` in the settings file, so the next command starts with it.
+
+    A local process (the SearXNG bring-up, the Tor bring-up) knows a URL the next command
+    has no way to guess, and a variable exported into this process dies with it. The
+    target is ``WEBSEARCH_ENV_FILE`` when configured, else the user config file, which is
+    this tool's own and safe to create. The working directory's ``.env`` is never written:
+    it belongs to whatever project you happen to be standing in.
+
+    Returns None when nothing was written, which happens when a
+    higher-precedence file already sets the key: writing underneath it would produce a
+    file that says one thing and an environment that does another.
+    """
+    target = Path(os.environ.get(ENV_FILE_VAR) or user_env_file()).expanduser()
+    for candidate in env_file_candidates():
+        if candidate.resolve() == target.resolve():
+            break
+        if _defines(candidate, key):
+            return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    line = f"{key}={value}"
+    existing = target.read_text(encoding="utf-8").splitlines() if target.exists() else []
+    pattern = re.compile(rf"^\s*(export\s+)?{re.escape(key)}\s*=")
+    kept = [ln for ln in existing if not pattern.match(ln)]
+    kept.append(line)
+    target.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    target.chmod(0o600)  # it holds proxy credentials often enough to assume it does
+    return target
 
 
 def redact_url(url: str | None) -> str | None:
@@ -244,6 +328,53 @@ def proxy_state(cli_value: str | None = None) -> LayerState:
     )
 
 
+def tor_state(cli_value: str | None = None, *, proxy_cli: str | None = None) -> LayerState:
+    """The Tor layer: off, or the local SOCKS port every path connects through.
+
+    The detail line names the upstream proxy when there is one, because "on" alone would
+    not tell you whether the VPN hop you configured survived. It did: Tor dials out
+    through it. See ``tor_local.torrc_upstream``.
+    """
+    source = "--tor" if cli_value is not None else TOR_ENV
+    try:
+        enabled = tor_enabled(cli_value)
+    except ProxyConfigError as exc:
+        return LayerState(
+            name="tor",
+            enabled=True,
+            source=source,
+            value=None,
+            detail=f"{source}={cli_value if cli_value is not None else os.environ.get(TOR_ENV)!r}"
+            " is not a switch value",
+            error=str(exc),
+        )
+    if not enabled:
+        return LayerState(
+            name="tor",
+            enabled=False,
+            source=None,
+            value=None,
+            detail=f"off (set {TOR_ENV}=on; `websearch tor up` starts one and sets it)",
+        )
+    try:
+        socks = tor_socks_url()
+    except ProxyConfigError as exc:
+        return LayerState(
+            name="tor",
+            enabled=True,
+            source=source,
+            value=None,
+            detail="the Tor SOCKS address is unusable",
+            error=str(exc),
+        )
+    upstream = proxy_state(proxy_cli)
+    chained = upstream.enabled and not upstream.error
+    detail = "every network path leaves through Tor; .onion and the onion engines work"
+    if chained:
+        detail += f"; Tor dials out through {upstream.value}"
+    return LayerState(name="tor", enabled=True, source=source, value=socks, detail=detail)
+
+
 def searxng_state(cli_value: str | None = None) -> LayerState:
     """The SearXNG layer: off, or one base URL joining the Layer-1 fanout."""
     source = "--searxng-url" if cli_value is not None else SEARXNG_ENV
@@ -275,23 +406,43 @@ def searxng_state(cli_value: str | None = None) -> LayerState:
     )
 
 
-def resolved_proxy_url(cli_value: str | None = None) -> str | None:
-    """The effective proxy URL WITH credentials, or None. Never print this."""
+def configured_proxy_url(cli_value: str | None = None) -> str | None:
+    """The ``WEBSEARCH_PROXY`` hop WITH credentials, ignoring Tor. Never print this.
+
+    Separate from ``resolved_proxy_url`` because two callers want different things: a
+    request wants the address to connect through (Tor, when it is on), while the proxy
+    check wants the proxy itself, which with Tor on is a real hop that still has to work.
+    """
     state = proxy_state(cli_value)
     if not state.enabled or state.error:
         return None
     return resolve_proxy(cli_value)
 
 
+def resolved_proxy_url(cli_value: str | None = None, tor_cli: str | None = None) -> str | None:
+    """The effective egress address WITH credentials, or None. Never print this.
+
+    Tor first when its layer is on, then the configured proxy. A proxy that is set but
+    unusable resolves to None on its own; with Tor on it is Tor's problem instead, since
+    that is the hop that has to dial through it.
+    """
+    tor = tor_state(tor_cli, proxy_cli=cli_value)
+    if tor.enabled and not tor.error:
+        return tor_socks_url()
+    return configured_proxy_url(cli_value)
+
+
 def layer_states(
     *,
     vpn: str | None = None,
     proxy: str | None = None,
+    tor: str | None = None,
     searxng_url: str | None = None,
 ) -> dict[str, LayerState]:
-    """All three layers at once, in the order they sit in the egress path."""
+    """All four layers at once, in the order they sit in the egress path."""
     return {
         "vpn": vpn_state(vpn),
         "proxy": proxy_state(proxy),
+        "tor": tor_state(tor, proxy_cli=proxy),
         "searxng": searxng_state(searxng_url),
     }

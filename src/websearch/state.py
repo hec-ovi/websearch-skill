@@ -21,12 +21,21 @@ PAGES_FILE = "pages.json"
 
 
 def state_dir() -> Path:
-    """The directory for anything that outlives a single command."""
+    """The directory for anything that outlives a single command.
+
+    Settings and state are deliberately not the same directory. Everything here is
+    regenerable (a SearXNG checkout, a Tor bundle, a page index), which is what the cache
+    is for, while settings live in the config directory and are not. Tying the two
+    together would also mean that writing your first settings file moved an existing
+    install out from under you.
+    """
     explicit = os.environ.get(STATE_DIR_VAR)
     if explicit:
         return Path(explicit).expanduser().resolve()
     env_file = os.environ.get(ENV_FILE_VAR)
     if env_file:
+        # A container that mounts one directory for its config keeps its install across
+        # runs this way, which is the case this rule exists for.
         return Path(env_file).expanduser().resolve().parent
     cache = os.environ.get("XDG_CACHE_HOME") or (Path.home() / ".cache")
     return (Path(cache) / "websearch").resolve()

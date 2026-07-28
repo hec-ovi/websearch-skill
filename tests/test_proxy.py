@@ -173,7 +173,7 @@ def test_fetch_proxy_shapes():
     assert proxy_type(SOCKS) == "socks5"
     assert proxy_type(HTTP) == "http"
     assert as_fetch_proxy(None) is None
-    assert as_fetch_proxy(SOCKS) == {"url": SOCKS, "type": "socks5"}
+    assert as_fetch_proxy(SOCKS) == {"url": SOCKS, "type": "socks5", "tor": False}
 
 
 # --- layer 1: search engines --------------------------------------------------------

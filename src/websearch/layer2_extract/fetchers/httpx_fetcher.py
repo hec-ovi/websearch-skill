@@ -82,6 +82,7 @@ class HttpxFetcher(FetchAdapter):
                             current,
                             allow_private=request.allow_private_hosts,
                             proxied=proxy is not None,
+                            tor=bool(request.proxy and request.proxy.tor),
                         )
                     except BlockedEgress as exc:
                         return fail(

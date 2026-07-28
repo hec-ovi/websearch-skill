@@ -6,8 +6,10 @@ This module is the supported alternative. It runs the same three steps every tim
 same order:
 
 1. ``env``     read the configured env file, so a URL another process wrote lands here.
-2. ``searxng`` start the local SearXNG (unless skipped) and point THIS process at it.
-3. ``doctor``  the full sweep, so the answer is measured rather than assumed.
+2. ``tor``     bring Tor up, but only when the tor layer is on. It is off by default, so
+               this step normally reports "off" and costs nothing.
+3. ``searxng`` start the local SearXNG (unless skipped) and point THIS process at it.
+4. ``doctor``  the full sweep, so the answer is measured rather than assumed.
 
 Then it answers the only question the caller actually has, in one field: ``ready``. What
 works and what does not is in ``capabilities``, and anything worth doing about it is in
@@ -27,9 +29,16 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .envelope import Envelope, ok_envelope
-from .optional_layers import ENV_FILE, ENV_FILE_VAR, SEARXNG_ENV, load_env_file
+from .optional_layers import (
+    ENV_FILE_VAR,
+    SEARXNG_ENV,
+    TOR_ENV,
+    env_file_candidates,
+    load_env_file,
+    user_env_file,
+)
 
-INIT_CONTRACT_VERSION = "1.0.0"
+INIT_CONTRACT_VERSION = "1.1.0"
 
 OK = "ok"
 WARN = "warn"
@@ -45,7 +54,7 @@ CAP_DOWN = "down"
 CAP_OFF = "off"
 CAP_UNKNOWN = "unknown"
 
-StepName = Literal["env", "searxng", "doctor"]
+StepName = Literal["env", "tor", "searxng", "doctor"]
 Status = Literal["ok", "warn", "fail", "skipped"]
 Capability = Literal["ok", "degraded", "down", "off", "unknown"]
 State = Literal["ready", "degraded", "broken"]
@@ -60,6 +69,10 @@ class InitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     searxng: Literal["up", "skip"] = "up"
+    # "auto" starts Tor only when the tor layer is on, which it is not unless you turned
+    # it on. There is no "up" here on purpose: bringing up an anonymity layer that nobody
+    # asked for would change where every request in the session comes from.
+    tor: Literal["auto", "skip"] = "auto"
     quick: bool = False
     timeout_ms: int = Field(default=15000, ge=1000, le=120000)
 
@@ -89,6 +102,7 @@ class InitCapabilities(BaseModel):
     searxng: Capability
     proxy: Capability
     vpn: Capability
+    tor: Capability = CAP_OFF  # type: ignore[assignment]
 
 
 class InitEngines(BaseModel):
@@ -124,13 +138,14 @@ def run(
     request: InitRequest | None = None,
     *,
     searxng_control: Callable[[Any], Envelope] | None = None,
+    tor_control: Callable[[Any], Envelope] | None = None,
     doctor_factory: Callable[..., Any] | None = None,
 ) -> Envelope:
     """Bring everything online and report the result. Never raises for a broken layer."""
     request = request or InitRequest()
     started = time.perf_counter()
 
-    steps = [_step_env(), _step_searxng(request, searxng_control)]
+    steps = [_step_env(), _step_tor(request, tor_control), _step_searxng(request, searxng_control)]
     doctor_step, doctor_payload = _step_doctor(request, doctor_factory)
     steps.append(doctor_step)
 
@@ -170,45 +185,131 @@ def _timed(fn: Callable[[], InitStep]) -> InitStep:
 
 def _step_env() -> InitStep:
     def go() -> InitStep:
-        from pathlib import Path
-
         configured = os.environ.get(ENV_FILE_VAR)
-        # The same target the loader uses, so the step reports the file that was actually
-        # read rather than only the configured one.
-        target = Path(configured or ENV_FILE)
-        # Re-reading is the point, not a no-op: the file may have gained variables since
+        # Every file the loader would read, in its own precedence order, so the step
+        # answers "where do my settings go" rather than only "did one file exist".
+        candidates = env_file_candidates()
+        # Re-reading is the point, not a no-op: a file may have gained variables since
         # this process started, and exported variables still win, so nothing already set
         # can be overwritten from disk.
         loaded = load_env_file()
+        present = [p for p in candidates if p.exists()]
         # Names only. These values are credentials often enough that printing them is
         # never worth it.
-        detail = {"path": str(target), "exists": target.exists(), "loaded": loaded}
-        if not target.exists():
+        detail = {
+            "path": str(present[0]) if present else str(candidates[0]),
+            "exists": bool(present),
+            "candidates": [{"path": str(p), "exists": p.exists()} for p in candidates],
+            "loaded": loaded,
+        }
+        if not present:
             return InitStep(
                 name="env",
                 status=OK,
-                summary=f"no env file at {target}; using the environment as it is",
+                summary=f"no settings file yet; using the environment as it is "
+                f"(looked in {', '.join(str(p) for p in candidates)})",
                 detail=detail,
                 hint=(
-                    f"Set {ENV_FILE_VAR} to a file path to keep proxy and SearXNG settings "
-                    "out of your shell history."
+                    f"Put proxy, Tor, and SearXNG settings in {user_env_file()} to keep "
+                    f"them out of your shell history and out of any one project. "
+                    f"{ENV_FILE_VAR} overrides that path."
                 ),
             )
+        read = ", ".join(str(p) for p in present)
         return InitStep(
             name="env",
             status=OK,
-            summary=f"read {target}" + (f" ({len(loaded)} new variables)" if loaded else ""),
+            summary=f"read {read}" + (f" ({len(loaded)} new variables)" if loaded else ""),
             detail=detail,
             hint=None
-            if configured
-            else f"This is the default ./{ENV_FILE}; set {ENV_FILE_VAR} to keep these "
-            "settings with your config instead of in the working directory.",
+            if configured or present[0] == user_env_file()
+            else f"These settings come from {present[0]}, which is tied to this working "
+            f"directory; {user_env_file()} applies wherever you run the command.",
         )
 
     return _timed(go)
 
 
-# --- step 2: SearXNG ------------------------------------------------------------------
+# --- step 2: Tor --------------------------------------------------------------------
+
+
+def _step_tor(request: InitRequest, tor_control: Callable[[Any], Envelope] | None) -> InitStep:
+    def go() -> InitStep:
+        from .optional_layers import tor_state
+
+        layer = tor_state()
+        if not layer.enabled:
+            return InitStep(
+                name="tor",
+                status=SKIPPED,
+                summary=f"off ({TOR_ENV} is not set); egress is not going through Tor",
+                detail={"socks_url": None},
+            )
+        if layer.error:
+            return InitStep(
+                name="tor",
+                status=WARN,
+                summary=f"the tor layer is on but unusable: {layer.error}",
+                detail={"socks_url": None},
+                hint=f"Fix {TOR_ENV} or set it to off; everything else still works.",
+            )
+        if request.tor == "skip":
+            return InitStep(
+                name="tor",
+                status=SKIPPED,
+                summary=f"not touched (tor=skip); {TOR_ENV} says egress goes through {layer.value}",
+                detail={"socks_url": layer.value},
+            )
+
+        from .tor_local import TorRequest, control
+
+        envelope = (tor_control or control)(TorRequest(action="up"))
+        if not envelope.ok:
+            message = envelope.error.message if envelope.error else "the bring-up failed"
+            return InitStep(
+                name="tor",
+                status=FAIL,
+                summary=f"Tor did not come up: {message}",
+                detail={"error": envelope.error.code if envelope.error else None},
+                # A failed Tor with the layer on is not a degradation to work around: the
+                # requests it was meant to anonymize would leave the machine unprotected,
+                # so the honest move is to say so and let the caller decide.
+                hint="Search still works, but NOT through Tor: with the layer on and no "
+                "Tor, .onion is unreachable and onion search is unavailable. Run "
+                "`websearch tor up` for the full output, or set WEBSEARCH_TOR=off to "
+                "search the clearnet deliberately.",
+            )
+        data = envelope.data or {}
+        verified = data.get("is_tor")
+        summary = f"Tor answering at {data.get('socks_url')}"
+        if data.get("version"):
+            summary += f" (expert bundle {data['version']})"
+        if data.get("upstream"):
+            summary += f", dialing out through {data['upstream']}"
+        if verified is False:
+            return InitStep(
+                name="tor",
+                status=FAIL,
+                summary=f"{data.get('socks_url')} answers but the traffic is not Tor",
+                detail=dict(data),
+                hint="Something else is bound to that port. Stop it, or move Tor with "
+                "WEBSEARCH_TOR_PORT.",
+            )
+        return InitStep(
+            name="tor",
+            status=OK if verified else WARN,
+            summary=summary + ("" if verified else "; could not confirm with check.torproject.org"),
+            detail=dict(data),
+            hint=None
+            if verified
+            else "The SOCKS port answers and Tor bootstrapped, but the check service could "
+            "not be reached to confirm the exit. Re-run `websearch tor status`.",
+        )
+
+    return _timed(go)
+
+
+# --- step 3: SearXNG ------------------------------------------------------------------
 
 
 def _step_searxng(
@@ -273,7 +374,7 @@ def _step_searxng(
     return _timed(go)
 
 
-# --- step 3: the sweep ----------------------------------------------------------------
+# --- step 4: the sweep ----------------------------------------------------------------
 
 
 def _step_doctor(
@@ -344,6 +445,7 @@ def _capabilities(checks: dict[str, Any]) -> InitCapabilities:
         searxng=_cap(checks, "searxng"),  # type: ignore[arg-type]
         proxy=_cap(checks, "proxy"),  # type: ignore[arg-type]
         vpn=_cap(checks, "vpn"),  # type: ignore[arg-type]
+        tor=_cap(checks, "tor"),  # type: ignore[arg-type]
     )
 
 
@@ -417,8 +519,15 @@ def _headline(
     if broken:
         parts.append(f"{', '.join(broken)} not working")
     proxy = layers.get("proxy") or {}
+    tor = layers.get("tor") or {}
     proxied = proxy.get("enabled") and capabilities.proxy == CAP_OK
-    parts.append(f"egress through {proxy.get('value')}" if proxied else "direct egress")
+    if tor.get("enabled") and capabilities.tor in (CAP_OK, CAP_DEGRADED):
+        # Name both hops when both are in the path: "through Tor" alone would read as the
+        # proxy having been dropped, which is exactly what did not happen.
+        via = f"egress through Tor at {tor.get('value')}"
+        parts.append(f"{via} via {proxy.get('value')}" if proxied else via)
+    else:
+        parts.append(f"egress through {proxy.get('value')}" if proxied else "direct egress")
     return f"{state}: " + "; ".join(parts)
 
 

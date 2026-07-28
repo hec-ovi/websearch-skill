@@ -14,7 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-AGENTIO_CONTRACT_VERSION = "1.1.0"
+AGENTIO_CONTRACT_VERSION = "1.2.0"
 
 # Engineering defaults (NOT documented platform constants). 8 results balances recall
 # against the per-call token budget; 4000-token pages stay well under the 25,000-token
@@ -47,6 +47,9 @@ class AgentSearchRequest(BaseModel):
     freshness: Freshness = "any"
     safesearch: SafeSearch = "moderate"
     site: str | None = None
+    # Search the Tor onion indexes instead of the clearnet engines. Needs the tor layer;
+    # without it the request comes back with no_engines_enabled and says so.
+    onion: bool = False
 
     @field_validator("query")
     @classmethod

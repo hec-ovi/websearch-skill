@@ -104,16 +104,39 @@ def schema_errors(instance: Any, ref: str) -> list[str]:
     ]
 
 
+LAYER_VARS = (
+    "WEBSEARCH_TOR",
+    "WEBSEARCH_TOR_SOCKS",
+    "WEBSEARCH_TOR_PORT",
+    "WEBSEARCH_TOR_HOME",
+    "WEBSEARCH_TOR_BINARY",
+    "WEBSEARCH_TOR_VERSION",
+    "WEBSEARCH_PROXY",
+    "WEBSEARCH_VPN",
+    "NORDVPN_USER",
+    "NORDVPN_PASS",
+    "NORDVPN_HOST",
+)
+
+
 @pytest.fixture(autouse=True)
 def _no_developer_dotenv(monkeypatch, tmp_path):
-    """Point the .env loader at a file that does not exist, for every test.
+    """Point the settings loader at files that do not exist, for every test.
 
-    The CLI reads a `.env` from the working directory, so without this a developer who
-    keeps a real one in the repo runs the whole suite with their proxy and NordVPN
-    credentials loaded, and the tests that assert on an unconfigured environment fail on
-    their machine only. Tests that exercise the loader pass an explicit path.
+    The CLI reads a `.env` from the working directory and one from the user config
+    directory, so without this a developer who keeps a real one runs the whole suite with
+    their proxy and NordVPN credentials loaded, and the tests that assert on an
+    unconfigured environment fail on their machine only. The config directory is
+    redirected as well as the file, because the bring-up paths WRITE there: a test must
+    never turn a developer's tor layer on. The layer variables themselves are cleared for
+    the same reason: a developer with a proxy exported would otherwise run the suite
+    through it, and one of these tests would print their credentials in a failure diff.
+    Tests that exercise the loader pass an explicit path.
     """
     monkeypatch.setenv("WEBSEARCH_ENV_FILE", str(tmp_path / "absent.env"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    for var in LAYER_VARS:
+        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture(autouse=True)

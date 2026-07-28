@@ -22,6 +22,8 @@ from urllib.parse import urlsplit
 
 ALLOWED_SCHEMES = ("http", "https")
 
+ONION_TLD = ".onion"
+
 
 class BlockedEgress(Exception):
     """Raised when a URL is refused by the egress policy (not an anti-bot block)."""
@@ -29,6 +31,12 @@ class BlockedEgress(Exception):
     def __init__(self, reason: str):
         self.reason = reason
         super().__init__(reason)
+
+
+def is_onion(url: str) -> bool:
+    """Whether this URL names a Tor onion service."""
+    host = (urlsplit(url).hostname or "").lower()
+    return host.endswith(ONION_TLD)
 
 
 def _ip_is_internal(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -52,11 +60,13 @@ def guard_url(
     allow_private: bool = False,
     resolve: Callable[[str], set[str]] | None = None,
     proxied: bool = False,
+    tor: bool = False,
 ) -> None:
     """Raise ``BlockedEgress`` if ``url`` violates the egress policy.
 
     ``proxied`` says the request will be made by a remote exit node rather than by this
-    machine. That changes what the hostname check is worth: see below.
+    machine. That changes what the hostname check is worth: see below. ``tor`` says that
+    exit is a Tor client, which is the only case where a ``.onion`` name means anything.
     """
     parts = urlsplit(url)
     scheme = (parts.scheme or "").lower()
@@ -65,6 +75,16 @@ def guard_url(
     host = parts.hostname
     if not host:
         raise BlockedEgress("refused: url has no host")
+    if host.lower().endswith(ONION_TLD):
+        # Checked before allow_private, and before anything resolves: an onion name has no
+        # answer outside Tor, so without the layer this is not a fetch that might work but
+        # a lookup that leaks the address to the local resolver on its way to failing.
+        if not tor:
+            raise BlockedEgress(
+                f"refused: {host} is a Tor onion service and the tor layer is off. "
+                "Start it with `websearch tor up`, then retry."
+            )
+        return
     if allow_private:
         return
 

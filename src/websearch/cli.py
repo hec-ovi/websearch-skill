@@ -21,7 +21,7 @@ from pydantic import ValidationError
 
 from . import errors
 from .envelope import ENVELOPE_CONTRACT_VERSION, error_envelope
-from .proxy import ProxyConfigError, as_fetch_proxy, resolve_proxy
+from .proxy import ProxyConfigError, as_fetch_proxy, egress_proxy
 
 # Mirrors layer3_agentio.DEFAULT_PAGE_SIZE_TOKENS without importing the layer at module
 # import time (tests pin the two in lockstep).
@@ -60,6 +60,34 @@ def _add_proxy_arg(p: Any) -> None:
         "'nordvpn' (SOCKS5 from NORDVPN_USER/NORDVPN_PASS service credentials), or "
         "'off'. Default: the WEBSEARCH_PROXY environment variable.",
     )
+    p.add_argument(
+        "--tor",
+        help="Tor layer for this run: 'on' or 'off'. Default: WEBSEARCH_TOR, which "
+        "defaults to off. On, every request goes through the local Tor SOCKS port and "
+        "a configured --proxy becomes Tor's own upstream instead of being replaced.",
+    )
+
+
+def _add_onion_arg(p: Any) -> None:
+    p.add_argument(
+        "--onion",
+        action="store_true",
+        help="Search the Tor onion indexes (Ahmia, and SearXNG's onions category) instead "
+        "of the clearnet engines. Needs the tor layer: `websearch tor up`. The two sets "
+        "index different networks, so this replaces the fanout rather than adding to it.",
+    )
+
+
+def _egress(args: argparse.Namespace) -> str | None:
+    """The address this command's requests connect through: Tor first, then the proxy."""
+    return egress_proxy(getattr(args, "proxy", None), getattr(args, "tor", None))
+
+
+def _egress_fetch_proxy(args: argparse.Namespace) -> dict | None:
+    """The same address in Layer-2A shape, carrying whether the hop is Tor."""
+    from .proxy import tor_enabled
+
+    return as_fetch_proxy(_egress(args), tor=tor_enabled(getattr(args, "tor", None)))
 
 
 def _add_search_command(sub: Any) -> None:
@@ -91,6 +119,7 @@ def _add_search_command(sub: Any) -> None:
         help="SearXNG base URL (or set WEBSEARCH_SEARXNG_URL).",
     )
     sp.add_argument("--no-ddgs", action="store_true", help="Disable the ddgs fallback engine.")
+    _add_onion_arg(sp)
     _add_proxy_arg(sp)
     sp.add_argument(
         "--ddgs-backends",
@@ -118,6 +147,7 @@ def _cmd_search(args: argparse.Namespace) -> int:
             include_sites=args.include_site,
             exclude_sites=args.exclude_site,
             engines=engines,
+            onion=args.onion,
         )
     except ValidationError as exc:
         env = error_envelope(
@@ -138,7 +168,8 @@ def _cmd_search(args: argparse.Namespace) -> int:
         searxng_url=args.searxng_url,
         enable_ddgs=not args.no_ddgs,
         ddgs_backend=args.ddgs_backends or "auto",
-        proxy=resolve_proxy(args.proxy),
+        proxy=_egress(args),
+        onion=request.onion,
     )
     envelope = router.search(request)
     payload = envelope.model_dump(mode="json")
@@ -252,7 +283,7 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
             as_json=args.json,
         )
 
-    proxy = as_fetch_proxy(resolve_proxy(args.proxy))
+    proxy = _egress_fetch_proxy(args)
 
     fetch_kwargs: dict[str, Any] = dict(
         url=args.url,
@@ -465,7 +496,7 @@ def _cmd_open(args: argparse.Namespace) -> int:
                 as_json=args.json,
             )
 
-    pipeline = build_pipeline(proxy=resolve_proxy(args.proxy))
+    pipeline = build_pipeline(proxy=_egress(args))
     results: list[ResultInput] = []
     pages: list[PageInput] = []
     warnings: list[str] = []
@@ -600,6 +631,7 @@ def _add_websearch_command(sub: Any) -> None:
     # zero-config default and needs no engine flags. Engine/backend selection lives on the
     # lower-level `search` command for debugging, not on this plug-and-play agent surface.
     wp.add_argument("--searxng-url", default=os.environ.get("WEBSEARCH_SEARXNG_URL"))
+    _add_onion_arg(wp)
     _add_proxy_arg(wp)
     wp.add_argument("--json", action="store_true", help="Emit the raw agentio Envelope.")
 
@@ -618,6 +650,7 @@ def _cmd_websearch(args: argparse.Namespace) -> int:
             safesearch=args.safesearch,
             site=args.site,
             offset=args.offset,
+            onion=args.onion,
         )
     except ValidationError as exc:
         return _emit_error(
@@ -627,7 +660,9 @@ def _cmd_websearch(args: argparse.Namespace) -> int:
             layer="agentio",
             as_json=args.json,
         )
-    aio = _builder("build_agent_io")(searxng_url=args.searxng_url, proxy=resolve_proxy(args.proxy))
+    aio = _builder("build_agent_io")(
+        searxng_url=args.searxng_url, proxy=_egress(args), onion=getattr(args, "onion", False)
+    )
     env = aio.web_search(req)
     payload = env.model_dump(mode="json")
     if args.json:
@@ -733,7 +768,7 @@ def _cmd_webfetch(args: argparse.Namespace) -> int:
     aio = _builder("build_agent_io")(
         enable_ddgs=False,
         store_config=StoreConfig(persist_path=store),
-        proxy=resolve_proxy(args.proxy),
+        proxy=_egress(args),
     )
     env = aio.web_fetch_many(
         args.urls,
@@ -923,7 +958,7 @@ def _cmd_arxiv(args: argparse.Namespace) -> int:
             layer="arxiv",
             as_json=args.json,
         )
-    env = _builder("build_arxiv_tool")(proxy=resolve_proxy(args.proxy)).search(req)
+    env = _builder("build_arxiv_tool")(proxy=_egress(args)).search(req)
     payload = env.model_dump(mode="json")
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -1001,7 +1036,7 @@ def _cmd_github(args: argparse.Namespace) -> int:
             layer="github",
             as_json=args.json,
         )
-    env = _builder("build_github_tool")(proxy=resolve_proxy(args.proxy)).search(req)
+    env = _builder("build_github_tool")(proxy=_egress(args)).search(req)
     payload = env.model_dump(mode="json")
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -1083,6 +1118,11 @@ def _add_doctor_command(sub: Any) -> None:
     )
     dp.add_argument("--fetch-url", default=None, help="The URL the fetch tiers are probed against.")
     dp.add_argument(
+        "--onion-url",
+        default=None,
+        help="The onion service the tor layer's fetch check is probed against.",
+    )
+    dp.add_argument(
         "--vpn",
         help="VPN layer for this run: 'nordvpn', 'any', or 'off'. Default: the "
         "WEBSEARCH_VPN environment variable, which defaults to off.",
@@ -1107,6 +1147,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         ("timeout_ms", "timeout_ms"),
         ("query", "query"),
         ("fetch_url", "fetch_url"),
+        ("onion_url", "onion_url"),
     ):
         value = getattr(args, flag)
         if value:  # an omitted flag keeps DoctorRequest's contract default
@@ -1124,7 +1165,9 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
     # A misconfigured proxy is a finding, not a crash: build_doctor records it as the
     # proxy layer's error and the run continues so you see everything else too.
-    doctor = _builder("build_doctor")(vpn=args.vpn, proxy=args.proxy, searxng_url=args.searxng_url)
+    doctor = _builder("build_doctor")(
+        vpn=args.vpn, proxy=args.proxy, tor=args.tor, searxng_url=args.searxng_url
+    )
     env = doctor.run(request)
     payload = env.model_dump(mode="json")
     if args.json:
@@ -1147,7 +1190,7 @@ def _print_doctor_human(env: dict) -> None:
     data = env.get("data") or {}
 
     print("optional layers (every one off until you turn it on)")
-    for name in ("vpn", "proxy", "searxng"):
+    for name in ("vpn", "proxy", "tor", "searxng"):
         layer = (data.get("layers") or {}).get(name) or {}
         state = "on " if layer.get("enabled") else "off"
         value = layer.get("value") or ""
@@ -1196,6 +1239,12 @@ def _add_init_command(sub: Any) -> None:
         "is still used and still checked.",
     )
     ip.add_argument(
+        "--skip-tor",
+        action="store_true",
+        help="Do not start Tor even when the tor layer is on. The layer is off by "
+        "default, in which case this changes nothing.",
+    )
+    ip.add_argument(
         "--quick",
         action="store_true",
         help="Quick doctor sweep: no per-engine fanout, extra tools, or fetch tiers. The "
@@ -1210,6 +1259,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
     fields: dict[str, Any] = {
         "searxng": "skip" if args.skip_searxng else "up",
+        "tor": "skip" if args.skip_tor else "auto",
         "quick": args.quick,
     }
     if args.timeout_ms:  # an omitted flag keeps InitRequest's contract default
@@ -1384,6 +1434,139 @@ def _print_searxng_wiring(url: str, wired: str | None) -> None:
         print(f"point this tool at it: export {SEARXNG_ENV}={url}")
 
 
+def _add_tor_command(sub: Any) -> None:
+    tp = sub.add_parser(
+        "tor",
+        help="Run Tor on this machine and route the tool through it: start it, report on "
+        "it, or stop it. Off until you start it.",
+        epilog=(
+            "state lives in WEBSEARCH_TOR_HOME (default: a 'tor' directory beside the "
+            "settings file, else the XDG cache). 'up' uses a tor already listening, then "
+            "`tor` on PATH, and only then downloads the official Tor Expert Bundle and "
+            "checks it against the published sha256. An egress proxy is not replaced: it "
+            "is written into torrc as Tor's upstream, so the path is proxy then Tor."
+        ),
+    )
+    tp.add_argument(
+        "action",
+        choices=["up", "status", "down"],
+        help="up: install if needed, start it, verify the exit, and turn the layer on. "
+        "status: where it is, whether it answers, and whether the traffic is really Tor. "
+        "down: stop it and turn the layer off.",
+    )
+    tp.add_argument(
+        "--reinstall",
+        action="store_true",
+        help="Download and unpack the expert bundle again before starting (up only).",
+    )
+    tp.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip the check.torproject.org confirmation. Faster, and blind: reachable is "
+        "not the same as anonymous.",
+    )
+    tp.add_argument(
+        "--timeout-s",
+        type=int,
+        help="How long to wait for the bootstrap (default 120). A first circuit through a "
+        "slow upstream proxy can need most of it.",
+    )
+    tp.add_argument("--json", action="store_true", help="Emit the state as JSON.")
+
+
+def _cmd_tor(args: argparse.Namespace) -> int:
+    from . import tor_local as tor
+
+    fields: dict[str, Any] = {"action": args.action, "reinstall": args.reinstall}
+    fields["verify"] = not args.no_verify
+    if args.timeout_s:
+        fields["timeout_s"] = args.timeout_s
+    try:
+        request = tor.TorRequest(**fields)
+    except ValidationError as exc:
+        return _emit_error(
+            tor.TOR_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=f"invalid tor request: {exc}",
+            layer="tor",
+            as_json=args.json,
+        )
+
+    paths = tor.Paths(tor.home_dir())
+    if args.action == "up" and not args.json:
+        binary, _ = (None, None) if args.reinstall else tor.find_binary(paths)
+        if binary is None and not tor.is_reachable():
+            # The first `up` downloads about 30 MB and then waits for a bootstrap, which is
+            # otherwise a minute of silence. Said before the work, not after.
+            print(
+                f"installing the Tor Expert Bundle into {paths.home} "
+                "(download + checksum), then bootstrapping...",
+                flush=True,
+            )
+
+    envelope = tor.control(request)
+    if args.json:
+        print(json.dumps(envelope.model_dump(mode="json"), indent=2))
+        if not envelope.ok:
+            return 1
+        # Same rule as the human face: `tor status` answers a question, and the answer
+        # "nothing is listening" is a failing one however it is printed.
+        return 0 if (args.action != "status" or envelope.data["reachable"]) else 1
+    if not envelope.ok:
+        print(f"error: {envelope.error.message}", file=sys.stderr)  # type: ignore[union-attr]
+        return 1
+
+    state = envelope.data
+    if args.action == "down":
+        print(f"stopped Tor at {state['socks_url']}" if state["pid"] is None else "stop requested")
+        if state["reachable"]:
+            print(
+                "something is still listening there; it was not started by this tool, so "
+                "the layer was left on"
+            )
+        elif state["wired"]:
+            print(f"wired WEBSEARCH_TOR=off into {state['wired']}")
+        return 0
+    if args.action == "status":
+        _print_tor_status(state)
+        return 0 if state["reachable"] else 1
+    _print_tor_status(state)
+    _print_tor_wiring(state)
+    return 0
+
+
+def _print_tor_status(state: dict[str, Any]) -> None:
+    from .tor_local import CHECK_URL
+
+    install = f"{state['source']} ({state['binary']})" if state["installed"] else "not installed"
+    if state.get("version"):
+        install += f", expert bundle {state['version']}"
+    verdict = {True: "yes", False: "NO", None: "not checked"}[state["is_tor"]]
+    print(f"home    {state['home']}")
+    print(f"socks   {state['socks_url']}")
+    print(f"tor     {install}")
+    print(f"process {'running (pid ' + str(state['pid']) + ')' if state['pid'] else 'not ours'}")
+    print(f"listen  {'answering' if state['reachable'] else 'nothing there'}")
+    print(f"is tor  {verdict}" + (f", exit {state['exit_ip']}" if state.get("exit_ip") else ""))
+    if state.get("upstream"):
+        print(f"through {state['upstream']} (Tor dials out through it)")
+    if state.get("log"):
+        print(f"log     {state['log']}")
+    if state["is_tor"] is False:
+        print(f"\n{state['socks_url']} answers but {CHECK_URL} says the traffic is not Tor.")
+    elif not state["reachable"]:
+        print("\nstart it with: websearch tor up")
+
+
+def _print_tor_wiring(state: dict[str, Any]) -> None:
+    from .optional_layers import TOR_ENV
+
+    if state.get("wired"):
+        print(f"wired {TOR_ENV}=on into {state['wired']}")
+    else:
+        print(f"turn the layer on for the next command: export {TOR_ENV}=on")
+
+
 def _contract_version_for(command: str) -> str:
     """The contract version stamped on a cross-layer 'cli' error envelope: the active
     command's own contract, so a `websearch github` failure carries github@x.y.z rather
@@ -1424,6 +1607,10 @@ def _contract_version_for(command: str) -> str:
         from .searxng_local import SEARXNG_CONTRACT_VERSION
 
         return SEARXNG_CONTRACT_VERSION
+    if command == "tor":
+        from .tor_local import TOR_CONTRACT_VERSION
+
+        return TOR_CONTRACT_VERSION
     # An unknown command: the cross-cutting envelope.
     return ENVELOPE_CONTRACT_VERSION
 
@@ -1459,6 +1646,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_doctor_command(sub)
     _add_init_command(sub)
     _add_searxng_command(sub)
+    _add_tor_command(sub)
     args = parser.parse_args(argv)
     dispatch = {
         "search": _cmd_search,
@@ -1472,6 +1660,7 @@ def main(argv: list[str] | None = None) -> int:
         "doctor": _cmd_doctor,
         "init": _cmd_init,
         "searxng": _cmd_searxng,
+        "tor": _cmd_tor,
     }
     handler = dispatch.get(args.command)
     if handler is None:

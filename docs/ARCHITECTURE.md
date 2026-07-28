@@ -189,9 +189,17 @@ command reads the environment fresh every time. The lower-level `search`
 / `fetch` / `open` commands remain as the per-layer surfaces for debugging and composition.
 
 **Bring-up.** Because state lives in the environment and on disk rather than in a resident process,
-something has to establish it. `init` (contract `init@1.0.0`) is that step: read the env file, start
-the local SearXNG, run the doctor sweep, and return one `ready` flag plus a capability map, so an
-agent asks once instead of probing the installation by hand.
+something has to establish it. `init` (contract `init@1.1.0`) is that step: read the settings files,
+start Tor when that layer is on, start the local SearXNG, run the doctor sweep, and return one `ready`
+flag plus a capability map, so an agent asks once instead of probing the installation by hand.
+
+**Optional layers.** Four switches, all off on a fresh install: `vpn` (declarative, so the doctor
+verifies a tunnel instead of assuming it), `proxy` (one egress URL for every path), `tor` (a local Tor
+this tool can install and start, which is what makes `.onion` reachable and the onion indexes
+selectable), and `searxng` (a self-hosted instance in the Layer-1 fanout). `tor` and `proxy` compose
+rather than compete: the proxy is written into Tor's torrc as its upstream, so turning on the layer
+that adds a hop never removes one. Onion and clearnet engines never run in the same fanout, because
+they index disjoint corpora and fusing them would rank two half-empty lists against each other.
 
 ## Extra tools: arxiv and github
 

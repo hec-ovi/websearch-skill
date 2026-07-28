@@ -15,7 +15,7 @@ import pytest
 from tests.conftest import DOCTOR_PAYLOAD_REF, DOCTOR_RESPONSE_REF
 from websearch.doctor import DoctorRequest, build_doctor, probes
 from websearch.envelope import ok_envelope
-from websearch.optional_layers import PROXY_ENV, SEARXNG_ENV, VPN_ENV
+from websearch.optional_layers import PROXY_ENV, SEARXNG_ENV, TOR_ENV, VPN_ENV
 
 DIRECT_IP = "203.0.113.7"
 PROXY_IP = "198.51.100.4"
@@ -26,7 +26,7 @@ SEARXNG_URL = "http://127.0.0.1:8888"
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for var in (VPN_ENV, PROXY_ENV, SEARXNG_ENV, "NORDVPN_USER", "NORDVPN_PASS"):
+    for var in (VPN_ENV, PROXY_ENV, SEARXNG_ENV, TOR_ENV, "NORDVPN_USER", "NORDVPN_PASS"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -126,10 +126,10 @@ def checks_by_name(envelope) -> dict:
 # --- default off ----------------------------------------------------------------------
 
 
-def test_all_three_layers_are_skipped_by_default():
+def test_every_layer_is_skipped_by_default():
     env = doctor_with().run(DoctorRequest(quick=True))
     data = env.model_dump(mode="json")["data"]
-    assert [layer["enabled"] for layer in data["layers"].values()] == [False, False, False]
+    assert not any(layer["enabled"] for layer in data["layers"].values())
     checks = checks_by_name(env)
     for name in ("vpn", "proxy", "searxng"):
         assert checks[name]["status"] == "skipped", name
@@ -636,3 +636,95 @@ def test_the_summary_counts_every_check():
     assert (
         summary["ok"] + summary["warn"] + summary["fail"] + summary["skipped"] == summary["total"]
     )
+
+
+# --- the tor layer ------------------------------------------------------------------
+
+
+def test_tor_is_skipped_when_the_layer_is_off():
+    check = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["tor"]
+    assert check["status"] == "skipped"
+    assert check["group"] == "tor"
+
+
+def test_tor_fails_when_nothing_is_listening(monkeypatch):
+    monkeypatch.setenv(TOR_ENV, "on")
+    monkeypatch.setattr("websearch.tor_local.is_reachable", lambda url=None, timeout_s=2.0: False)
+
+    check = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["tor"]
+
+    assert check["status"] == "fail"
+    assert "websearch tor up" in check["hint"]
+
+
+def test_tor_fails_when_the_port_answers_but_the_traffic_is_not_tor(monkeypatch):
+    """The whole point of the check: listening is not the same as anonymous."""
+    monkeypatch.setenv(TOR_ENV, "on")
+    monkeypatch.setattr("websearch.tor_local.is_reachable", lambda url=None, timeout_s=2.0: True)
+    monkeypatch.setattr(
+        "websearch.tor_local.verify",
+        lambda url=None, timeout_s=20.0: {"is_tor": False, "exit_ip": DIRECT_IP, "error": None},
+    )
+
+    check = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["tor"]
+
+    assert check["status"] == "fail"
+    assert "NOT leaving through Tor" in check["summary"]
+
+
+def test_tor_warns_when_the_exit_cannot_be_confirmed(monkeypatch):
+    monkeypatch.setenv(TOR_ENV, "on")
+    monkeypatch.setattr("websearch.tor_local.is_reachable", lambda url=None, timeout_s=2.0: True)
+    monkeypatch.setattr(
+        "websearch.tor_local.verify",
+        lambda url=None, timeout_s=20.0: {"is_tor": None, "exit_ip": None, "error": "timed out"},
+    )
+
+    check = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["tor"]
+
+    assert check["status"] == "warn"  # unknown is not the same answer as no
+
+
+def test_tor_ok_reports_the_exit(monkeypatch):
+    monkeypatch.setenv(TOR_ENV, "on")
+    monkeypatch.setattr("websearch.tor_local.is_reachable", lambda url=None, timeout_s=2.0: True)
+    monkeypatch.setattr(
+        "websearch.tor_local.verify",
+        lambda url=None, timeout_s=20.0: {"is_tor": True, "exit_ip": PROXY_IP, "error": None},
+    )
+
+    check = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["tor"]
+
+    assert check["status"] == "ok"
+    assert PROXY_IP in check["summary"]
+
+
+def test_the_vpn_check_is_skipped_behind_tor_instead_of_failing(monkeypatch):
+    """Behind Tor the outside world only sees the exit node, so the VPN hop in front of
+    it is real but unverifiable. Reporting FAIL would call a working setup broken."""
+    monkeypatch.setenv(VPN_ENV, "nordvpn")
+    monkeypatch.setenv(TOR_ENV, "on")
+    monkeypatch.setattr("websearch.tor_local.is_reachable", lambda url=None, timeout_s=2.0: True)
+    monkeypatch.setattr(
+        "websearch.tor_local.verify",
+        lambda url=None, timeout_s=20.0: {"is_tor": True, "exit_ip": PROXY_IP, "error": None},
+    )
+
+    check = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["vpn"]
+
+    assert check["status"] == "skipped"
+    assert "behind Tor" in check["summary"]
+
+
+def test_the_baseline_stays_opt_in_when_only_tor_is_on(monkeypatch):
+    """With Tor on, a direct request is the one that leaves the tunnel."""
+    monkeypatch.setenv(TOR_ENV, "on")
+    monkeypatch.setattr("websearch.tor_local.is_reachable", lambda url=None, timeout_s=2.0: True)
+    monkeypatch.setattr(
+        "websearch.tor_local.verify",
+        lambda url=None, timeout_s=20.0: {"is_tor": True, "exit_ip": PROXY_IP, "error": None},
+    )
+
+    check = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["baseline"]
+
+    assert check["status"] == "skipped"

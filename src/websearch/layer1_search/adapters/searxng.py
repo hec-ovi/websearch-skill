@@ -13,9 +13,15 @@ from typing import Any
 import httpx
 
 from ...proxy import proxy_for
-from ..capability import GENERAL_AGGREGATOR
+from ..capability import GENERAL_AGGREGATOR, ONION_INDEX
 from ..models import FreshnessRange, SearchRequest
 from ..port import EngineAdapter, EngineOutput, RawResult
+
+# The SearXNG category that holds its onion engines (ahmia, torch). Selecting it is what
+# turns a clearnet instance into an onion index; the instance still has to be configured
+# to reach Tor, which `websearch searxng up` does when the tor layer is on.
+ONIONS_CATEGORY = "onions"
+ONION_ENGINE_NAME = "searxng-onions"
 
 _SAFE = {"off": 0, "moderate": 1, "strict": 2}
 _FRESH = {"day": "day", "week": "week", "month": "month", "year": "year"}
@@ -47,9 +53,19 @@ class SearxngAdapter(EngineAdapter):
         engines: list[str] | None = None,
         client: httpx.Client | None = None,
         proxy: str | None = None,
+        category: str | None = None,
+        name: str | None = None,
     ):
         self.base_url = (base_url or "").rstrip("/")
         self._engines = engines
+        self._category = category
+        # An onion instance and a clearnet one are the same code against the same URL with
+        # a different category, but they are two entries in the fanout and two lines of
+        # provenance, so the name is per instance rather than per class.
+        if name:
+            self.name = name
+        if category == ONIONS_CATEGORY:
+            self.correlation_group = ONION_INDEX
         self._client = client
         self._owned_client: httpx.Client | None = None
         # A self-hosted SearXNG usually lives on loopback or the LAN, where an egress
@@ -73,9 +89,11 @@ class SearxngAdapter(EngineAdapter):
             params["time_range"] = _FRESH[request.freshness]
         if request.language:
             params["language"] = request.language
-        if request.result_type == "news":
+        if self._category:
+            params["categories"] = self._category
+        elif request.result_type == "news":
             params["categories"] = "news"
-        override = request.engine_overrides.get("searxng", {}) or {}
+        override = request.engine_overrides.get(self.name, {}) or {}
         # A request-scoped override wins over the adapter's static engine list.
         engines = override.get("engines") or self._engines
         if engines:

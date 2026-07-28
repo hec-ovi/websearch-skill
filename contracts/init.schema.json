@@ -3,14 +3,17 @@
   "$id": "https://github.com/hec-ovi/websearch-skill/contracts/init.schema.json",
   "title": "Init - one call that brings the whole tool online and reports what works",
   "description": "The single entry point an agent calls once at the start of a session instead of probing the installation by hand. It loads the configured env file, brings the local SearXNG up (unless told to skip it), and finishes with a full doctor sweep, then answers the only question the caller has: can I search now, and with what. A standalone orchestration over the searxng and doctor contracts; it emits the same Envelope (meta.layer \"init\") as every other command.",
-  "x-contract-version": "1.0.0",
+  "x-contract-version": "1.1.0",
   "$defs": {
     "InitRequest": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "searxng": {
-          "enum": ["up", "skip"],
+          "enum": [
+            "up",
+            "skip"
+          ],
           "default": "up",
           "description": "'up' installs (first run only) and starts the local SearXNG, then points this process at it. 'skip' leaves it alone: an already-configured WEBSEARCH_SEARXNG_URL is still used and still checked."
         },
@@ -25,78 +28,174 @@
           "maximum": 120000,
           "default": 15000,
           "description": "Per-check network timeout for the doctor sweep. Not a budget for the whole call: a first SearXNG install clones a repository and builds a virtualenv."
+        },
+        "tor": {
+          "enum": [
+            "auto",
+            "skip"
+          ],
+          "default": "auto",
+          "description": "auto starts Tor only when the tor layer is on, which it is not unless you turned it on. skip leaves it alone. There is no 'up' here on purpose: bringing up an anonymity layer nobody asked for would change where every request in the session comes from."
         }
       }
     },
-
     "InitStep": {
       "type": "object",
       "description": "One stage of the bring-up, in the order it ran. A step never aborts the run: a SearXNG that will not start is a warn, because the keyless engines still search.",
-      "required": ["name", "status", "summary"],
+      "required": [
+        "name",
+        "status",
+        "summary"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "enum": ["env", "searxng", "doctor"] },
-        "status": { "enum": ["ok", "warn", "fail", "skipped"] },
-        "summary": { "type": "string", "description": "One line, safe to print: never carries credentials." },
+        "name": {
+          "enum": [
+            "env",
+            "tor",
+            "searxng",
+            "doctor"
+          ]
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "warn",
+            "fail",
+            "skipped"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "description": "One line, safe to print: never carries credentials."
+        },
         "detail": {
           "type": "object",
           "default": {},
           "description": "Free-form, step-specific facts (paths, versions, counts). Additive by contract. Variable NAMES only, never their values.",
           "additionalProperties": true
         },
-        "hint": { "type": ["string", "null"], "default": null, "description": "What to do about a warn or fail." },
-        "elapsed_ms": { "type": "number", "minimum": 0, "default": 0 }
+        "hint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "What to do about a warn or fail."
+        },
+        "elapsed_ms": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        }
       }
     },
-
     "CapabilityStatus": {
       "description": "What the caller can rely on for one capability. 'ok' works now; 'degraded' works but something asked for is missing; 'down' does not work; 'off' is an optional layer nobody turned on, which is the default and not a problem; 'unknown' was not probed this run (quick mode).",
-      "enum": ["ok", "degraded", "down", "off", "unknown"]
+      "enum": [
+        "ok",
+        "degraded",
+        "down",
+        "off",
+        "unknown"
+      ]
     },
-
     "InitCapabilities": {
       "type": "object",
       "description": "The answer to 'what can I use'. Read this instead of re-deriving it from the doctor checks.",
-      "required": ["web_search", "web_fetch", "arxiv", "github", "searxng", "proxy", "vpn"],
+      "required": [
+        "web_search",
+        "web_fetch",
+        "arxiv",
+        "github",
+        "searxng",
+        "proxy",
+        "vpn",
+        "tor"
+      ],
       "additionalProperties": false,
       "properties": {
-        "web_search": { "$ref": "#/$defs/CapabilityStatus" },
-        "web_fetch": { "$ref": "#/$defs/CapabilityStatus" },
-        "arxiv": { "$ref": "#/$defs/CapabilityStatus" },
-        "github": { "$ref": "#/$defs/CapabilityStatus" },
-        "searxng": { "$ref": "#/$defs/CapabilityStatus" },
-        "proxy": { "$ref": "#/$defs/CapabilityStatus" },
-        "vpn": { "$ref": "#/$defs/CapabilityStatus" }
+        "web_search": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "web_fetch": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "arxiv": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "github": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "searxng": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "proxy": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "vpn": {
+          "$ref": "#/$defs/CapabilityStatus"
+        },
+        "tor": {
+          "$ref": "#/$defs/CapabilityStatus"
+        }
       }
     },
-
     "InitEngines": {
       "type": "object",
       "description": "Which providers answered this run. A silent provider is normal: the fanout rotates and fuses whatever responds.",
-      "required": ["answered", "silent"],
+      "required": [
+        "answered",
+        "silent"
+      ],
       "additionalProperties": false,
       "properties": {
-        "answered": { "type": "array", "items": { "type": "string" }, "description": "ddgs providers that returned results." },
-        "silent": { "type": "array", "items": { "type": "string" }, "description": "ddgs providers that returned nothing (blocked, rate-limited, or a stale parser)." },
+        "answered": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "ddgs providers that returned results."
+        },
+        "silent": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "ddgs providers that returned nothing (blocked, rate-limited, or a stale parser)."
+        },
         "reached_via_searxng": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "Silent providers that the local SearXNG did reach with its own parser. Query these through SearXNG."
         },
         "searxng_engines_active": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "default": null,
           "description": "Engines enabled in the local SearXNG instance, when one is answering."
         }
       }
     },
-
     "InitPayload": {
       "type": "object",
       "description": "Envelope.data for an init run. Envelope.ok reports whether the bring-up RAN; 'ready' reports whether the tool is online. A run that finds everything broken is still ok:true with data.",
-      "required": ["ready", "state", "headline", "steps", "capabilities", "engines", "next_actions", "doctor"],
+      "required": [
+        "ready",
+        "state",
+        "headline",
+        "steps",
+        "capabilities",
+        "engines",
+        "next_actions",
+        "doctor"
+      ],
       "additionalProperties": false,
       "properties": {
         "ready": {
@@ -104,16 +203,34 @@
           "description": "True only when state is 'ready'. This is the flag to wait on: everything asked for is online."
         },
         "state": {
-          "enum": ["ready", "degraded", "broken"],
+          "enum": [
+            "ready",
+            "degraded",
+            "broken"
+          ],
           "description": "'ready': search, fetch and the extra tools work, and SearXNG is up when it was asked for. 'degraded': search works, but something asked for is missing (SearXNG down, or a failed check). 'broken': search itself does not work."
         },
-        "headline": { "type": "string", "description": "One line stating what is online, safe to read out verbatim." },
-        "steps": { "type": "array", "items": { "$ref": "#/$defs/InitStep" } },
-        "capabilities": { "$ref": "#/$defs/InitCapabilities" },
-        "engines": { "$ref": "#/$defs/InitEngines" },
+        "headline": {
+          "type": "string",
+          "description": "One line stating what is online, safe to read out verbatim."
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InitStep"
+          }
+        },
+        "capabilities": {
+          "$ref": "#/$defs/InitCapabilities"
+        },
+        "engines": {
+          "$ref": "#/$defs/InitEngines"
+        },
         "next_actions": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "description": "What to do about anything not online, already deduplicated. Empty when state is 'ready'."
         },
@@ -123,16 +240,30 @@
         }
       }
     },
-
     "InitResponse": {
       "description": "An Envelope whose meta.layer is \"init\" and whose data is an InitPayload (or null on error).",
       "allOf": [
-        { "$ref": "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json" },
+        {
+          "$ref": "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json"
+        },
         {
           "properties": {
-            "data": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/InitPayload" }] },
+            "data": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/$defs/InitPayload"
+                }
+              ]
+            },
             "meta": {
-              "properties": { "layer": { "const": "init" } }
+              "properties": {
+                "layer": {
+                  "const": "init"
+                }
+              }
             }
           }
         }

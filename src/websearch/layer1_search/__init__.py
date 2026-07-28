@@ -11,7 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .adapters import DdgsAdapter, SearxngAdapter
+from .adapters import AhmiaAdapter, DdgsAdapter, SearxngAdapter
+from .adapters.searxng import ONION_ENGINE_NAME, ONIONS_CATEGORY
 from .models import (
     SEARCH_CONTRACT_VERSION,
     Fusion,
@@ -33,6 +34,7 @@ def build_router(
     ddgs_backend: str = "auto",
     extra_adapters: list[EngineAdapter] | None = None,
     proxy: str | None = None,
+    onion: bool = False,
 ) -> SearchRouter:
     """Assemble a SearchRouter from the available backends.
 
@@ -42,8 +44,27 @@ def build_router(
     are ignored by ddgs. ``extra_adapters`` lets a caller plug in keyed/decorrelated
     engines. ``proxy`` routes both built-in engines' egress through one proxy URL
     (extra adapters own their transport and are unaffected).
+
+    ``onion`` swaps the clearnet fanout for the onion one (Ahmia, plus SearXNG's onions
+    category when an instance is configured). It replaces rather than extends: ddgs
+    cannot see an onion service and Ahmia does not index the clearnet, so running both
+    would produce one half-empty list per engine and a fusion over two disjoint corpora.
     """
     adapters: list[EngineAdapter] = []
+    if onion:
+        adapters.append(AhmiaAdapter(proxy=proxy))
+        if searxng_url:
+            adapters.append(
+                SearxngAdapter(
+                    searxng_url,
+                    proxy=proxy,
+                    category=ONIONS_CATEGORY,
+                    name=ONION_ENGINE_NAME,
+                )
+            )
+        if extra_adapters:
+            adapters.extend(extra_adapters)
+        return SearchRouter(adapters)
     if searxng_url:
         adapters.append(SearxngAdapter(searxng_url, engines=searxng_engines, proxy=proxy))
     if enable_ddgs:
@@ -66,5 +87,8 @@ __all__ = [
     "RawResult",
     "SearxngAdapter",
     "DdgsAdapter",
+    "AhmiaAdapter",
+    "ONIONS_CATEGORY",
+    "ONION_ENGINE_NAME",
     "build_router",
 ]

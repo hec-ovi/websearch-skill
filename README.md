@@ -15,7 +15,7 @@ A self-hosted web search and page reader for AI agents, with no API keys or paid
 
 Core commands:
 
-- **`init`** reads the env file, starts local SearXNG, and reports available capabilities.
+- **`init`** reads the settings files, starts local SearXNG (and Tor, when that layer is on), and reports available capabilities.
 - **`web_search`** finds pages: ranked, deduplicated results across engines, each with a reusable `handle`.
 - **`web_fetch`** reads a page: clean Markdown, fenced as untrusted, paginated so a long page never overflows context.
 - **`web_open`** pages back through a document you already fetched, from cache, without hitting the network again.
@@ -24,6 +24,7 @@ Additional keyless commands:
 
 - **`arxiv`** searches arXiv papers and returns structured metadata (authors, abstract, categories, abstract and PDF links).
 - **`github`** searches GitHub repositories and returns typed fields you can sort on (stars, language, topics).
+- **`tor`** starts a local Tor and routes everything through it, which is what makes `.onion` reachable and `--onion` search the Tor indexes. Off by default; see Tor below.
 
 ### Engines, out of the box, no keys
 
@@ -45,9 +46,10 @@ The scorecard below compares result quality, latency, cost, privacy, and retriev
 | Layer 3: Agent I/O | Consolidated `web_search`/`web_fetch`/`web_open`, untrusted-content fence, `SKILL.md` | Built |
 | Extra tools | Keyless `arxiv` (paper search) and `github` (repo search), standalone over the same Envelope | Built |
 | Doctor | `websearch doctor`: per-capability self-test of the optional layers, every engine, the tools, and both fetch tiers | Built |
-| Init | `websearch init`: reads the env file, starts SearXNG, runs diagnostics, and reports capability state | Built |
+| Init | `websearch init`: reads the settings files, starts SearXNG and Tor, runs diagnostics, and reports capability state | Built |
+| Tor | `websearch tor`: a local Tor with no Docker, onion search (Ahmia, SearXNG's onions category) and `.onion` fetching, chained behind an existing proxy rather than replacing it | Built |
 
-Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.1.0`, `fetch@1.2.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.1.0`, `arxiv@1.1.0`, `github@1.1.0`, `doctor@2.0.0`, `searxng@1.0.0`, `init@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
+Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.2.0`, `fetch@1.3.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.2.0`, `arxiv@1.1.0`, `github@1.1.0`, `doctor@2.1.0`, `searxng@1.1.0`, `init@1.1.0`, `tor@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
 
 ## Layer 1: Search
 
@@ -194,6 +196,11 @@ uv run websearch web-open "doc.rust-lang.org~<hash>" --page 2
 uv run websearch arxiv "mixture of experts scaling laws" --max-results 5
 uv run websearch github "llm agent framework" --language Python --sort stars
 
+# Tor (off by default): start it, then search the onion indexes and read .onion pages
+uv run websearch tor up
+uv run websearch web-search "hidden wiki" --onion
+uv run websearch web-fetch "http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion/"
+
 # initialize local services and report available capabilities
 uv run websearch init
 
@@ -261,15 +268,24 @@ hits = index.search(SearchPageRequest(query="borrow checker"))
 
 ## Optional layers (all off by default)
 
-The base install searches keyless engines over a direct connection. Three optional settings add VPN verification, proxy routing, or self-hosted SearXNG. `websearch doctor` verifies each configured setting:
+The base install searches keyless engines over a direct connection. Four optional settings add VPN verification, proxy routing, Tor, or self-hosted SearXNG. `websearch doctor` verifies each configured setting:
 
 | Layer | Switch | What it adds |
 |---|---|---|
 | VPN | `WEBSEARCH_VPN=nordvpn` or `any` | declares that egress should be tunneled, so the doctor verifies it instead of assuming it. It routes nothing on its own: the tunnel is your VPN app's job |
 | Egress proxy | `WEBSEARCH_PROXY=<url>` or `nordvpn` | one proxy for every network path the tool opens |
+| Tor | `WEBSEARCH_TOR=on` | every path goes through a local Tor, `.onion` becomes reachable, and `--onion` searches the onion indexes. `websearch tor up` starts one and sets this for you |
 | SearXNG | `WEBSEARCH_SEARXNG_URL=<url>` | a self-hosted metasearch instance joins the Layer-1 fanout. `websearch searxng up` starts one and sets this for you, with or without Docker |
 
-All three read from a gitignored `.env` in the working directory if you have one (copy `.env.example`), which keeps NordVPN service credentials out of your shell history. An exported variable always beats the file, and `--vpn` / `--proxy` / `--searxng-url` beat both for a single run.
+### Where settings live
+
+An exported variable always wins, and `--vpn` / `--proxy` / `--tor` / `--searxng-url` beat everything for a single run. Otherwise the settings come from the first file that defines them:
+
+1. `WEBSEARCH_ENV_FILE`, when you point it at one (a container that mounts a config directory does this).
+2. `.env` in the working directory, for a project that keeps its own (copy `.env.example`).
+3. `$XDG_CONFIG_HOME/websearch/.env`, usually `~/.config/websearch/.env`. This is the one that applies wherever you run the command, and it is where `searxng up` and `tor up` record what they started.
+
+Nothing already set is ever overwritten, so a file can only fill in a gap, and both files are outside the repo or gitignored, which keeps NordVPN service credentials out of your shell history. `websearch init` prints the files it read and the ones it looked for.
 
 ### Self-hosting SearXNG
 
@@ -324,6 +340,30 @@ The opt-in `websearch doctor --baseline` check makes one direct request to compa
 
 A self-hosted SearXNG request has two hops. The client connects directly to local SearXNG at `127.0.0.1`; proxying that address would target the proxy server's localhost. SearXNG then connects to upstream engines from its container, and `docker/searxng/searxng.sh up` routes that hop through `WEBSEARCH_PROXY` (including the `nordvpn` shorthand). `searxng.sh egress` prints both IPs. Set `SEARXNG_OUTGOING_PROXY=off` for direct container egress. A remote SearXNG address still uses the client proxy.
 
+### Tor
+
+Off until you start it. `websearch tor up` is the whole setup:
+
+```bash
+websearch tor up                              # start Tor, verify the exit, turn the layer on
+websearch web-search "query" --onion          # search the onion indexes
+websearch web-fetch "http://<addr>.onion/"    # read an onion page, same output as any other
+websearch tor status                          # listening, and is the traffic really Tor
+websearch tor down                            # stop it and turn the layer off
+```
+
+`up` uses a Tor that is already listening, else `tor` on PATH, else it downloads the official Tor Expert Bundle (about 30 MB) into the state directory and checks it against the sha256 published beside it. The binary is not GPG-verified: what this trusts is TLS to torproject.org plus that digest. Tor is started in its own session so it survives the command, the same way SearXNG is, and `up` waits for the bootstrap and then asks `check.torproject.org` whether the traffic really leaves through Tor. A port that answers is not the same thing as a port that is Tor, which is why `is_tor` is a separate field from `reachable` and why the doctor fails on `false` rather than treating "something is listening" as ready.
+
+With the layer on, every path goes through Tor: search, fetch, arXiv, GitHub. `.onion` addresses work, and with it off they are refused before anything resolves, because looking up an onion name locally leaks it to your resolver on its way to failing anyway.
+
+`--onion` swaps the clearnet engines for the onion ones (Ahmia, plus SearXNG's onions category when you run a local instance, which adds Torch). It replaces rather than extends: no clearnet engine indexes onion services and no onion index crawls the clearnet, so a mixed fanout would fuse two half-empty lists over disjoint corpora. Onion searches take ten to thirty seconds and get a longer default timeout to match.
+
+**Tor does not replace your proxy.** If `WEBSEARCH_PROXY` is set, it is written into Tor's own torrc as its upstream (`Socks5Proxy` / `HTTPSProxy`), so the path becomes you, then the proxy, then Tor: the VPN hop still hides Tor use from your ISP, and turning on the layer that was supposed to add a hop never silently removes one. A proxy scheme Tor cannot dial through (WireGuard, say) is a loud error rather than a dropped hop. The one thing that does change is the vpn check, which is skipped while Tor is on and says why: behind Tor the outside world only sees the exit node, so nothing external can confirm a VPN in front of it.
+
+Put your own Tor directives in `torrc.local` beside the generated `torrc`; it is included and survives regeneration. `WEBSEARCH_TOR_SOCKS` points at a Tor you already run (`socks5h://127.0.0.1:9150` is Tor Browser's), `WEBSEARCH_TOR_PORT` moves the port, `WEBSEARCH_TOR_BINARY` skips the download, and `WEBSEARCH_TOR_VERSION` pins the bundle release.
+
+This is Tor, not Tor Browser. It hides where your requests come from; it does not resist fingerprinting, isolate circuits per site, or make what you send anonymous.
+
 ### VPN
 
 `WEBSEARCH_VPN` records the expected tunnel state but does not configure routing. If the tunnel drops, the doctor reports a failure. `nordvpn` is verified against NordVPN's keyless connection endpoint, which reports whether the caller is inside its network. `any` checks only for an active tunnel interface because there is no provider-specific endpoint. The doctor checks through the egress proxy when one is set and directly otherwise.
@@ -332,16 +372,18 @@ A self-hosted SearXNG request has two hops. The client connects directly to loca
 
 ## websearch init
 
-`websearch init` reads the configured env file, starts local SearXNG unless `--skip-searxng` is set, and runs the doctor checks:
+`websearch init` reads the settings files, starts Tor when that layer is on, starts local SearXNG unless `--skip-searxng` is set, and runs the doctor checks:
 
 ```bash
 uv run websearch init                # bring everything up, then report
 uv run websearch init --json         # the same run as an Envelope
 uv run websearch init --quick        # skip the slow sweep; unprobed capabilities read "unknown"
+uv run websearch init --skip-tor     # leave Tor alone even with the layer on
 ```
 
 ```
   ok    env       read /config/websearch.env
+  skip  tor       off (WEBSEARCH_TOR is not set); egress is not going through Tor
   ok    searxng   SearXNG 2026.7.25 answering at http://127.0.0.1:8888, 83 of 278 engines
   warn  doctor    18 ok, 4 warn, 0 fail, 3 skipped
 
@@ -353,6 +395,7 @@ capabilities
   searxng     ok
   proxy       ok
   vpn         off
+  tor         off
 
 ready: search online (5 of 9 keyless providers + SearXNG, 83 engines); fetch, arxiv, github ok; egress through socks5h://***:***@nl.socks.nordhold.net:1080
 ```
@@ -367,10 +410,11 @@ Wait for `data.ready`. `data.state` is `ready`, `degraded` (search works but a r
 uv run websearch doctor                          # everything
 uv run websearch doctor --quick                  # skip the engine fanout, tools, and fetch tiers
 uv run websearch doctor --check engines --check proxy
+uv run websearch doctor --check tor              # just the Tor layer
 uv run websearch doctor --json                   # the same run as an Envelope
 ```
 
-It prints the three optional layers' state, then checks Python and the dependency closure, direct internet and the exit IP, the egress proxy and whether the exit IP actually moved, the declared VPN, a self-hosted SearXNG (health, active engine count, live JSON query), each `ddgs` provider on its own, arXiv and GitHub, and both fetch tiers. Exit code is 1 only when something failed: an optional layer that is off is skipped, and one rate-limited provider is a warning. Proxy credentials never reach the output, including inside HTTP client error text.
+It prints the four optional layers' state, then checks Python and the dependency closure, direct internet and the exit IP, the egress proxy and whether the exit IP actually moved, Tor (listening, and confirmed as Tor by `check.torproject.org`, plus a real onion fetch), the declared VPN, a self-hosted SearXNG (health, active engine count, live JSON query), each `ddgs` provider on its own, arXiv and GitHub, and both fetch tiers. Exit code is 1 only when something failed: an optional layer that is off is skipped, and one rate-limited provider is a warning. Proxy credentials never reach the output, including inside HTTP client error text.
 
 The SearXNG cross-check helps classify `ddgs` failures. `ddgs` reports "No results found" for CAPTCHAs, rate limits, and successful responses whose markup its parser cannot read. With SearXNG running, the doctor queries the same provider through SearXNG's separately maintained scraper:
 

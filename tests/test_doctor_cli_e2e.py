@@ -165,6 +165,7 @@ def test_flags_reach_the_request_and_the_builder(monkeypatch):
     assert captured == {
         "vpn": "nordvpn",
         "proxy": "http://p:3128",
+        "tor": None,
         "searxng_url": "http://127.0.0.1:8888",
     }
 
@@ -175,7 +176,7 @@ def test_defaults_leave_every_layer_to_the_environment(monkeypatch):
     doctor = FakeDoctor(HEALTHY)
     captured = install(monkeypatch, doctor)
     cli.main(["doctor"])
-    assert captured == {"vpn": None, "proxy": None, "searxng_url": None}
+    assert captured == {"vpn": None, "proxy": None, "tor": None, "searxng_url": None}
     assert doctor.request.checks is None
     assert doctor.request.quick is False
     # The one request that would leave the egress proxy is opt-in.

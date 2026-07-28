@@ -97,6 +97,7 @@ HEALTHY_CHECKS = [
     check("runtime", "runtime", "ok"),
     check("internet", "egress", "ok"),
     check("proxy", "egress", "skipped"),
+    check("tor", "tor", "skipped"),
     check("vpn", "vpn", "skipped"),
     check("searxng", "searxng", "ok", "answering, 83 engines"),
     check(
@@ -132,6 +133,7 @@ class FakeDoctor:
             or {
                 "vpn": layer("vpn"),
                 "proxy": layer("proxy"),
+                "tor": layer("tor"),
                 "searxng": layer("searxng", True, URL),
             },
             "checks": self._checks,
@@ -202,7 +204,7 @@ def test_ready_when_everything_answers(wire, assert_valid):
     data = env["data"]
     assert data["ready"] is True and data["state"] == "ready"
     assert data["next_actions"] == []
-    assert [s["name"] for s in data["steps"]] == ["env", "searxng", "doctor"]
+    assert [s["name"] for s in data["steps"]] == ["env", "tor", "searxng", "doctor"]
     assert data["capabilities"] == {
         "web_search": "ok",
         "web_fetch": "ok",
@@ -211,6 +213,7 @@ def test_ready_when_everything_answers(wire, assert_valid):
         "searxng": "ok",
         "proxy": "off",
         "vpn": "off",
+        "tor": "off",
     }
     assert data["engines"]["searxng_engines_active"] == 83
     assert "search online" in data["headline"]
@@ -280,7 +283,7 @@ def test_the_env_step_says_so_when_there_is_no_file(wire, tmp_path, monkeypatch)
         s for s in initialize.run().model_dump(mode="json")["data"]["steps"] if s["name"] == "env"
     )
     assert step["detail"]["exists"] is False
-    assert step["summary"].startswith("no env file at")
+    assert step["summary"].startswith("no settings file yet")
 
 
 def test_the_env_step_reports_variable_names_and_never_their_values(wire, tmp_path, monkeypatch):
@@ -464,3 +467,94 @@ def test_human_output_prints_next_actions_when_degraded(wire, capsys):
     assert "warn  searxng" in out
     assert "degraded:" in out
     assert "  - " in out  # the action list
+
+
+# --- the tor step -------------------------------------------------------------------
+
+
+def test_the_tor_step_is_skipped_and_costs_nothing_with_the_layer_off(wire, monkeypatch):
+    """Off is the default, and init must not quietly start an anonymity layer."""
+    wire()
+    monkeypatch.setattr(
+        "websearch.tor_local.control",
+        lambda request: (_ for _ in ()).throw(AssertionError("must not run")),
+    )
+
+    data = run_json([])["envelope"]["data"]
+
+    step = next(s for s in data["steps"] if s["name"] == "tor")
+    assert step["status"] == "skipped"
+    assert "WEBSEARCH_TOR" in step["summary"]
+
+
+def test_the_tor_step_brings_tor_up_when_the_layer_is_on(wire, monkeypatch):
+    monkeypatch.setenv("WEBSEARCH_TOR", "on")
+    called: list = []
+
+    def tor_control(request):
+        called.append(request.action)
+        return ok_envelope(
+            "1.0.0",
+            {
+                "action": "up",
+                "enabled": True,
+                "home": "/state/tor",
+                "socks_url": "socks5h://127.0.0.1:9050",
+                "installed": True,
+                "reachable": True,
+                "is_tor": True,
+                "exit_ip": "171.25.193.79",
+                "version": "15.0.19",
+                "upstream": None,
+            },
+            layer="tor",
+            backend="tor-local",
+        )
+
+    wire()
+    monkeypatch.setattr("websearch.tor_local.control", tor_control)
+
+    data = run_json([])["envelope"]["data"]
+
+    step = next(s for s in data["steps"] if s["name"] == "tor")
+    assert called == ["up"]
+    assert step["status"] == "ok"
+    assert "socks5h://127.0.0.1:9050" in step["summary"]
+
+
+def test_a_tor_that_will_not_come_up_is_a_failure_not_a_shrug(wire, monkeypatch):
+    """With the layer on, requests that were meant to be anonymous would go out bare."""
+    monkeypatch.setenv("WEBSEARCH_TOR", "on")
+    wire()
+    monkeypatch.setattr(
+        "websearch.tor_local.control",
+        lambda request: error_envelope(
+            "1.0.0",
+            code="dependency_missing",
+            message="no tor binary",
+            retriable=False,
+            layer="tor",
+            backend="tor-local",
+        ),
+    )
+
+    data = run_json([])["envelope"]["data"]
+
+    step = next(s for s in data["steps"] if s["name"] == "tor")
+    assert step["status"] == "fail"
+    assert data["state"] == "degraded"
+    assert any("NOT through Tor" in a for a in data["next_actions"])
+
+
+def test_skip_tor_leaves_a_configured_layer_alone(wire, monkeypatch):
+    monkeypatch.setenv("WEBSEARCH_TOR", "on")
+    wire()
+    monkeypatch.setattr(
+        "websearch.tor_local.control",
+        lambda request: (_ for _ in ()).throw(AssertionError("must not run")),
+    )
+
+    data = run_json(["--skip-tor"])["envelope"]["data"]
+
+    step = next(s for s in data["steps"] if s["name"] == "tor")
+    assert step["status"] == "skipped"

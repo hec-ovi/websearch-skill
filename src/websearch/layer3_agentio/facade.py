@@ -122,6 +122,7 @@ class AgentIO:
                 max_total_results=req.max_results,
                 include_sites=[site] if site else [],
                 engines=engines,
+                onion=req.onion,
             )
         except ValidationError as exc:
             return error_envelope(
@@ -558,6 +559,7 @@ def build_agent_io(
     router=None,
     pipeline=None,
     proxy: str | None = None,
+    onion: bool = False,
 ) -> AgentIO:
     """Wire an AgentIO with the default Layer-1 router and Layer-2A pipeline.
 
@@ -565,7 +567,9 @@ def build_agent_io(
     fakes) to stand in for the network; production passes deployment config (searxng_url).
     ``ddgs_backend`` selects which keyless engines ddgs queries (e.g. "google,brave").
     ``proxy`` routes search and fetch egress through one proxy URL; an injected
-    ``router``/``pipeline`` owns its own transport and is unaffected.
+    ``router``/``pipeline`` owns its own transport and is unaffected. ``onion`` builds the
+    onion fanout instead of the clearnet one, which only works with the tor layer on and
+    the proxy pointing at its SOCKS port.
     """
     router = router or build_router(
         searxng_url=searxng_url,
@@ -573,6 +577,7 @@ def build_agent_io(
         ddgs_factory=ddgs_factory,
         ddgs_backend=ddgs_backend,
         proxy=proxy,
+        onion=onion,
     )
     pipeline = pipeline or build_pipeline(
         enable_curl_cffi=enable_curl_cffi, curl_cffi_getter=curl_cffi_getter, proxy=proxy

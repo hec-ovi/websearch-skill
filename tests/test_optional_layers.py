@@ -36,7 +36,7 @@ def _clean_env(monkeypatch):
 def test_every_layer_is_off_with_a_bare_environment():
     states = layer_states()
     assert sorted(states) == sorted(LAYER_NAMES)
-    assert [s.enabled for s in states.values()] == [False, False, False]
+    assert [s.enabled for s in states.values()] == [False] * len(LAYER_NAMES)
     assert all(s.source is None and s.value is None for s in states.values())
 
 
@@ -44,7 +44,7 @@ def test_every_layer_is_off_with_a_bare_environment():
 def test_off_words_keep_each_layer_off(monkeypatch, word):
     for var in (VPN_ENV, PROXY_ENV, SEARXNG_ENV):
         monkeypatch.setenv(var, word)
-    assert [s.enabled for s in layer_states().values()] == [False, False, False]
+    assert [s.enabled for s in layer_states().values()] == [False] * len(LAYER_NAMES)
 
 
 def test_an_off_layer_says_how_to_turn_it_on():

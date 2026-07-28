@@ -3,62 +3,170 @@
   "$id": "https://github.com/hec-ovi/websearch-skill/contracts/fetch.schema.json",
   "title": "Layer 2A - Fetch sub-port contract",
   "description": "URL-in / raw-content-out. The first of Layer 2A's two decoupled sub-ports (the other is extract.schema.json). FETCH escalates by tier and never extracts or truncates; it hands raw HTML to EXTRACT. It enforces an http(s) scheme allowlist and refuses private/reserved egress targets unless allow_private_hosts is set, and follows redirects with the same guard on each hop. The default closure is permissive (httpx, curl_cffi); browser and stealth tiers (Crawl4AI, nodriver, Camoufox) and the jina_reader fallback are opt-in adapters named in the enums but not part of the base install. Proxy egress is owned by Layer 1; FETCH only consumes an endpoint, never holds credentials.",
-  "x-contract-version": "1.2.0",
+  "x-contract-version": "1.3.0",
   "$defs": {
     "Proxy": {
       "type": "object",
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "additionalProperties": false,
       "description": "An egress endpoint supplied by Layer 1. Proxy-agnostic: the same shape carries a direct proxy, a VPN socks5 sidecar, or a paid residential pool.",
       "properties": {
-        "url": { "type": "string", "description": "Endpoint URL, e.g. socks5h://127.0.0.1:1080." },
-        "type": { "enum": ["http", "socks5", "wireguard", "none"], "default": "http" }
+        "url": {
+          "type": "string",
+          "description": "Endpoint URL, e.g. socks5h://127.0.0.1:1080."
+        },
+        "type": {
+          "enum": [
+            "http",
+            "socks5",
+            "wireguard",
+            "none"
+          ],
+          "default": "http"
+        },
+        "tor": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this hop is a Tor client. It is what makes a .onion target reachable rather than an unresolvable name: the egress guard refuses an onion URL when this is false, so a misdeclared proxy fails closed instead of leaking the lookup to the local resolver."
+        }
       }
     },
-
     "Cookie": {
       "type": "object",
-      "required": ["name", "value"],
+      "required": [
+        "name",
+        "value"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string" },
-        "value": { "type": "string" },
-        "domain": { "type": ["string", "null"], "default": null },
-        "path": { "type": ["string", "null"], "default": null }
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "domain": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
       }
     },
-
     "Politeness": {
       "type": "object",
       "additionalProperties": false,
       "description": "Reserved: accepted but not implemented yet. No fetch tier honors these fields; setting either adds a pipeline warning.",
       "properties": {
-        "per_host_delay_ms": { "type": "integer", "minimum": 0, "default": 0, "description": "Minimum spacing between requests to the same host." },
-        "respect_robots": { "type": "boolean", "default": false, "description": "Honor robots.txt for the fetched URL. Default false: a single deliberate fetch of an agent-chosen URL is closer to a browser open than to crawling. Enable for crawl-like batch use." }
+        "per_host_delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Minimum spacing between requests to the same host."
+        },
+        "respect_robots": {
+          "type": "boolean",
+          "default": false,
+          "description": "Honor robots.txt for the fetched URL. Default false: a single deliberate fetch of an agent-chosen URL is closer to a browser open than to crawling. Enable for crawl-like batch use."
+        }
       }
     },
-
     "FetchRequest": {
       "type": "object",
-      "required": ["url"],
+      "required": [
+        "url"
+      ],
       "additionalProperties": false,
       "properties": {
-        "url": { "type": "string", "minLength": 1, "description": "Absolute http(s) URL to fetch." },
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Absolute http(s) URL to fetch."
+        },
         "tier_hint": {
-          "enum": ["auto", "http", "browser", "stealth"],
+          "enum": [
+            "auto",
+            "http",
+            "browser",
+            "stealth"
+          ],
           "default": "auto",
           "description": "auto = start cheap and escalate only on a detected block. http = plain/impersonated HTTP only (no browser). browser/stealth select the opt-in headless tiers."
         },
-        "render_js": { "type": ["boolean", "null"], "default": null, "description": "Force JS rendering (browser tier). null = decide by tier_hint." },
-        "wait_for": { "type": ["string", "null"], "default": null, "description": "Reserved: accepted but not implemented yet (would be a CSS selector or text to await before capture on a browser tier). Setting it adds a pipeline warning." },
-        "timeout_ms": { "type": "integer", "minimum": 1, "default": 20000, "description": "Per-operation (connect/read) timeout, not a total wall-clock budget." },
-        "headers": { "type": "object", "additionalProperties": { "type": "string" }, "default": {} },
-        "cookies": { "type": "array", "items": { "$ref": "#/$defs/Cookie" }, "default": [] },
-        "proxy": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/Proxy" }], "default": null },
-        "user_agent": { "type": ["string", "null"], "default": null },
-        "screenshot": { "type": "boolean", "default": false, "description": "Capture a screenshot (browser tiers only)." },
+        "render_js": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null,
+          "description": "Force JS rendering (browser tier). null = decide by tier_hint."
+        },
+        "wait_for": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Reserved: accepted but not implemented yet (would be a CSS selector or text to await before capture on a browser tier). Setting it adds a pipeline warning."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 20000,
+          "description": "Per-operation (connect/read) timeout, not a total wall-clock budget."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "cookies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Cookie"
+          },
+          "default": []
+        },
+        "proxy": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Proxy"
+            }
+          ],
+          "default": null
+        },
+        "user_agent": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "screenshot": {
+          "type": "boolean",
+          "default": false,
+          "description": "Capture a screenshot (browser tiers only)."
+        },
         "max_bytes": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0,
           "default": 10000000,
           "description": "Transport guard ONLY: stop downloading a response body past this many bytes (defends against multi-GB transfers); defaults to 10 MB. This is NOT an output/LLM length cap; extracted content is never truncated. 0 or null removes the guard."
@@ -68,41 +176,149 @@
           "default": false,
           "description": "Permit fetching private/loopback/link-local/reserved addresses (e.g. an internal service). Default false: the SSRF guard refuses them, including the 169.254.169.254 cloud-metadata endpoint."
         },
-        "politeness": { "$ref": "#/$defs/Politeness", "default": { "per_host_delay_ms": 0, "respect_robots": false } }
+        "politeness": {
+          "$ref": "#/$defs/Politeness",
+          "default": {
+            "per_host_delay_ms": 0,
+            "respect_robots": false
+          }
+        }
       }
     },
-
     "FetchResult": {
       "type": "object",
-      "required": ["url", "status", "ok", "fetched_via"],
+      "required": [
+        "url",
+        "status",
+        "ok",
+        "fetched_via"
+      ],
       "additionalProperties": false,
       "properties": {
-        "url": { "type": "string", "description": "The requested URL." },
-        "final_url": { "type": ["string", "null"], "default": null, "description": "URL after redirects." },
-        "status": { "type": "integer", "description": "HTTP status; 0 when no response was received." },
-        "ok": { "type": "boolean", "description": "A usable response body was retrieved (independent of blocked)." },
+        "url": {
+          "type": "string",
+          "description": "The requested URL."
+        },
+        "final_url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "URL after redirects."
+        },
+        "status": {
+          "type": "integer",
+          "description": "HTTP status; 0 when no response was received."
+        },
+        "ok": {
+          "type": "boolean",
+          "description": "A usable response body was retrieved (independent of blocked)."
+        },
         "fetched_via": {
-          "enum": ["http", "curl_cffi", "browser", "undetected", "nodriver", "camoufox", "jina_reader"],
+          "enum": [
+            "http",
+            "curl_cffi",
+            "browser",
+            "undetected",
+            "nodriver",
+            "camoufox",
+            "jina_reader"
+          ],
           "description": "Which tier/adapter produced this result."
         },
-        "raw_html": { "type": ["string", "null"], "default": null, "description": "Unmodified response body (never truncated for content reasons)." },
-        "rendered_html": { "type": ["string", "null"], "default": null, "description": "Post-JS DOM (browser tiers only)." },
-        "content_type": { "type": ["string", "null"], "default": null },
-        "redirects": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Redirect chain, in order." },
-        "headers": { "type": "object", "additionalProperties": { "type": "string" }, "default": {} },
-        "blocked": { "type": "boolean", "default": false, "description": "An anti-bot challenge/interstitial was detected (may still carry partial content)." },
+        "raw_html": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Unmodified response body (never truncated for content reasons)."
+        },
+        "rendered_html": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Post-JS DOM (browser tiers only)."
+        },
+        "content_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "redirects": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Redirect chain, in order."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "blocked": {
+          "type": "boolean",
+          "default": false,
+          "description": "An anti-bot challenge/interstitial was detected (may still carry partial content)."
+        },
         "block_reason": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "default": null,
           "description": "Branchable cause when blocked. Recommended vocabulary (kept as a string so new vendors do not force a contract bump): cloudflare_challenge, cloudflare_firewall, datadome, perimeterx, akamai, imperva, ddos_guard, rate_limited, forbidden_suspected_bot, unavailable_suspected_block, auth_required, legal_geo_block."
         },
-        "screenshot_b64": { "type": ["string", "null"], "default": null },
-        "tier_attempts": { "type": "array", "items": { "type": "string" }, "default": [], "description": "Adapters tried in order before this result (escalation trail)." },
-        "fetch_ms": { "type": "integer", "minimum": 0, "default": 0 },
-        "error": { "type": ["string", "null"], "default": null, "description": "Transport error when no response was obtained." },
+        "screenshot_b64": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "tier_attempts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Adapters tried in order before this result (escalation trail)."
+        },
+        "fetch_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null,
+          "description": "Transport error when no response was obtained."
+        },
         "failure_kind": {
-          "type": ["string", "null"],
-          "enum": ["egress_refused", "redirect_loop", "transport_error", "timeout", "dependency_missing", null],
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "egress_refused",
+            "redirect_loop",
+            "transport_error",
+            "timeout",
+            "dependency_missing",
+            null
+          ],
           "default": null,
           "description": "Structured cause for a failed fetch (status 0), letting a consumer set retriability precisely instead of parsing the error text. Null on success."
         }

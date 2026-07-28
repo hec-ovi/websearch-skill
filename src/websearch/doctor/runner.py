@@ -19,7 +19,12 @@ from datetime import UTC, datetime
 
 from ..envelope import Envelope, ok_envelope
 from ..layer1_search import DdgsAdapter, SearchRequest
-from ..optional_layers import LayerState, layer_states, resolved_proxy_url
+from ..optional_layers import (
+    LayerState,
+    configured_proxy_url,
+    layer_states,
+    resolved_proxy_url,
+)
 from ..proxy import proxy_for
 from . import probes
 from .models import (
@@ -51,6 +56,7 @@ class Doctor:
         *,
         layers: dict[str, LayerState],
         proxy_url: str | None,
+        configured_proxy: str | None = None,
         net: probes.Net | None = None,
         ddgs_factory: Callable[[str], object] | None = None,
         pipeline_factory: Callable[..., object] | None = None,
@@ -58,7 +64,12 @@ class Doctor:
         github_factory: Callable[..., object] | None = None,
     ):
         self._layers = layers
+        # Two addresses, on purpose: proxy_url is what a request connects through (Tor's
+        # SOCKS port when that layer is on), configured_proxy is the WEBSEARCH_PROXY hop
+        # itself, which the proxy check has to measure directly even when Tor is in front
+        # of it. Defaulting the second to the first keeps every existing caller correct.
         self._proxy_url = proxy_url
+        self._configured_proxy = proxy_url if configured_proxy is None else configured_proxy
         self._net = net or probes.HttpxNet()
         # The same seam the ddgs adapter exposes, plus the backend name: ddgs talks to the
         # network through a Rust client, so a fake DDGS is the only way to exercise the
@@ -79,8 +90,18 @@ class Doctor:
         state = self._layer("proxy")
         return state.enabled and not state.error
 
+    @property
+    def _tor_enabled(self) -> bool:
+        state = self._layer("tor")
+        return state.enabled and not state.error
+
+    @property
+    def _egress_enabled(self) -> bool:
+        """Whether anything at all stands between this machine and the destination."""
+        return self._tor_enabled or self._proxy_enabled
+
     def _effective_proxy(self) -> str | None:
-        return self._proxy_url if self._proxy_enabled else None
+        return self._proxy_url if self._egress_enabled else None
 
     def _build_pipeline(self):
         if self._pipeline_factory is not None:
@@ -113,6 +134,7 @@ class Doctor:
             ("internet", "egress", None),
             ("baseline", "egress", None),
             ("proxy", "egress", "proxy"),
+            ("tor", "tor", "tor"),
             ("vpn", "vpn", "vpn"),
             ("searxng", "searxng", "searxng"),
         ]
@@ -127,6 +149,10 @@ class Doctor:
         plan.append(("tool:github", "tools", None))
         plan.append(("fetch:http", "fetch", None))
         plan.append(("fetch:impersonation", "fetch", None))
+        # Only with the layer on: a .onion fetch has nowhere to go without Tor, and a
+        # check that always reads "skipped" is noise in every run that does not use it.
+        if self._layer("tor").enabled and not self._layer("tor").error:
+            plan.append(("fetch:onion", "fetch", "tor"))
         return [item for item in plan if self._selected(item, request)]
 
     @staticmethod
@@ -195,7 +221,7 @@ class Doctor:
         # Phase 2: connectivity along the path the tool actually uses, plus the opt-in
         # direct baseline. With a proxy configured, both of these go through it unless
         # --baseline explicitly allows the one request that does not.
-        proxy_url = self._proxy_url
+        proxy_url = self._configured_proxy
         path_proxy = self._effective_proxy()
         run_all(
             {
@@ -205,16 +231,18 @@ class Doctor:
                 "baseline": lambda: probes.probe_baseline(
                     self._net,
                     timeout_s=timeout_s,
-                    # With no proxy configured, "direct" is already the only path, so the
-                    # baseline is free and always worth having.
-                    requested=request.baseline or not self._proxy_enabled,
+                    # With nothing between this machine and the internet, "direct" is
+                    # already the only path, so the baseline is free and always worth
+                    # having. With Tor or a proxy on, it is the one request that leaves
+                    # the tunnel, and stays opt-in.
+                    requested=request.baseline or not self._egress_enabled,
                 ),
             }
         )
         baseline = results.get("baseline")
         direct_ip = (baseline.detail.get("exit_ip") if baseline else None) or None
 
-        # Phase 3: the three optional layers.
+        # Phase 3: the optional layers.
         run_all(
             {
                 "proxy": lambda: probes.probe_proxy(
@@ -224,18 +252,25 @@ class Doctor:
                     timeout_s=timeout_s,
                     direct_ip=direct_ip,
                 ),
+                "tor": lambda: probes.probe_tor(
+                    self._layer("tor"), timeout_s=timeout_s, direct_ip=direct_ip
+                ),
                 "vpn": lambda: probes.probe_vpn(
                     self._layer("vpn"),
                     self._net,
                     timeout_s=timeout_s,
                     proxy_url=proxy_url,
                     proxy_enabled=self._proxy_enabled,
+                    tor_enabled=self._tor_enabled,
                 ),
                 "searxng": lambda: probes.probe_searxng(
                     self._layer("searxng"),
                     self._net,
                     timeout_s=timeout_s,
-                    proxy_url=proxy_url,
+                    # The path a search takes, not the proxy hop: a loopback instance is
+                    # bypassed either way, and a remote one belongs behind Tor when Tor is
+                    # on, the same as every other request.
+                    proxy_url=path_proxy,
                     query=request.query,
                 ),
             }
@@ -304,6 +339,12 @@ class Doctor:
             self._build_pipeline(), request.fetch_url, timeout_ms=request.timeout_ms
         )
         jobs["fetch:impersonation"] = probes.probe_impersonation
+        jobs["fetch:onion"] = lambda: probes.probe_fetch(
+            self._build_pipeline(),
+            request.onion_url,
+            timeout_ms=max(request.timeout_ms, 30000),  # onion circuits are slow to build
+            what="onion",
+        )
         return jobs
 
     def _cross_check_silent_providers(
@@ -326,7 +367,7 @@ class Doctor:
         }
         if not silent:
             return
-        proxy = proxy_for(state.value, self._proxy_url if self._proxy_enabled else None)
+        proxy = proxy_for(state.value, self._effective_proxy())
 
         def ask(engine: str):
             return engine, probes.probe_searxng_engine(
@@ -461,6 +502,7 @@ def build_doctor(
     *,
     vpn: str | None = None,
     proxy: str | None = None,
+    tor: str | None = None,
     searxng_url: str | None = None,
     net: probes.Net | None = None,
     ddgs_factory: Callable[[str], object] | None = None,
@@ -473,11 +515,15 @@ def build_doctor(
     Each argument mirrors one optional layer's switch; passing None means "read the
     environment", and the environment defaults to off.
     """
-    layers = layer_states(vpn=vpn, proxy=proxy, searxng_url=searxng_url)
-    proxy_url = resolved_proxy_url(proxy)
+    layers = layer_states(vpn=vpn, proxy=proxy, tor=tor, searxng_url=searxng_url)
+    # The address the probes connect through, which is Tor's SOCKS port when that layer is
+    # on: a doctor that measured the configured proxy while the tool used Tor would be
+    # reporting on a path no request takes.
+    proxy_url = resolved_proxy_url(proxy, tor)
     return Doctor(
         layers=layers,
         proxy_url=proxy_url,
+        configured_proxy=configured_proxy_url(proxy),
         net=net,
         ddgs_factory=ddgs_factory,
         pipeline_factory=pipeline_factory,

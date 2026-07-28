@@ -12,7 +12,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-FETCH_CONTRACT_VERSION = "1.2.0"
+FETCH_CONTRACT_VERSION = "1.3.0"
 EXTRACT_CONTRACT_VERSION = "1.0.0"
 
 # Default transport guard: bound how much of a response we buffer/hand downstream.
@@ -33,6 +33,10 @@ class Proxy(BaseModel):
 
     url: str
     type: Literal["http", "socks5", "wireguard", "none"] = "http"
+    # Whether this hop is a Tor client. It is the only thing that makes a .onion target
+    # reachable rather than an unresolvable name, and the egress guard refuses one
+    # without it, so a misdeclared proxy fails closed instead of leaking the lookup.
+    tor: bool = False
 
 
 class Cookie(BaseModel):

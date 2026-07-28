@@ -158,11 +158,29 @@ def test_rewiring_replaces_the_old_url_instead_of_stacking(monkeypatch, tmp_path
     assert "2222" in body and "1111" not in body
 
 
-def test_with_no_env_file_configured_nothing_is_written(monkeypatch, tmp_path):
-    """The cwd's .env belongs to whatever project the agent is working in."""
+def test_with_no_env_file_configured_the_user_config_file_is_used(monkeypatch, tmp_path):
+    """The cwd's .env belongs to whatever project the agent is working in.
+
+    So the URL goes to the tool's own file instead, which is the one place a setting
+    survives changing directories. XDG_CONFIG_HOME is redirected by the suite-wide
+    fixture, so this never touches the developer's real config.
+    """
     monkeypatch.chdir(tmp_path)
-    assert sx.wire_env_file("http://127.0.0.1:8888") is None
+    from websearch.optional_layers import user_env_file
+
+    written = sx.wire_env_file("http://127.0.0.1:8888")
+
+    assert written == user_env_file()
+    assert f"{SEARXNG_ENV}=http://127.0.0.1:8888" in written.read_text().splitlines()
     assert not (tmp_path / ".env").exists()
+
+
+def test_a_project_env_file_that_already_sets_the_url_is_not_written_under(monkeypatch, tmp_path):
+    """Writing under a file that outranks ours would say one thing and do another."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".env").write_text(f"{SEARXNG_ENV}=http://127.0.0.1:1234\n")
+
+    assert sx.wire_env_file("http://127.0.0.1:8888") is None
 
 
 # --- health, status, and stopping ---------------------------------------------------
@@ -537,3 +555,78 @@ def test_up_installs_and_serves_json_results(tmp_path, monkeypatch, free_port):
         assert payload["results"], "a live instance returned nothing"
     finally:
         sx.stop(paths)
+
+
+# --- settings that follow the tor layer ---------------------------------------------
+
+
+def test_the_generated_settings_carry_no_tor_block_with_the_layer_off(tmp_path):
+    paths = sx.Paths(tmp_path)
+    sx.write_settings(paths, 8888)
+
+    body = paths.settings.read_text()
+    assert "using_tor_proxy" not in body
+    assert sx.MANAGED_MARKER in body
+    assert not sx.settings_stale(paths, 8888, None)
+
+
+def test_turning_tor_on_rewrites_the_settings_and_points_the_onion_engines_at_it(tmp_path):
+    paths = sx.Paths(tmp_path)
+    sx.write_settings(paths, 8888)
+    assert sx.settings_stale(paths, 8888, "socks5h://127.0.0.1:9050") is True
+
+    sx.write_settings(paths, 8888, tor_socks="socks5h://127.0.0.1:9050")
+
+    body = paths.settings.read_text()
+    assert "- name: ahmia" in body and "- name: torch" in body
+    assert body.count("socks5h://127.0.0.1:9050") == 2
+    # Per engine, never globally: the clearnet engines must not be pushed through Tor.
+    assert "using_tor_proxy: false" in body
+
+
+def test_a_rewrite_keeps_the_secret_key(tmp_path):
+    paths = sx.Paths(tmp_path)
+    sx.write_settings(paths, 8888)
+    secret = sx._existing_secret(paths.settings.read_text())
+
+    sx.write_settings(paths, 8888, tor_socks="socks5h://127.0.0.1:9050")
+
+    assert sx._existing_secret(paths.settings.read_text()) == secret
+
+
+def test_an_operator_file_is_never_rewritten(tmp_path):
+    """Removing the marker is how you take the file over."""
+    paths = sx.Paths(tmp_path)
+    paths.settings.write_text("use_default_settings: true\nserver:\n  port: 9999\n")
+
+    sx.write_settings(paths, 8888, tor_socks="socks5h://127.0.0.1:9050")
+
+    assert "9999" in paths.settings.read_text()
+    assert "ahmia" not in paths.settings.read_text()
+    assert sx.settings_stale(paths, 8888, "socks5h://127.0.0.1:9050") is False
+
+
+def test_a_settings_file_from_before_the_marker_is_adopted_if_unedited(tmp_path):
+    """Otherwise every install that predates the tor layer keeps a file that can never
+    gain the onion engines, and `websearch tor up` silently does nothing for SearXNG."""
+    paths = sx.Paths(tmp_path)
+    paths.settings.write_text(sx.LEGACY_SETTINGS_TEMPLATE.format(port=8888, secret="abc123"))
+
+    assert sx.settings_stale(paths, 8888, "socks5h://127.0.0.1:9050") is True
+    sx.write_settings(paths, 8888, tor_socks="socks5h://127.0.0.1:9050")
+
+    body = paths.settings.read_text()
+    assert sx.MANAGED_MARKER in body and "- name: ahmia" in body
+    assert 'secret_key: "abc123"' in body
+
+
+def test_an_edited_file_from_before_the_marker_is_left_alone(tmp_path):
+    paths = sx.Paths(tmp_path)
+    edited = (
+        sx.LEGACY_SETTINGS_TEMPLATE.format(port=8888, secret="abc123") + "  autocomplete: ddg\n"
+    )
+    paths.settings.write_text(edited)
+
+    sx.write_settings(paths, 8888, tor_socks="socks5h://127.0.0.1:9050")
+
+    assert paths.settings.read_text() == edited

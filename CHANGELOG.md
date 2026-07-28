@@ -6,6 +6,63 @@ semantic versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **A Tor layer, off by default.** `websearch tor up|status|down` runs Tor on this machine
+  the same way `searxng up` runs SearXNG: it uses a Tor that is already listening, else
+  `tor` on PATH, else it downloads the official Tor Expert Bundle into the state directory
+  and checks it against the sha256 published beside it, then starts it detached and waits
+  for the bootstrap. Nothing goes through Tor until you run it, and `up` writes
+  `WEBSEARCH_TOR=on` into your settings file so the next command inherits it. New contract
+  `tor@1.0.0`.
+
+  `up` and the doctor both ask `check.torproject.org` whether the traffic really leaves
+  through Tor, and that answer is reported separately from reachability: a port that
+  accepts connections is not a port that is Tor, and treating the two as the same would
+  tell you your requests are anonymous when they are not.
+
+- **A configured proxy is chained rather than replaced.** With both layers on, the proxy is
+  written into Tor's torrc as its upstream (`Socks5Proxy` / `HTTPSProxy`), so the path is
+  you, then the proxy, then Tor. A VPN hop still hides Tor use from your ISP, and turning
+  on the layer that was supposed to add a hop never silently drops one. A proxy scheme Tor
+  cannot dial through is an error instead. The vpn check is skipped while Tor is on and
+  says why: behind Tor nothing external can see the hop in front of it.
+
+- **Onion search and `.onion` fetching.** `--onion` on `search` and `web-search` swaps the
+  clearnet engines for the onion ones: a new keyless Ahmia adapter, plus SearXNG's onions
+  category (which adds Torch) when a local instance is configured. The two sets never run
+  together, since no clearnet engine indexes onion services and no onion index crawls the
+  clearnet. `web-fetch` and `web-open` take `.onion` URLs unchanged. Onion searches get a
+  45s default timeout because ten to thirty seconds is normal through three relays.
+  `search@1.2.0` (new `onion`), `agent-io@1.2.0` (same), `fetch@1.3.0` (`Proxy.tor`).
+
+- **`.onion` fails closed without the layer.** The egress guard refuses an onion URL before
+  anything resolves and names the command that turns Tor on. Resolving an onion name
+  locally leaks it to your resolver on the way to failing anyway.
+
+- **A user-level settings file.** Settings now come from the first file that defines them:
+  `WEBSEARCH_ENV_FILE`, then `./.env`, then `$XDG_CONFIG_HOME/websearch/.env`. An exported
+  variable still beats all of them. Before this the only fallback was a `.env` in the
+  working directory, so "set it once" meant a file per project or re-exporting in every
+  shell. `searxng up` and `tor up` record what they started in that file, and skip the
+  write when a higher-precedence file already sets the key rather than writing a line the
+  environment would ignore. `init@1.1.0` reports every candidate it looked at.
+
+- **`web-search-tor` skill**, covering the layer, onion search, and what Tor does not give
+  you. The base skill points at it.
+
+### Changed
+
+- The generated SearXNG `settings.yml` is regenerated on `up` while it carries its managed
+  marker, and the instance restarts when the content changes, because the onion engines
+  need a proxy block that a write-once file could never gain. Removing the marker (or
+  editing the file) hands it to you permanently. A file written by an earlier version is
+  adopted only when it is byte-identical to what that version produced. `searxng@1.1.0`.
+- `doctor@2.1.0`: a `tor` layer and group, a `tor` check, and an onion fetch check that
+  only runs with the layer on.
+- The off-word vocabulary (`off`, `none`, `no`, `false`, `0`, `direct`) is now one
+  definition shared by every layer switch instead of two that had drifted apart.
+
 ## [0.3.0] - 2026-07-25
 
 ### Removed

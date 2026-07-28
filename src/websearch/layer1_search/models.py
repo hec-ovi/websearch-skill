@@ -9,9 +9,16 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-SEARCH_CONTRACT_VERSION = "1.1.0"
+SEARCH_CONTRACT_VERSION = "1.2.0"
+
+# A clearnet engine answers in a second or two; an onion index is reached through three
+# relays and answers in ten to thirty. The clearnet default applied to an onion search
+# times out every query, so the default follows the network being searched. An explicit
+# timeout_ms still wins, whatever it says.
+DEFAULT_TIMEOUT_MS = 8000
+ONION_TIMEOUT_MS = 45000
 
 SafeSearch = Literal["off", "moderate", "strict"]
 ResultType = Literal["web", "news"]
@@ -58,12 +65,22 @@ class SearchRequest(BaseModel):
     include_sites: list[str] = Field(default_factory=list)
     exclude_sites: list[str] = Field(default_factory=list)
     result_type: ResultType = "web"
+    # Search the onion indexes instead of the clearnet engines. Not a filter over the same
+    # fanout and not additive: no clearnet engine indexes onion services and no onion index
+    # indexes the clearnet, so this picks which set of engines runs. Needs the tor layer.
+    onion: bool = False
     engines: list[str] | None = None
     max_total_results: int = Field(default=20, ge=0)  # 0 = no cap after fusion
     fusion: Fusion = Field(default_factory=Fusion)
     egress: Egress | None = None
     engine_overrides: dict[str, dict] = Field(default_factory=dict)
-    timeout_ms: int = Field(default=8000, ge=1)
+    timeout_ms: int = Field(default=DEFAULT_TIMEOUT_MS, ge=1)
+
+    @model_validator(mode="after")
+    def _onion_searches_get_longer(self) -> SearchRequest:
+        if self.onion and "timeout_ms" not in self.model_fields_set:
+            self.timeout_ms = ONION_TIMEOUT_MS
+        return self
 
 
 class SourceProvenance(BaseModel):

@@ -45,14 +45,16 @@ git URL for reproducibility.
 
 ## As an agent skill (npx skills add)
 
-The [`skills`](https://www.npmjs.com/package/skills) CLI installs the `skills/web-search/`
-directory into every agent it detects (Claude Code, Codex, OpenCode, Cursor, Gemini, and
-others), so the same SKILL.md works across all of them.
+The [`skills`](https://www.npmjs.com/package/skills) CLI installs the `skills/` directories
+into every agent it detects (Claude Code, Codex, OpenCode, Cursor, Gemini, and others), so
+the same SKILL.md works across all of them. There are two: `web-search` (the CLI) and
+`web-search-tor` (the same CLI with the Tor layer on, for `.onion` and onion search).
 
 ```bash
 npx skills add hec-ovi/websearch-skill                 # all detected agents, project scope
 npx skills add hec-ovi/websearch-skill -g              # global (your user dir)
 npx skills add hec-ovi/websearch-skill -a claude-code -a codex -s web-search
+npx skills add hec-ovi/websearch-skill -s web-search-tor   # just the Tor one
 npx skills add hec-ovi/websearch-skill --list          # show what the repo offers, install nothing
 npx skills add hec-ovi/websearch-skill --copy -y       # copy instead of symlink (e.g. Windows)
 ```

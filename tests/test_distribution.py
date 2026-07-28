@@ -66,7 +66,7 @@ def test_sdist_uses_an_allowlist_that_excludes_local_state():
 
 
 @pytest.mark.parametrize(
-    "subcommand", ["init", "doctor", "searxng", "web-search", "web-fetch", "web-open"]
+    "subcommand", ["init", "doctor", "searxng", "tor", "web-search", "web-fetch", "web-open"]
 )
 def test_manifest_launch_subcommands_exist(subcommand):
     # argparse prints help and exits 0 for a real subcommand, before any dispatch/server.
@@ -141,11 +141,20 @@ def test_release_workflow_is_tokenless_trusted_publishing():
 # --- skill discoverability -------------------------------------------------------------
 
 
-def test_skill_is_in_the_flat_layout_with_a_stable_name():
-    skill = ROOT / "skills" / "web-search" / "SKILL.md"
+@pytest.mark.parametrize("name", ["web-search", "web-search-tor"])
+def test_skill_is_in_the_flat_layout_with_a_stable_name(name):
+    skill = ROOT / "skills" / name / "SKILL.md"
     assert skill.is_file()  # npx skills add walks skills/<name>/SKILL.md
-    head = skill.read_text(encoding="utf-8")[:600]
-    assert "name: web-search" in head  # stable name; the plugin relies on it
+    head = skill.read_text(encoding="utf-8")[:900]
+    assert f"name: {name}" in head  # stable name; the plugin relies on it
+
+
+def test_the_tor_skill_says_the_layer_is_off_by_default():
+    """A skill that reads as "search is on Tor now" would be a safety problem, not a
+    documentation one: the layer changes where every request in the session comes from."""
+    body = (ROOT / "skills" / "web-search-tor" / "SKILL.md").read_text(encoding="utf-8")
+    assert "Off by default" in body
+    assert "websearch tor up" in body
 
 
 # --- no Unicode dashes in any doc or manifest ------------------------------------------

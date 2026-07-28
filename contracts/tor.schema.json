@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/tor.schema.json",
+  "title": "Tor local stack - lifecycle contract",
+  "description": "Run Tor on this machine and route the tool through it, report on it, or stop it. This is process control, not a search path: it finds a tor (one already listening, one on PATH, or the official Tor Expert Bundle downloaded and checked against its published sha256), writes a torrc, starts it detached from the caller, and records WEBSEARCH_TOR in the settings file. Turning the layer on is what makes .onion reachable and the onion engines selectable. A configured WEBSEARCH_PROXY is not replaced: it becomes Tor's own upstream in torrc, so the path is proxy then Tor. Emits the same Envelope (meta.layer \"tor\") as every other port.",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "TorRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "enum": ["up", "status", "down"],
+          "description": "up: install if this is the first time, start it, verify the exit, and turn the layer on for later commands. status: where the state lives, whether the SOCKS port answers, and whether the traffic is really Tor. down: stop it and turn the layer off. 'up' against a Tor that is already listening never installs over it."
+        },
+        "reinstall": {
+          "type": "boolean",
+          "default": false,
+          "description": "Download and unpack the expert bundle again before starting. Only meaningful with 'up'."
+        },
+        "verify": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask check.torproject.org whether the traffic really leaves through Tor. Off skips one request and gives up the only answer that distinguishes Tor from anything else listening on the port."
+        },
+        "timeout_s": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 600,
+          "default": 120,
+          "description": "How long to wait for the bootstrap to reach 100%. A first circuit through a slow upstream proxy can need most of it."
+        }
+      }
+    },
+
+    "TorPayload": {
+      "type": "object",
+      "description": "The state of the local Tor stack after the action ran.",
+      "required": ["action", "enabled", "home", "socks_url", "installed", "reachable"],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": ["up", "status", "down"],
+          "description": "The action that produced this state."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the tor layer switch (WEBSEARCH_TOR) is on. Off by default, and off is not an error: it means requests go out the ordinary way."
+        },
+        "home": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The state directory holding the expert bundle, Tor's DataDirectory, the generated torrc, the log, and the pidfile. WEBSEARCH_TOR_HOME sets it; the default is a 'tor' directory beside the settings file, else the XDG cache."
+        },
+        "socks_url": {
+          "type": "string",
+          "pattern": "^socks5h?://",
+          "description": "The SOCKS address every network path connects through while the layer is on. Always socks5h in the default form, so hostnames resolve at the Tor client: a .onion name has no answer locally, and asking would leak the lookup."
+        },
+        "installed": {
+          "type": "boolean",
+          "description": "Whether a tor binary is available to run."
+        },
+        "binary": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The tor binary that would be run, or null when none was found."
+        },
+        "source": {
+          "type": ["string", "null"],
+          "enum": ["explicit", "bundle", "system", "none", null],
+          "default": null,
+          "description": "Where that binary came from: WEBSEARCH_TOR_BINARY, the downloaded expert bundle, or the system PATH."
+        },
+        "version": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The Tor Browser release the installed expert bundle was cut from. Null when the tor in use is the system's, whose version this does not claim to know."
+        },
+        "pid": {
+          "type": ["integer", "null"],
+          "default": null,
+          "description": "The process id of the Tor this tool started, or null when nothing of ours is running (which includes the case of an external Tor answering on the port). It is a session leader, not a child of the caller, which is what lets it outlive the command that started it."
+        },
+        "reachable": {
+          "type": "boolean",
+          "description": "Whether anything accepts connections on the SOCKS port. Not proof it is Tor: see is_tor."
+        },
+        "is_tor": {
+          "type": ["boolean", "null"],
+          "default": null,
+          "description": "What check.torproject.org says about the traffic. True is the only value that means anonymous. Null means the question could not be asked (no network, verify off), which is not the same as false, and false means something else is bound to that port."
+        },
+        "exit_ip": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The exit node's address as the check service saw it."
+        },
+        "upstream": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The egress proxy Tor dials out through, redacted. Null when Tor connects directly. This is the hop that keeps a configured VPN in the path instead of being replaced by Tor."
+        },
+        "wired": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The settings file WEBSEARCH_TOR was written into, or null when nothing was written and the caller must export the variable itself."
+        },
+        "bootstrap": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The log line the bootstrap ended on, which is where a slow or failed start explains itself."
+        },
+        "log": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Tor's log file."
+        }
+      }
+    }
+  }
+}

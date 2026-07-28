@@ -22,6 +22,7 @@ from websearch.layer3_agentio import AGENTIO_CONTRACT_VERSION
 from websearch.searxng_local import SEARXNG_CONTRACT_VERSION
 from websearch.tool_arxiv import ARXIV_CONTRACT_VERSION
 from websearch.tool_github import GITHUB_CONTRACT_VERSION
+from websearch.tor_local import TOR_CONTRACT_VERSION
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -38,6 +39,7 @@ PAIRS = [
     ("doctor.schema.json", DOCTOR_CONTRACT_VERSION),
     ("searxng.schema.json", SEARXNG_CONTRACT_VERSION),
     ("init.schema.json", INIT_CONTRACT_VERSION),
+    ("tor.schema.json", TOR_CONTRACT_VERSION),
 ]
 
 

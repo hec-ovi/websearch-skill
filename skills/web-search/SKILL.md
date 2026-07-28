@@ -32,8 +32,8 @@ Default output is a compact human view; add `--json` for the structured Envelope
 websearch init [--skip-searxng] [--quick] [--timeout-ms MS] [--json]
 ```
 
-Run this ONCE at the start of a session, before searching. It reads the configured env
-file, starts the local SearXNG, runs the full self-test, and reports what works. Give it a
+Run this ONCE at the start of a session, before searching. It reads the settings files,
+starts the local SearXNG, runs the full self-test, and reports what works. Give it a
 generous timeout: the first run installs SearXNG and can take a minute or more.
 
 Read three fields and move on:
@@ -133,6 +133,7 @@ wait and retry, do not loop. Repository search only (code search needs a token).
 | Code, libraries, GitHub projects | `github` |
 | Reddit or X content | `web-search --site reddit.com` (or `x.com`) |
 | First results page was not enough | refine the `web-search` query |
+| A `.onion` address, or search over Tor | the `web-search-tor` skill |
 
 Typical flow: `init` once, then `web-search`, then `web-fetch` the two or three most
 relevant URLs, then `web-open` only if a page reported `has_more` and you still need more
@@ -193,6 +194,12 @@ path, and it handles the detachment for you.
 - `WEBSEARCH_SEARXNG_URL` can also point at a SearXNG you already run; `searxng up` just
   sets it for you. Engine-selection flags (`--engines`, `--ddgs-backends`, `--no-ddgs`)
   live only on the lower-level `websearch search` command, for debugging.
+- Settings come from the first file that defines them: `WEBSEARCH_ENV_FILE` when set, then
+  `./.env`, then `~/.config/websearch/.env`. An exported variable beats all of them. The
+  last one is where a setting survives changing directories, and where `searxng up` and
+  `tor up` record what they started.
+- A `.onion` URL is refused unless the Tor layer is on, and the error says which command
+  turns it on. Same CLI, one switch: the `web-search-tor` skill covers it.
 - Every command is its own process and reads the env file each time, so a setting takes
   effect on the next command with nothing to restart. The page index behind `web-open` is
   written to disk for the same reason; `--persist-path off` opts out of that for a run.
