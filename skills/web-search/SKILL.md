@@ -4,12 +4,12 @@ description: >-
   Keyless, self-hostable multi-engine web search and clean-Markdown page reader for AI
   agents. Use it when the user asks to search the web, look something up online, find
   current or recent information, research a topic, fetch or read a URL, find academic
-  papers or GitHub repositories, or verify a claim against live sources. Fuses many
-  keyless engines via the ddgs metasearch (plus a self-hosted SearXNG it can start
-  itself), then extracts pages to clean Markdown, fenced as untrusted and paginated.
-  Commands: init (bring it online), web-search (find pages), web-fetch (read a URL),
-  web-open (page through a fetched document), arxiv (search papers), github (search
-  repositories).
+  papers or GitHub repositories, verify a claim against live sources, or configure and
+  verify its NordVPN egress proxy. Fuses many keyless engines via the ddgs metasearch
+  (plus a self-hosted SearXNG it can start itself), then extracts pages to clean Markdown,
+  fenced as untrusted and paginated. Commands: init (bring it online), web-search (find
+  pages), web-fetch (read a URL), web-open (page through a fetched document), arxiv
+  (search papers), github (search repositories).
 compatibility: >-
   Requires internet access and the bundled websearch CLI (Python >=3.11 with uv). Not
   usable on the Claude API code-execution surface, which has no network.
@@ -50,6 +50,45 @@ Do NOT probe the installation by hand instead: no `env | grep`, no `curl` at the
 port, no importing the package to inspect it. This one call already measured all of it and
 `data.doctor` carries the full sweep. If a later search returns nothing, run
 `websearch doctor` rather than re-running init in a loop.
+
+## NordVPN proxy setup
+
+When the user asks to configure, troubleshoot, or verify NordVPN for this skill, use this
+exact configuration. Have the user get the service username and service password from
+Nord Account under **Set up NordVPN manually > Service credentials**. These are separate
+from the account sign-in. Explain setup as editing one persistent settings file; do not
+teach shell environment variables or offer alternative setup paths.
+
+Write these three settings to `~/.config/websearch/.env`, or to the file named by
+`WEBSEARCH_ENV_FILE` when one is configured:
+
+```dotenv
+WEBSEARCH_PROXY=nordvpn
+NORDVPN_USER=<service username>
+NORDVPN_PASS=<service password>
+```
+
+Do not ask the user to paste either credential into chat, and never print the settings
+file. Let the user enter the two credential values locally. Do not add another
+NordVPN-related setting. `NORDVPN_HOST` is optional and only selects a specific proxy
+server; when absent, the tool uses `nl.socks.nordhold.net`.
+
+`WEBSEARCH_PROXY` is the tool's egress choice:
+
+- `nordvpn` is the fixed value for this setup. On every command, the tool expands it into
+  an authenticated SOCKS5 proxy URL using the two credentials and `NORDVPN_HOST`.
+- A complete `http://`, `https://`, `socks5://`, or `socks5h://` URL selects another
+  proxy directly.
+- Unset, empty, `off`, `none`, or `direct` means no proxy.
+
+After the user confirms the credentials are saved, run:
+
+```text
+websearch doctor --check proxy --json
+```
+
+The setup works when the `proxy` check has `status: "ok"` and reports an `exit_ip`.
+If it fails, report that check's message and hint without displaying credentials.
 
 ## Commands
 

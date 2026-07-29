@@ -157,6 +157,23 @@ def test_the_tor_skill_says_the_layer_is_off_by_default():
     assert "websearch tor up" in body
 
 
+def test_web_search_skill_has_complete_nordvpn_proxy_setup():
+    body = (ROOT / "skills" / "web-search" / "SKILL.md").read_text(encoding="utf-8")
+    assert "configure and\n  verify its NordVPN egress proxy" in body[:1100]
+    for setting in (
+        "WEBSEARCH_PROXY=nordvpn",
+        "NORDVPN_USER=<service username>",
+        "NORDVPN_PASS=<service password>",
+    ):
+        assert setting in body
+    assert "websearch doctor --check proxy --json" in body
+    assert 'status: "ok"' in body
+    assert "Unset, empty, `off`, `none`, or `direct`" in body
+    assert "means no proxy" in body
+    assert "editing one persistent settings file" in body
+    assert "do not\nteach shell environment variables or offer alternative setup paths" in body
+
+
 # --- no Unicode dashes in any doc or manifest ------------------------------------------
 
 
