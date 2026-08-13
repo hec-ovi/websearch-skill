@@ -496,8 +496,11 @@ def test_an_off_contract_request_is_refused(bad):
         sx.SearxngRequest(**bad)
 
 
-def test_down_with_nothing_running_says_so_and_succeeds(capsys, monkeypatch, tmp_path):
+def test_down_with_nothing_running_says_so_and_succeeds(capsys, monkeypatch, tmp_path, free_port):
+    # A pinned free port, not the default: on a machine that really runs an instance on
+    # 8888, the default would make this test read that one and report it as stopped.
     monkeypatch.setenv(sx.HOME_VAR, str(tmp_path))
+    monkeypatch.setenv(sx.PORT_VAR, str(free_port))
     assert main(["searxng", "down"]) == 0
     assert "nothing was running" in capsys.readouterr().out
 

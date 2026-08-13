@@ -112,7 +112,12 @@ LAYER_VARS = (
     "WEBSEARCH_TOR_BINARY",
     "WEBSEARCH_TOR_VERSION",
     "WEBSEARCH_PROXY",
+    "WEBSEARCH_EGRESS_LOCK",
     "WEBSEARCH_VPN",
+    # Set into os.environ (not just a file) by the bring-up paths, so without clearing it
+    # a test that wired one instance decides what the next test's search fans out to.
+    "WEBSEARCH_SEARXNG_URL",
+    "SEARXNG_OUTGOING_PROXY",
     "NORDVPN_USER",
     "NORDVPN_PASS",
     "NORDVPN_HOST",
