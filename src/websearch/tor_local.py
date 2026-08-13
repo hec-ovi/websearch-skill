@@ -501,7 +501,6 @@ def wait_bootstrapped(paths: Paths, timeout_s: int = BOOTSTRAP_TIMEOUT_S) -> tup
     return False, last or f"no bootstrap within {timeout_s}s"
 
 
-
 def status(paths: Paths, *, socks_url: str, check: bool) -> dict[str, Any]:
     binary, source = find_binary(paths)
     reachable = is_reachable(socks_url)

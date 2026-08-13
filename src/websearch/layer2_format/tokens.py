@@ -18,9 +18,7 @@ import math
 from .models import DEFAULT_CHARS_PER_TOKEN
 
 
-def estimate_tokens(
-    text: str | None, *, chars_per_token: float = DEFAULT_CHARS_PER_TOKEN
-) -> int:
+def estimate_tokens(text: str | None, *, chars_per_token: float = DEFAULT_CHARS_PER_TOKEN) -> int:
     """Estimate the token count of ``text``. Returns 0 for empty/None input."""
     if not text:
         return 0

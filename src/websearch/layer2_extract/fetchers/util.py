@@ -16,6 +16,7 @@ def header(headers: dict[str, str], name: str) -> str | None:
             return v
     return None
 
+
 # A current, realistic desktop Chrome UA used when the caller does not supply one.
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "

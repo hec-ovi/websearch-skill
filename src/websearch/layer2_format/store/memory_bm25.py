@@ -117,9 +117,7 @@ class MemoryBm25Index:
             prepared = prepare_doc(page, self._config)
             existing = self._docs.get(prepared.id)
             if existing is not None and existing.content_hash == prepared.content_hash:
-                added.append(
-                    stored_doc(prepared, n_passages=existing.n_passages, deduped=True)
-                )
+                added.append(stored_doc(prepared, n_passages=existing.n_passages, deduped=True))
                 continue
             if existing is not None:  # changed content: drop old passages, move to end
                 self._passages = [p for p in self._passages if p.doc_id != prepared.id]
@@ -155,9 +153,7 @@ class MemoryBm25Index:
                     )
                 )
             changed = True
-            added.append(
-                stored_doc(prepared, n_passages=len(prepared.passages), deduped=False)
-            )
+            added.append(stored_doc(prepared, n_passages=len(prepared.passages), deduped=False))
         if changed:
             self._reindex()
         return AddResult(added=added)

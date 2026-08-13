@@ -498,7 +498,6 @@ def wait_healthy(url: str, timeout_s: int = HEALTH_TIMEOUT_S) -> bool:
     return False
 
 
-
 def wire_env_file(url: str) -> Path | None:
     """Record the URL in the settings file the tool reads, so later commands pick it up.
 
@@ -681,4 +680,3 @@ def control(request: SearxngRequest) -> Envelope:
             retriable=True,
         )
     return _ok(_payload("up", paths, p, wired=wire_env_file(url)), started)
-

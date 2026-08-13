@@ -115,9 +115,7 @@ class SqliteFts5Index:
                     "SELECT content_hash, n_passages FROM docs WHERE id = ?", (prepared.id,)
                 ).fetchone()
                 if row is not None and row["content_hash"] == prepared.content_hash:
-                    added.append(
-                        stored_doc(prepared, n_passages=row["n_passages"], deduped=True)
-                    )
+                    added.append(stored_doc(prepared, n_passages=row["n_passages"], deduped=True))
                     continue
                 # One doc = one atomic transaction. `with self._con` commits on success
                 # and ROLLS BACK on any error, so a mid-write failure never leaves a
@@ -149,9 +147,7 @@ class SqliteFts5Index:
                             for p in prepared.passages
                         ],
                     )
-                added.append(
-                    stored_doc(prepared, n_passages=len(prepared.passages), deduped=False)
-                )
+                added.append(stored_doc(prepared, n_passages=len(prepared.passages), deduped=False))
         return AddResult(added=added)
 
     def search(self, request: SearchPageRequest) -> SearchPageResult:
