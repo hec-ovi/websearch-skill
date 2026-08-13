@@ -1,6 +1,6 @@
 [project]
 name = "websearch-skill"
-version = "0.6.0"
+version = "0.6.1"
 description = "Open-source multi-engine web search + extraction SKILL and CLI for AI agents (uv-native, contract-driven, harness-portable, self-hosted SearXNG and egress proxy)"
 readme = "README.md"
 requires-python = ">=3.11"

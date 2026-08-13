@@ -4,7 +4,7 @@ Open-source multi-engine web search and content extraction for AI agents. Intern
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-792%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-793%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
 > **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). Available now: keyless search, Markdown extraction, five agent commands, self-hosted SearXNG, and a NordVPN egress proxy that two env vars enable and lock. These are covered by the test suite. **There is no MCP server**; use the CLI directly or install the skill (see No MCP below). Hard anti-bot tiers and local reranking remain on the roadmap. Pin a version and test it in a sandbox before using it with sensitive data.
@@ -28,7 +28,7 @@ Additional keyless commands:
 
 ### One runtime, one call
 
-The whole toolkit is one Python package with one CLI, `websearch`. There is no Node service, no npm runtime, no daemon of its own, and nothing to compose; the only requirement is [uv](https://docs.astral.sh/uv/), which fetches a compatible Python on its own. The `npx skills add` line under Install is a one-time copier for agent skill folders, not a runtime.
+The whole toolkit is one Python package with one CLI, `websearch`. There is no Node service, no npm runtime, no daemon of its own, and nothing to compose; the only requirement is [uv](https://docs.astral.sh/uv/), which fetches a compatible Python on its own. The `npx skills add` line under Install copies skill folders into agents once; nothing from Node runs afterwards.
 
 An agent brings everything online with one call:
 
@@ -38,7 +38,7 @@ websearch init
 
 `init` reads the settings files, starts the local SearXNG when it is not already running, starts Tor when that layer is on, runs the self-test, and reports capabilities and next actions. There is nothing to probe first and no order to follow: the same call is correct on a fresh machine and on one where everything is already up.
 
-SearXNG is an optional extra engine catalog, not a separate product to operate: `init` (or `websearch searxng up`) clones it, installs it into its own virtualenv, and runs it as a detached local Python process. Docker is never required; [`docker/searxng/`](docker/searxng/) exists only as an alternative for hosts that prefer a container.
+SearXNG is an optional extra engine catalog that the toolkit operates for you: `init` (or `websearch searxng up`) clones it, installs it into its own virtualenv, and runs it as a detached local Python process. Docker is never required; [`docker/searxng/`](docker/searxng/) exists only as an alternative for hosts that prefer a container.
 
 ### Engines, out of the box, no keys
 
@@ -380,7 +380,7 @@ A self-hosted SearXNG request has two hops, and they are proxied differently on 
 
 Skip this section unless you work in security: it covers an edge case that only matters when someone is recording traffic on your own network path, which is not the situation of a normal machine on a normal connection.
 
-Queries and page content are inside TLS end to end: the HTTPS session runs from this machine to the website through the proxy, so neither the proxy nor anyone watching the line can read a search query or the pages that come back. What SOCKS5 does not hide from an observer on your line is metadata: that you talk to a NordVPN server, the destination hostnames (in the SOCKS handshake and the TLS SNI), and the SOCKS username and password, which that protocol sends in cleartext. Those are the service credentials, scoped to the proxy service: they cannot log into the Nord account, and the dashboard can regenerate them. Websites see only the exit IP. NordVPN's TLS proxies (port 89) do not accept the service credentials, so a proxy dialed over TLS is not available at protocol level, and this residue is the price of the zero-install setup.
+Queries and page content are inside TLS end to end: the HTTPS session runs from this machine to the website through the proxy, so neither the proxy nor anyone watching the line can read a search query or the pages that come back. What SOCKS5 does not hide from an observer on your line is metadata: that you talk to a NordVPN server, the destination hostnames (in the SOCKS handshake and the TLS SNI), and the SOCKS username and password, which that protocol sends in cleartext. Those are the service credentials, scoped to the proxy service: they cannot log into the Nord account, and the dashboard can regenerate them. Websites see only the exit IP. NordVPN's TLS proxies (port 89) answer the service credentials with HTTP 407 (verified live; see Limitations), so a TLS-dialed proxy is not available from them at protocol level, and this residue is the price of the zero-install setup.
 
 Closing it entirely is an OS-level job: run the provider's VPN app (WireGuard) with its kill switch on, set `WEBSEARCH_PROXY=off`, and declare `WEBSEARCH_VPN=nordvpn` so the doctor verifies the tunnel instead of assuming it. Every byte the machine sends then leaves encrypted, this tool's included, and there is no proxy handshake on the wire at all. The kill switch is what turns "encrypted while the tunnel is up" into "never direct": without it, a dropped tunnel fails open. Running the app and keeping the proxy on also works (the handshake then happens inside the tunnel, and the proxy pins the exit city), but off is the simple answer.
 
@@ -503,6 +503,30 @@ Protected sites usually require paid residential egress (even Firecrawl scores a
 ## Benchmark
 
 [`docs/BENCHMARK.md`](docs/BENCHMARK.md) compares the same queries at the same time against the hosted web search in Claude Code and includes commands for reproduction. Both found comparable relevant and recent pages. This project adds local extraction, multi-engine fusion, and the `arxiv` and `github` commands; the hosted search returns a summary in one call.
+
+## Verification
+
+Two kinds of evidence back this codebase: an offline suite that pins behavior, and live end-to-end runs against the real network.
+
+The suite is 793 tests and none of them opens a socket: every network boundary (the httpx transport, the ddgs client, curl_cffi, SearXNG, the doctor's HTTP port) is injected, so the suite passes identically on an air-gapped machine and in CI. Tests exist one per contract promise, through the real entry point, and the egress rules carry dedicated proofs: no local DNS resolution behind a proxy, literal-IP SSRF refusals including the cloud metadata endpoint and CGNAT (RFC 6598), re-guarding on every redirect hop, credential scoping across cross-origin redirects, fence nonce integrity, credentials never reaching any output, and the lock refusing every unproxied path, a diagnostics run included.
+
+The live validation, most recently 2026-08-13, on a real NordVPN SOCKS5 exit:
+
+- `websearch proxy status` confirmed the exit against NordVPN's own insights endpoint: exit IP, city, `protected: true`.
+- A doctor egress sweep left every request through the proxy with zero direct requests; with the lock on and no proxy usable, a full doctor run made zero network requests and reported each refusal by name.
+- `web-search` fused live ddgs and SearXNG results; `web-fetch` returned a fenced, paginated page; `web-open` served later pages from the store without touching the network.
+- A cold `websearch tor up` downloaded the Tor Expert Bundle (15.0.19), verified its published checksum, bootstrapped, and had its exit confirmed as Tor by check.torproject.org; `--onion` search returned onion results, and a `.onion` fetch came back fenced with the onion provenance note.
+- The same sweep ran again with the proxy off to confirm the direct default: search, fetch, open, arxiv, github, and the full Tor lifecycle, nothing refused and nothing restricted.
+
+## Limitations, and whose they are
+
+Each limit below sits on the provider side of a boundary; the client side of each is built and tested.
+
+- **SOCKS5 metadata (NordVPN).** The observer section above describes what SOCKS5 exposes on your own line. NordVPN runs TLS proxies on port 89 (`*.proxy.nordvpn.com`, a valid Sectigo certificate) and they answer the service credentials with HTTP 407 (verified live 2026-08-13): those servers authenticate their browser extensions only, and their credentialed offering is SOCKS5. The client already accepts `WEBSEARCH_PROXY=https://user:pass@host:port` and dials such a proxy inside TLS, hostnames and credentials encrypted, so any provider that offers a credentialed TLS proxy closes this with a settings line and no code change.
+- **Datacenter exits and anti-bot walls.** Commercial VPN exits are datacenter IPs, which anti-bot systems flag regardless of the client. The fetch tiers escalate to browser impersonation on a detected block; sites that require residential egress remain out of reach until the planned paid adapter.
+- **Engine availability varies by network and by day.** The keyless providers rate-limit, block, or change their markup on their own schedule; `websearch doctor` measures which ones answer from your connection right now, and the SearXNG fanout recovers engines whose pages ddgs can no longer parse.
+- **Keyless API ceilings.** GitHub allows about 10 unauthenticated searches per minute and answers over that with `rate_limited`; arXiv rate-limits and the client backs off on its schedule.
+- **Tor exits are public.** Many sites refuse them outright; that is a property of the exit list, and the clearnet path through the proxy is the alternative when a site does.
 
 ## Roadmap
 

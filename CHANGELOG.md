@@ -6,6 +6,16 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-13
+
+### Changed
+
+- **The egress lock holds for diagnostics too.** With egress locked and no usable proxy,
+  every doctor check that would open a connection from the machine's own address reports
+  a refusal instead of performing it; the local checks and the proxy check (which fails
+  fast on a broken configuration and only ever sends through the proxy) still run. A
+  locked doctor run makes zero network requests.
+
 ## [0.6.0] - 2026-08-13
 
 ### Changed

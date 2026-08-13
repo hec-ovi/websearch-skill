@@ -25,7 +25,13 @@ from ..optional_layers import (
     layer_states,
     resolved_proxy_url,
 )
-from ..proxy import proxy_for
+from ..proxy import (
+    EGRESS_LOCK_VAR,
+    ProxyConfigError,
+    bypasses_proxy,
+    lock_enabled,
+    proxy_for,
+)
 from . import probes
 from .models import (
     DOCTOR_CONTRACT_VERSION,
@@ -187,7 +193,48 @@ class Doctor:
                 optional_layer=layer,
             )
 
+        # The lock holds for diagnostics too: locked with no usable proxy, a probe sent
+        # direct is the exact request the lock forbids, and a doctor run is the likeliest
+        # moment for it (it is what you run when everything else is refusing). Local
+        # checks still run; each network check reports the refusal instead of leaking.
+        try:
+            locked = lock_enabled()
+        except ProxyConfigError:
+            locked = True  # a malformed switch fails closed, same as the egress paths
+        locked_no_exit = self._effective_proxy() is None and locked
+
+        def _refused(name: str) -> probes.Outcome | None:
+            if not locked_no_exit:
+                return None
+            # The proxy check stays ungated: it fails fast on a broken configuration
+            # without a request, and anything it does send goes through the proxy.
+            network = name.startswith(("internet", "vpn", "engine", "tool:", "fetch:"))
+            if name == "searxng":
+                # Loopback itself never leaves, but a live query makes the instance fetch
+                # from every engine, and an instance whose settings carry no proxy would
+                # do that from this machine's own address.
+                state = self._layer("searxng")
+                network = bool(
+                    state.enabled
+                    and state.value
+                    and bypasses_proxy(state.value)
+                    and probes._searxng_egress() is None
+                )
+            if not network:
+                return None
+            return probes.Outcome(
+                SKIPPED,
+                f"refused: {EGRESS_LOCK_VAR} is on with no usable proxy, so this check "
+                "would leave from the machine's own address",
+                hint="Set the proxy up (`websearch proxy use <city>`), or run "
+                "`websearch proxy unlock`.",
+            )
+
         def run_one(name: str, fn: Callable[[], probes.Outcome]) -> None:
+            refused = _refused(name)
+            if refused is not None:
+                record(name, refused, 0.0)
+                return
             start = time.perf_counter()
             try:
                 outcome = fn()

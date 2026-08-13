@@ -725,3 +725,16 @@ def test_the_baseline_stays_opt_in_when_only_tor_is_on(monkeypatch):
     check = checks_by_name(doctor_with().run(DoctorRequest(quick=True)))["baseline"]
 
     assert check["status"] == "skipped"
+
+
+def test_locked_without_a_proxy_the_doctor_sends_nothing(monkeypatch):
+    """The lock holds for diagnostics: a doctor run with egress locked and no proxy
+    makes zero network requests, and each network check reports the refusal."""
+    monkeypatch.setenv(EGRESS_LOCK_VAR, "on")
+    net = net_with()
+    env = doctor_with(net=net).run(DoctorRequest(quick=True, baseline=True))
+    assert net.calls == []
+    checks = checks_by_name(env)
+    assert checks["internet"]["status"] == "skipped"
+    assert "refused" in checks["internet"]["summary"]
+    assert checks["baseline"]["status"] == "skipped"
