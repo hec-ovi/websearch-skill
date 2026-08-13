@@ -49,3 +49,6 @@ docker/searxng/.runtime/
 
 # Local scratch (a resume command dropped in the working tree)
 session
+
+# User raw requirements (kept local)
+docs/REQUIREMENTS.md
