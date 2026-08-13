@@ -40,8 +40,6 @@ import socket
 import subprocess
 import tarfile
 import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -52,7 +50,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import errors
 from .envelope import Envelope, error_envelope, ok_envelope
 from .optional_layers import TOR_ENV, redact_url, scrub_proxy, write_env_setting
-from .proxy import ProxyConfigError, resolve_proxy, tor_enabled, tor_socks_url
+from .proxy import (
+    EGRESS_LOCK_VAR,
+    ProxyConfigError,
+    lock_enabled,
+    resolve_proxy,
+    tor_enabled,
+    tor_socks_url,
+)
 
 TOR_CONTRACT_VERSION = "1.0.0"
 
@@ -122,7 +127,9 @@ def bundle_version() -> str:
     try:
         index = json.loads(_get(VERSION_INDEX, 15.0))
         version = index.get("version")
-    except (urllib.error.URLError, OSError, ValueError):
+    except (TorError, OSError, ValueError):
+        # Unreachable index, or a locked egress with no proxy: the pin below still names a
+        # release, and the download itself refuses on its own if it must.
         return DEFAULT_VERSION
     return str(version) if version else DEFAULT_VERSION
 
@@ -236,14 +243,36 @@ def verify(url: str | None = None, timeout_s: float = 20.0) -> dict[str, Any]:
 # --- installing the bundle --------------------------------------------------------------
 
 
+def install_proxy() -> str | None:
+    """The proxy the bundle download goes through: the configured hop, Tor excluded.
+
+    Tor cannot be its own upstream while it is being installed, so this is the proxy hop
+    alone rather than ``egress_proxy``. It is an ordinary download and gets the same exit
+    as everything else; with the lock on and nothing configured it is refused, because a
+    download that says where you are is still a download that says where you are.
+    """
+    proxy = resolve_proxy()
+    if proxy is None and lock_enabled():
+        raise TorError(
+            f"{EGRESS_LOCK_VAR} is on and no proxy is configured, so downloading the Tor "
+            "bundle would leave from your own address. Set a proxy up, or install Tor "
+            "yourself and point WEBSEARCH_TOR_BINARY at it."
+        )
+    return proxy
+
+
 def _get(url: str, timeout_s: float) -> bytes:
-    # urllib on purpose, and with the proxy handlers emptied: this is the one path that
-    # must not go through the tool's own egress setting, since it runs to set that egress
-    # up. A configured proxy still applies to Tor itself, through torrc.
-    request = urllib.request.Request(url, headers={"User-Agent": "websearch-tor"})
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with opener.open(request, timeout=timeout_s) as response:
-        return response.read()
+    """Fetch a URL through the configured proxy (httpx, so a SOCKS one works too)."""
+    import httpx
+
+    proxy = install_proxy()
+    try:
+        with httpx.Client(proxy=proxy, timeout=timeout_s, follow_redirects=True) as client:
+            response = client.get(url, headers={"User-Agent": "websearch-tor"})
+            response.raise_for_status()
+            return response.content
+    except httpx.HTTPError as exc:
+        raise TorError(scrub_proxy(f"could not fetch {url}: {exc}", proxy)) from exc
 
 
 def _expected_digest(sums: str, name: str) -> str:
@@ -259,15 +288,9 @@ def download_bundle(paths: Paths, *, version: str | None = None) -> Path:
     version = version or bundle_version()
     archive_url, sums_url, name = bundle_urls(version)
     paths.home.mkdir(parents=True, exist_ok=True)
-    try:
-        sums = _get(sums_url, 30.0).decode("utf-8", "replace")
-    except (urllib.error.URLError, OSError) as exc:
-        raise TorError(f"could not read {sums_url}: {exc}") from exc
+    sums = _get(sums_url, 30.0).decode("utf-8", "replace")
     expected = _expected_digest(sums, name)
-    try:
-        blob = _get(archive_url, 300.0)
-    except (urllib.error.URLError, OSError) as exc:
-        raise TorError(f"could not download {archive_url}: {exc}") from exc
+    blob = _get(archive_url, 300.0)
     actual = hashlib.sha256(blob).hexdigest()
     if actual != expected:
         raise TorError(

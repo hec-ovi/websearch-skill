@@ -21,6 +21,7 @@ of language or process boundary.
 | `searxng.schema.json` | Local SearXNG lifecycle (`SearxngRequest`, `SearxngPayload`) | 1.1.0 | frozen |
 | `init.schema.json` | Bring-up: one call that starts everything and reports what works (`InitRequest`, `InitStep`, `InitCapabilities`, `InitEngines`, `InitPayload`) | 1.1.0 | frozen |
 | `tor.schema.json` | Local Tor lifecycle (`TorRequest`, `TorPayload`): start it, say whether the traffic is really Tor, stop it | 1.0.0 | frozen |
+| `proxy.schema.json` | NordVPN proxy setup (`ProxyRequest`, `ProxyLocation`, `ProxyExit`, `ProxyPayload`): where the credentials go, which city the exit is in, and where the traffic really comes out | 1.0.0 | frozen |
 
 Layer 2A is two decoupled sub-ports: `fetch` (URL in, raw HTML out) and `extract`
 (HTML in, clean Markdown + metadata out). Layer 2B is likewise two decoupled

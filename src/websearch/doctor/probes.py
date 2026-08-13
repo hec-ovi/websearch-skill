@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from ..optional_layers import LayerState, redact_url, scrub_proxy
-from ..proxy import proxy_for
+from ..proxy import EGRESS_LOCK_VAR, NORDVPN_INSIGHTS, lock_enabled, proxy_for
 from .models import FAIL, OK, SKIPPED, WARN
 
 # Keyless IP echoes, tried in order. Several because a doctor that reports "no internet"
@@ -29,10 +29,6 @@ IP_ECHOES = (
     "https://checkip.amazonaws.com",
     "https://icanhazip.com",
 )
-
-# NordVPN's keyless connection check. It reports whether the CALLER's egress is inside
-# NordVPN's network, which is the only way to confirm the tunnel from outside it.
-NORDVPN_INSIGHTS = "https://api.nordvpn.com/v1/helpers/ips/insights"
 
 # Interface name prefixes that mean "traffic is tunneled". Covers OpenVPN (tun/tap),
 # WireGuard (wg), macOS, which puts every tunnel on utun, and the provider-specific names
@@ -269,10 +265,36 @@ def probe_baseline(net: Net, *, timeout_s: float, requested: bool) -> Outcome:
             SKIPPED,
             "not measured: a direct request would leave the tunnel (--baseline to allow it)",
         )
+    if lock_enabled():
+        # The one probe that deliberately leaves the proxy, refused by the one setting that
+        # says nothing may. Asking for it does not outrank the lock: that is what a lock is.
+        return Outcome(
+            SKIPPED,
+            f"refused: {EGRESS_LOCK_VAR} is on, and this is the one request that would "
+            "leave outside the proxy",
+        )
     ip, echo, errors = exit_ip(net, proxy=None, timeout_s=timeout_s)
     if not ip:
         return Outcome(WARN, "no direct internet outside the proxy", {"errors": errors})
     return Outcome(OK, f"direct exit {ip} (via {echo})", {"exit_ip": ip, "echo": echo})
+
+
+def _searxng_egress() -> str | None:
+    """Where a local SearXNG's own engine requests leave from, redacted, or None.
+
+    Reported next to the proxy check because it is a different process with its own
+    setting: the CLI going through the proxy says nothing about where the instance that
+    queries Google and Brave leaves from.
+    """
+    from .. import searxng_local
+
+    try:
+        paths = searxng_local.Paths(searxng_local.home_dir())
+        if searxng_local.running_pid(paths) is None:
+            return None
+        return redact_url(searxng_local.settings_egress(paths))
+    except (OSError, ValueError):
+        return None
 
 
 def probe_proxy(
@@ -295,7 +317,15 @@ def probe_proxy(
         )
     shown = state.value or redact_url(proxy_url) or "(unknown)"
     ip, echo, errors = exit_ip(net, proxy=proxy_url, timeout_s=timeout_s)
-    detail: dict[str, Any] = {"proxy": shown, "direct_ip": direct_ip, "echo": echo}
+    detail: dict[str, Any] = {
+        "proxy": shown,
+        "direct_ip": direct_ip,
+        "echo": echo,
+        # Whether a path that cannot use the proxy is refused or quietly goes direct. The
+        # difference only shows up on the day the proxy is unavailable.
+        "locked": lock_enabled(),
+        "searxng_egress": _searxng_egress(),
+    }
     if not ip:
         return Outcome(
             FAIL,

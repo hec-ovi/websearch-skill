@@ -66,6 +66,13 @@ def _add_proxy_arg(p: Any) -> None:
         "defaults to off. On, every request goes through the local Tor SOCKS port and "
         "a configured --proxy becomes Tor's own upstream instead of being replaced.",
     )
+    p.add_argument(
+        "--location",
+        help="Come out of this NordVPN city for this command only (e.g. dallas, "
+        "'new york', sweden). Implies the nordvpn proxy, so it needs the service "
+        "credentials. `websearch proxy locations` lists them; `websearch proxy use "
+        "<city>` makes a choice stick.",
+    )
 
 
 def _add_onion_arg(p: Any) -> None:
@@ -80,7 +87,35 @@ def _add_onion_arg(p: Any) -> None:
 
 def _egress(args: argparse.Namespace) -> str | None:
     """The address this command's requests connect through: Tor first, then the proxy."""
-    return egress_proxy(getattr(args, "proxy", None), getattr(args, "tor", None))
+    return egress_proxy(
+        getattr(args, "proxy", None),
+        getattr(args, "tor", None),
+        getattr(args, "location", None),
+    )
+
+
+def _searxng_url(args: argparse.Namespace) -> str | None:
+    """The SearXNG this command may query, or None when none is configured.
+
+    A local instance is a second process that fetches every engine result itself, so with
+    the lock on, one whose settings carry no proxy is exactly the leak the lock exists to
+    stop: querying it would send the search out from this machine's own address while
+    everything else in the command went through the proxy. A remote instance is reached
+    through the proxy like any other host, so it needs no check here.
+    """
+    from .proxy import EGRESS_LOCK_VAR, EgressLocked, bypasses_proxy, lock_enabled
+
+    url = getattr(args, "searxng_url", None)
+    if not url or not lock_enabled() or not bypasses_proxy(url):
+        return url
+    from . import searxng_local
+
+    if searxng_local.settings_egress(searxng_local.Paths(searxng_local.home_dir())) is None:
+        raise EgressLocked(
+            f"{EGRESS_LOCK_VAR} is on and the local SearXNG at {url} would search from this "
+            "machine's own address. Move it onto the proxy: `websearch searxng up`."
+        )
+    return url
 
 
 def _egress_fetch_proxy(args: argparse.Namespace) -> dict | None:
@@ -165,7 +200,7 @@ def _cmd_search(args: argparse.Namespace) -> int:
         return 1
 
     router = _builder("build_router")(
-        searxng_url=args.searxng_url,
+        searxng_url=_searxng_url(args),
         enable_ddgs=not args.no_ddgs,
         ddgs_backend=args.ddgs_backends or "auto",
         proxy=_egress(args),
@@ -661,7 +696,7 @@ def _cmd_websearch(args: argparse.Namespace) -> int:
             as_json=args.json,
         )
     aio = _builder("build_agent_io")(
-        searxng_url=args.searxng_url, proxy=_egress(args), onion=getattr(args, "onion", False)
+        searxng_url=_searxng_url(args), proxy=_egress(args), onion=getattr(args, "onion", False)
     )
     env = aio.web_search(req)
     payload = env.model_dump(mode="json")
@@ -1417,6 +1452,9 @@ def _print_searxng_status(state: dict[str, Any]) -> None:
     print(f"install {install}")
     print(f"process {process}")
     print(f"health  {health}")
+    print(
+        f"egress  {state.get('egress') or 'direct (its engine requests leave from this machine)'}"
+    )
     if version:
         print(f"engines SearXNG {version}, {active} active of {available}")
     if state.get("log"):
@@ -1567,6 +1605,172 @@ def _print_tor_wiring(state: dict[str, Any]) -> None:
         print(f"turn the layer on for the next command: export {TOR_ENV}=on")
 
 
+def _add_proxy_command(sub: Any) -> None:
+    pp = sub.add_parser(
+        "proxy",
+        help="Set up the NordVPN egress proxy: where the two credentials go, which city "
+        "the traffic comes out of, and whether it really does.",
+        epilog=(
+            "the credentials are the NordVPN SERVICE credentials (Nord Account -> NordVPN "
+            "-> Manual setup -> Service credentials), not the account login. This command "
+            "never reads them back or prints them: `setup` creates the file and names the "
+            "two keys, you fill them in your own editor."
+        ),
+    )
+    pp.add_argument(
+        "action",
+        choices=["setup", "status", "locations", "use", "off", "lock", "unlock"],
+        help="setup: create the settings file with both keys scaffolded and print its "
+        "path. status: what is set, what is missing, and where the traffic comes out. "
+        "locations: the cities to choose from. use: choose one and turn the proxy on. "
+        "lock: refuse every path that would leave without the proxy. unlock: allow them "
+        "again. off: back to a direct connection, keeping the choice.",
+    )
+    pp.add_argument(
+        "location",
+        nargs="?",
+        help="For 'use': the city, as a slug (dallas), a name ('San Francisco'), a "
+        "country (sweden, se), or a *.socks.nordhold.net host.",
+    )
+    pp.add_argument(
+        "--edit",
+        action="store_true",
+        help="Open the settings file in $EDITOR after creating it (setup only). Needs a "
+        "terminal, so run it yourself rather than through an agent.",
+    )
+    pp.add_argument(
+        "--no-verify",
+        action="store_true",
+        help="Skip asking NordVPN where the traffic comes out. Faster, and blind: a "
+        "written setting is not a working exit.",
+    )
+    pp.add_argument("--timeout-s", type=int, help="Timeout for that check (default 15).")
+    pp.add_argument("--json", action="store_true", help="Emit the state as JSON.")
+
+
+def _cmd_proxy(args: argparse.Namespace) -> int:
+    from . import proxy_setup as ps
+
+    fields: dict[str, Any] = {"action": args.action, "verify": not args.no_verify}
+    if args.location:
+        fields["location"] = args.location
+    if args.timeout_s:
+        fields["timeout_s"] = args.timeout_s
+    try:
+        request = ps.ProxyRequest(**fields)
+    except ValidationError as exc:
+        return _emit_error(
+            ps.PROXY_CONTRACT_VERSION,
+            code=errors.INVALID_REQUEST,
+            message=f"invalid proxy request: {exc}",
+            layer="proxy",
+            as_json=args.json,
+        )
+
+    envelope = ps.control(request)
+    if args.json:
+        print(json.dumps(envelope.model_dump(mode="json"), indent=2, ensure_ascii=False))
+        return 1 if not envelope.ok else _proxy_exit_code(args.action, envelope.data)
+    if not envelope.ok:
+        print(f"error: {envelope.error.message}", file=sys.stderr)  # type: ignore[union-attr]
+        return 1
+
+    data = envelope.data
+    if args.action == "locations":
+        _print_proxy_locations(data)
+        return 0
+    _print_proxy_state(data)
+    if args.action == "setup":
+        _print_credential_block(data)
+        if args.edit:
+            return _edit_settings_file(data["settings_file"])
+    return _proxy_exit_code(args.action, data)
+
+
+def _proxy_exit_code(action: str, data: dict) -> int:
+    """`proxy status` answers a question, and "the proxy is not usable" is a failing
+    answer however it is printed. The other actions report what they did and succeed."""
+    if action != "status":
+        return 0
+    exit_state = data.get("exit")
+    return 0 if data["enabled"] and (exit_state is None or exit_state["protected"]) else 1
+
+
+def _proxy_place(location: dict | None) -> str:
+    if not location:
+        return "Amsterdam pool (default, no NORDVPN_HOST set)"
+    city, country = location.get("city"), location["country"]
+    where = f"{city}, {country}" if city else f"{country} (any city)"
+    return f"{where}  {location['host']}"
+
+
+def _print_proxy_state(data: dict) -> None:
+    where = data["settings_file"] + ("" if data["settings_exists"] else "  (not created yet)")
+    print(f"settings  {where}")
+    others = [f for f in data["env_files"] if f != data["settings_file"]]
+    if others:
+        print(f"also read {', '.join(others)} (read first, so a key set there wins)")
+    missing = data["missing_keys"]
+    print(f"keys      {'missing ' + ', '.join(missing) if missing else 'both credentials set'}")
+    print(f"location  {_proxy_place(data['location'])}")
+    print(f"proxy     {data['proxy'] or 'off (direct connection)'}")
+    locked = data.get("locked")
+    print(f"lock      {'on: nothing leaves outside the proxy' if locked else 'off'}")
+    exit_state = data.get("exit")
+    if exit_state:
+        place = ", ".join(p for p in (exit_state["city"], exit_state["country"]) if p)
+        verdict = "NordVPN" if exit_state["protected"] else "NOT NordVPN"
+        print(f"exit      {exit_state['ip']} {place or 'unknown location'} ({verdict})")
+    for path in data["wired"]:
+        print(f"wrote     {path}")
+    if data.get("searxng"):
+        print(f"restarted {data['searxng']} onto this exit")
+    if data["next_actions"]:
+        print()
+        for action in data["next_actions"]:
+            print(f"  - {action}")
+
+
+def _print_credential_block(data: dict) -> None:
+    """The two lines to fill, quoted literally, under the path they live in."""
+    if not data["missing_keys"]:
+        return
+    print(f"\nfill these lines in {data['settings_file']}:\n")
+    for key in data["missing_keys"]:
+        print(f"  {key}=")
+    print(
+        "\nthey are the NordVPN service credentials: Nord Account -> NordVPN -> "
+        "Manual setup -> Service credentials"
+    )
+
+
+def _edit_settings_file(path: str) -> int:
+    """Open the settings file in the user's editor. Interactive only, by nature."""
+    import shutil
+    import subprocess
+
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        print(f"\n--edit needs a terminal; open {path} yourself", file=sys.stderr)
+        return 1
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
+    if not editor:
+        editor = next((e for e in ("nano", "vim", "vi") if shutil.which(e)), None)
+    if not editor:
+        print(f"\nno $EDITOR set; open {path} yourself", file=sys.stderr)
+        return 1
+    return subprocess.call([*editor.split(), path])  # noqa: S603 - the user's own editor
+
+
+def _print_proxy_locations(data: dict) -> None:
+    print("  slug             city             country          host")
+    for loc in data["locations"]:
+        mark = "*" if loc["selected"] else " "
+        city = loc["city"] or "(any)"
+        print(f"{mark} {loc['slug']:<16} {city:<16} {loc['country']:<16} {loc['host']}")
+    print(f"\ncurrently:  {_proxy_place(data['location'])}")
+    print("select one: websearch proxy use dallas")
+
+
 def _contract_version_for(command: str) -> str:
     """The contract version stamped on a cross-layer 'cli' error envelope: the active
     command's own contract, so a `websearch github` failure carries github@x.y.z rather
@@ -1611,6 +1815,10 @@ def _contract_version_for(command: str) -> str:
         from .tor_local import TOR_CONTRACT_VERSION
 
         return TOR_CONTRACT_VERSION
+    if command == "proxy":
+        from .proxy_setup import PROXY_CONTRACT_VERSION
+
+        return PROXY_CONTRACT_VERSION
     # An unknown command: the cross-cutting envelope.
     return ENVELOPE_CONTRACT_VERSION
 
@@ -1647,6 +1855,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_init_command(sub)
     _add_searxng_command(sub)
     _add_tor_command(sub)
+    _add_proxy_command(sub)
     args = parser.parse_args(argv)
     dispatch = {
         "search": _cmd_search,
@@ -1661,6 +1870,7 @@ def main(argv: list[str] | None = None) -> int:
         "init": _cmd_init,
         "searxng": _cmd_searxng,
         "tor": _cmd_tor,
+        "proxy": _cmd_proxy,
     }
     handler = dispatch.get(args.command)
     if handler is None:
@@ -1670,10 +1880,13 @@ def main(argv: list[str] | None = None) -> int:
         return handler(args)
     except ProxyConfigError as exc:
         # A misconfigured proxy (e.g. 'nordvpn' without service credentials) is caller
-        # configuration, not an internal failure.
+        # configuration, not an internal failure. A locked egress with nothing to leave
+        # through gets its own code: the request was refused, not attempted and failed.
+        from .proxy import EgressLocked
+
         return _emit_error(
             _contract_version_for(args.command),
-            code=errors.INVALID_REQUEST,
+            code=errors.EGRESS_LOCKED if isinstance(exc, EgressLocked) else errors.INVALID_REQUEST,
             message=str(exc),
             layer="cli",
             as_json=getattr(args, "json", False),

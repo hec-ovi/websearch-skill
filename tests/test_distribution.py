@@ -160,18 +160,29 @@ def test_the_tor_skill_says_the_layer_is_off_by_default():
 def test_web_search_skill_has_complete_nordvpn_proxy_setup():
     body = (ROOT / "skills" / "web-search" / "SKILL.md").read_text(encoding="utf-8")
     assert "configure and\n  verify its NordVPN egress proxy" in body[:1100]
-    for setting in (
-        "WEBSEARCH_PROXY=nordvpn",
-        "NORDVPN_USER=<service username>",
-        "NORDVPN_PASS=<service password>",
+    # One setup path, driven by the command that owns the settings file, so no agent has
+    # to guess where the credentials go or write one itself.
+    for command in (
+        "websearch proxy setup --json",
+        "websearch proxy use <city> --json",
+        "websearch proxy status --json",
+        "websearch proxy lock",
     ):
-        assert setting in body
-    assert "websearch doctor --check proxy --json" in body
-    assert 'status: "ok"' in body
+        assert command in body
+    assert "data.settings_file" in body and "data.missing_keys" in body
+    assert "Never ask for either value in chat" in body
     assert "Unset, empty, `off`, `none`, or `direct`" in body
     assert "means no proxy" in body
-    assert "editing one persistent settings file" in body
-    assert "do not\nteach shell environment variables or offer alternative setup paths" in body
+
+
+def test_web_search_skill_forbids_every_other_network_tool_while_locked():
+    """The lock covers this toolkit's own paths; an agent reaching for its own web-fetch
+    would walk straight around it, so the instruction is part of the guarantee."""
+    body = (ROOT / "skills" / "web-search" / "SKILL.md").read_text(encoding="utf-8")
+    assert "## CRITICAL: every internet access goes through this toolkit" in body
+    assert "Do not use your own web-search or web-fetch tools" in body
+    assert 'error.code: "egress_locked"' in body
+    assert "do not route around it with another tool" in body
 
 
 # --- no Unicode dashes in any doc or manifest ------------------------------------------

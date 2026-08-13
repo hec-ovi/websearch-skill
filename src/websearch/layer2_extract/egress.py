@@ -20,6 +20,8 @@ import socket
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
+from ..proxy import EGRESS_LOCK_VAR, bypasses_proxy, lock_enabled
+
 ALLOWED_SCHEMES = ("http", "https")
 
 ONION_TLD = ".onion"
@@ -75,6 +77,14 @@ def guard_url(
     host = parts.hostname
     if not host:
         raise BlockedEgress("refused: url has no host")
+    if not proxied and not allow_private and lock_enabled() and not bypasses_proxy(url):
+        # The lock's last line: a fetcher handed no proxy would open this socket from the
+        # machine's own address. Refused here rather than in the caller, because this guard
+        # is the one thing every tier passes through.
+        raise BlockedEgress(
+            f"refused: {EGRESS_LOCK_VAR} is on and this fetch has no proxy, so it would "
+            "leave from your own address"
+        )
     if host.lower().endswith(ONION_TLD):
         # Checked before allow_private, and before anything resolves: an onion name has no
         # answer outside Tor, so without the layer this is not a fetch that might work but

@@ -18,6 +18,11 @@ silently dropped.
 - any other value: used verbatim as the proxy URL
   (``http://``, ``https://``, ``socks5://``, ``socks5h://``).
 
+Which city the traffic comes out of is ``NORDVPN_HOST``, and ``NORDVPN_LOCATIONS`` is
+the table of names you can put there: ``websearch proxy use dallas`` writes one, and a
+``--location`` on a single command picks one for that command alone. See
+``proxy_setup.py`` for the setup and selection commands.
+
 A ``--proxy`` CLI value takes precedence over the environment and accepts the same
 three forms, so ``--proxy off`` forces a direct connection even when the variable is
 set. ``socks5h`` resolves DNS through the proxy, so target hostnames never reach the
@@ -32,10 +37,57 @@ from __future__ import annotations
 
 import ipaddress
 import os
+from dataclasses import dataclass
 from urllib.parse import quote, urlsplit
 
 NORDVPN_DEFAULT_HOST = "nl.socks.nordhold.net"
 NORDVPN_PORT = 1080
+NORDVPN_SUFFIX = ".socks.nordhold.net"
+# NordVPN's own endpoint for "where does this connection come out": it answers with the
+# exit IP, its city and country, and whether the address belongs to NordVPN. Used to
+# confirm a selected location really is where the traffic leaves from.
+NORDVPN_INSIGHTS = "https://api.nordvpn.com/v1/helpers/ips/insights"
+
+
+@dataclass(frozen=True)
+class NordvpnLocation:
+    """One selectable NordVPN SOCKS5 exit."""
+
+    slug: str
+    city: str | None  # None for a country-wide pool, which lands in any of its cities
+    country: str
+    host: str
+
+    @property
+    def place(self) -> str:
+        return f"{self.city}, {self.country}" if self.city else f"{self.country} (any city)"
+
+
+def _nord_host(prefix: str) -> str:
+    return f"{prefix}{NORDVPN_SUFFIX}"
+
+
+# Every location NordVPN runs a SOCKS5 exit in. SOCKS5 is a small subset of their VPN
+# network (three countries, nine cities), so this is the whole list rather than a
+# selection from it, and the country rows are the pools the city rows belong to.
+_NL, _SE, _US = "Netherlands", "Sweden", "United States"
+NORDVPN_LOCATIONS: tuple[NordvpnLocation, ...] = (
+    NordvpnLocation("netherlands", None, _NL, _nord_host("nl")),
+    NordvpnLocation("amsterdam", "Amsterdam", _NL, _nord_host("amsterdam.nl")),
+    NordvpnLocation("sweden", None, _SE, _nord_host("se")),
+    NordvpnLocation("stockholm", "Stockholm", _SE, _nord_host("stockholm.se")),
+    NordvpnLocation("united-states", None, _US, _nord_host("us")),
+    NordvpnLocation("atlanta", "Atlanta", _US, _nord_host("atlanta.us")),
+    NordvpnLocation("chicago", "Chicago", _US, _nord_host("chicago.us")),
+    NordvpnLocation("dallas", "Dallas", _US, _nord_host("dallas.us")),
+    NordvpnLocation("los-angeles", "Los Angeles", _US, _nord_host("los-angeles.us")),
+    NordvpnLocation("new-york", "New York", _US, _nord_host("new-york.us")),
+    NordvpnLocation("phoenix", "Phoenix", _US, _nord_host("phoenix.us")),
+    NordvpnLocation("san-francisco", "San Francisco", _US, _nord_host("san-francisco.us")),
+)
+
+# The country pools answer to their code as well, because "us" is what people type.
+_LOCATION_ALIASES = {"nl": "netherlands", "se": "sweden", "us": "united-states"}
 
 TOR_ENV = "WEBSEARCH_TOR"
 TOR_SOCKS_VAR = "WEBSEARCH_TOR_SOCKS"
@@ -54,6 +106,9 @@ _OFF = {"", "off", "none", "direct"}
 # typo rather than a value: the switch has no third setting.
 _TOR_ON = {"on", "yes", "true", "1", "tor", "up", "enabled"}
 
+EGRESS_LOCK_VAR = "WEBSEARCH_EGRESS_LOCK"
+_LOCK_ON = {"on", "yes", "true", "1", "lock", "locked", "strict", "enabled"}
+
 # socks5h keeps name resolution at the Tor client, which is not a preference: a .onion
 # name has no answer in the local resolver, and asking it would leak the lookup.
 TOR_SCHEMES = ("socks5h://", "socks5://")
@@ -63,26 +118,105 @@ class ProxyConfigError(ValueError):
     """A proxy was requested but its configuration is unusable."""
 
 
-def _nordvpn_url() -> str:
+class EgressLocked(ProxyConfigError):
+    """The lock is on and this path has no proxy to leave through, so it does not run."""
+
+
+def lock_enabled(cli_value: str | None = None) -> bool:
+    """Whether egress is locked to the proxy. Off unless something says otherwise.
+
+    Locked means one thing, and it is absolute: nothing this tool sends leaves the machine
+    outside the proxy. A path that cannot use it fails instead of falling back to a direct
+    connection, because a fallback is exactly the request that gives the address away, and
+    it happens on the day the proxy is down rather than on the day you are watching.
+
+    Local targets (loopback, LAN) are not affected: they never leave the machine, and a
+    remote exit could not reach them anyway. See ``bypasses_proxy``.
+    """
+    raw = cli_value if cli_value is not None else os.environ.get(EGRESS_LOCK_VAR)
+    if raw is None:
+        return False
+    value = raw.strip().lower()
+    if value in OFF_WORDS:
+        return False
+    if value in _LOCK_ON:
+        return True
+    raise ProxyConfigError(f"{EGRESS_LOCK_VAR}={raw!r} is not a switch value; use 'on' or 'off'.")
+
+
+def find_location(name: str) -> NordvpnLocation | None:
+    """The location a typed name means, or None when nothing matches.
+
+    Accepts the slug, the city or country as written, a country code, and a full
+    ``*.socks.nordhold.net`` hostname, because all four are things people have in hand.
+    """
+    key = " ".join(name.split()).strip().lower().replace(" ", "-")
+    key = _LOCATION_ALIASES.get(key, key)
+    for location in NORDVPN_LOCATIONS:
+        names = {location.slug, location.country.lower().replace(" ", "-"), location.host}
+        if location.city:
+            names.add(location.city.lower().replace(" ", "-"))
+        if key in names:
+            return location
+    return None
+
+
+def location_of_host(host: str | None) -> NordvpnLocation | None:
+    """The table row a configured ``NORDVPN_HOST`` names, or None for a host not in it."""
+    if not host:
+        return None
+    return next((loc for loc in NORDVPN_LOCATIONS if loc.host == host.strip().lower()), None)
+
+
+def nordvpn_host(location: str | None = None) -> str:
+    """The NordVPN SOCKS host to dial: a named location, then ``NORDVPN_HOST``, then Amsterdam."""
+    if location:
+        found = find_location(location)
+        if found:
+            return found.host
+        if location.strip().lower().endswith(NORDVPN_SUFFIX):
+            return location.strip().lower()  # an official server this table does not list
+        raise ProxyConfigError(
+            f"unknown NordVPN location {location!r}. Run `websearch proxy locations` for "
+            "the list; NordVPN runs SOCKS5 exits in the Netherlands, Sweden, and nine US "
+            "cities only."
+        )
+    return os.environ.get("NORDVPN_HOST", NORDVPN_DEFAULT_HOST)
+
+
+def _nordvpn_url(location: str | None = None) -> str:
     user = os.environ.get("NORDVPN_USER", "")
     password = os.environ.get("NORDVPN_PASS", "")
     if not user or not password:
         raise ProxyConfigError(
             "proxy 'nordvpn' needs NORDVPN_USER and NORDVPN_PASS set to the NordVPN "
             "service credentials (Nord Account dashboard, 'Set up NordVPN manually'; "
-            "these are not the account email/password)."
+            "these are not the account email/password). Run `websearch proxy setup` for "
+            "the file to put them in."
         )
-    host = os.environ.get("NORDVPN_HOST", NORDVPN_DEFAULT_HOST)
+    host = nordvpn_host(location)
     return f"socks5h://{quote(user, safe='')}:{quote(password, safe='')}@{host}:{NORDVPN_PORT}"
 
 
-def resolve_proxy(cli_value: str | None = None) -> str | None:
+def resolve_proxy(cli_value: str | None = None, location: str | None = None) -> str | None:
     """The configured egress proxy URL, or None for a direct connection.
 
     This is the ``WEBSEARCH_PROXY`` hop on its own. It does not know about Tor: callers
     that want the address to actually connect through want ``egress_proxy``.
+
+    ``location`` names the NordVPN city this call should come out of. Asking for a city
+    is asking for NordVPN, so it turns the proxy on for the call even when the variable
+    is off; what it cannot do is redirect some other proxy, which is an error rather than
+    a silently ignored flag.
     """
     value = cli_value if cli_value is not None else os.environ.get("WEBSEARCH_PROXY")
+    if location:
+        if cli_value is not None and cli_value.strip().lower() != "nordvpn":
+            raise ProxyConfigError(
+                f"--location selects a NordVPN exit city and cannot be combined with "
+                f"--proxy {cli_value!r}; drop one of the two."
+            )
+        return _nordvpn_url(location)
     if value is None or value.strip().lower() in _OFF:
         return None
     value = value.strip()
@@ -133,15 +267,35 @@ def tor_socks_url() -> str:
     return explicit
 
 
-def egress_proxy(cli_value: str | None = None, tor_value: str | None = None) -> str | None:
+def egress_proxy(
+    cli_value: str | None = None,
+    tor_value: str | None = None,
+    location: str | None = None,
+) -> str | None:
     """The address every network path should actually connect through, or None.
 
     Tor answers first when it is on. That is not the configured proxy being ignored: the
     proxy becomes Tor's upstream in torrc, so it is still in the path, one hop earlier.
+    That is also why a per-call ``location`` is refused while Tor is up: the upstream is
+    baked into the running Tor's torrc, so honoring the flag would take a restart and
+    accepting it silently would name a city the traffic never visits.
     """
     if tor_enabled(tor_value):
+        if location:
+            raise ProxyConfigError(
+                "--location cannot change the exit while the tor layer is on: the proxy is "
+                "Tor's upstream, fixed when Tor started. Run `websearch proxy use "
+                f"{location}` and then `websearch tor up` again."
+            )
         return tor_socks_url()
-    return resolve_proxy(cli_value)
+    address = resolve_proxy(cli_value, location)
+    if address is None and lock_enabled():
+        raise EgressLocked(
+            f"{EGRESS_LOCK_VAR} is on and no proxy is configured, so this would leave from "
+            "your own address. Set one up (`websearch proxy setup`, then `websearch proxy "
+            "use <city>`), or unlock with `websearch proxy unlock`."
+        )
+    return address
 
 
 _LOCAL_SUFFIXES = (".local", ".localdomain", ".internal", ".home.arpa")

@@ -6,6 +6,45 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-13
+
+### Added
+
+- **`websearch proxy`: setup, exit city, and a lock.** `proxy setup` creates the settings
+  file with `NORDVPN_USER` and `NORDVPN_PASS` scaffolded and empty, and reports its
+  absolute path, so the two credentials go in one known place; nothing reads them back or
+  prints them. `proxy locations` lists the exits NordVPN runs SOCKS5 in (Netherlands,
+  Sweden, nine US cities), `proxy use <city>` selects one and turns the proxy on, and
+  `proxy status` asks NordVPN through the proxy where the traffic actually comes out, so a
+  selection that did not take effect shows as a city that does not match. `--location
+  <city>` picks an exit for a single command. New contract `proxy@1.0.0`.
+
+- **`websearch proxy lock`: nothing leaves outside the proxy.** With
+  `WEBSEARCH_EGRESS_LOCK=on`, a path that has no proxy is refused with
+  `error.code: "egress_locked"` instead of falling back to a direct connection, which is
+  the request that gives the address away and happens when the proxy is unavailable rather
+  than when you are watching. It covers both fetch tiers, the search engines, the local
+  SearXNG's own requests, the SearXNG and Tor installs, and `doctor --baseline`; loopback
+  and LAN targets are unaffected. `proxy off` is refused until `proxy unlock`. The skill
+  carries a CRITICAL instruction telling the agent not to reach for its own web tools while
+  the lock is on, since those would leave from the user's address.
+
+### Changed
+
+- **The self-hosted SearXNG's own engine requests go through the proxy.** The instance is a
+  second process, and every result it returns is fetched by it, so a proxied CLI and an
+  unproxied instance meant the searches still left from this machine's address (and earned
+  its IP the CAPTCHAs that come with querying engines from a residential connection). Its
+  generated `settings.yml` now carries `outgoing.proxies` plus `extra_proxy_timeout`, the
+  `git clone` and `pip install` behind `searxng up` inherit the same proxy, and
+  `proxy use <city>` restarts a running instance so it cannot keep the old exit. Where it
+  leaves from is reported as `egress` on `searxng status` and in the doctor's proxy check.
+  `searxng@1.2.0` (new `egress`).
+
+- **The Tor bundle download goes through the proxy** instead of deliberately around it,
+  over httpx so a SOCKS proxy works, and is refused while the lock is on with nothing
+  configured.
+
 ## [0.4.0] - 2026-07-28
 
 ### Added

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 # Cross-cutting
 INVALID_REQUEST = "invalid_request"
+# Egress is locked to the proxy and this path had none, so it did not run. Never a
+# transport failure: the request was refused before it was made.
+EGRESS_LOCKED = "egress_locked"
 DEPENDENCY_MISSING = "dependency_missing"
 # An unexpected failure that escaped a lower layer (store I/O, a bug). Always surfaced as a
 # clean Envelope rather than a raw traceback so an agent/CLI never sees a stack trace.

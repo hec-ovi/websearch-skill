@@ -20,6 +20,18 @@ compatibility: >-
 Search the web and read pages by running the `websearch` CLI and reading its stdout.
 Everything is keyless: no API key, no account.
 
+## CRITICAL: every internet access goes through this toolkit
+
+When `websearch proxy status` reports `locked: true`, this CLI is the only way you reach
+the internet in this session. Do not use your own web-search or web-fetch tools, `curl`,
+`wget`, `git clone`, a browser tool, or any other network call, for anything: not a quick
+lookup, not a raw file, not a docs page, not "just this once". Those tools leave from the
+user's own address, which is what the lock exists to prevent.
+
+If a `websearch` command is refused with `error.code: "egress_locked"`, that is the lock
+working. Report it and stop; do not route around it with another tool. If the user asks
+for something this toolkit cannot fetch, say so rather than fetching it another way.
+
 Run `websearch <command>` if it is on PATH; otherwise `uvx websearch-skill <command>`
 (needs only [uv](https://docs.astral.sh/uv/)); from a clone, `uv run websearch <command>`.
 Default output is a compact human view; add `--json` for the structured Envelope
@@ -53,42 +65,68 @@ port, no importing the package to inspect it. This one call already measured all
 
 ## NordVPN proxy setup
 
-When the user asks to configure, troubleshoot, or verify NordVPN for this skill, use this
-exact configuration. Have the user get the service username and service password from
-Nord Account under **Set up NordVPN manually > Service credentials**. These are separate
-from the account sign-in. Explain setup as editing one persistent settings file; do not
-teach shell environment variables or offer alternative setup paths.
+When the user asks to configure, troubleshoot, or verify NordVPN for this skill, drive it
+through the `proxy` command. It owns the settings file, so no path has to be guessed and
+no credential passes through the conversation.
 
-Write these three settings to `~/.config/websearch/.env`, or to the file named by
-`WEBSEARCH_ENV_FILE` when one is configured:
-
-```dotenv
-WEBSEARCH_PROXY=nordvpn
-NORDVPN_USER=<service username>
-NORDVPN_PASS=<service password>
+```
+websearch proxy setup | status | locations | use <city> | off  [--no-verify] [--json]
 ```
 
-Do not ask the user to paste either credential into chat, and never print the settings
-file. Let the user enter the two credential values locally. Do not add another
-NordVPN-related setting. `NORDVPN_HOST` is optional and only selects a specific proxy
-server; when absent, the tool uses `nl.socks.nordhold.net`.
+1. `websearch proxy setup --json` creates the settings file with both credential keys
+   scaffolded and empty. Report `data.settings_file` to the user: that is the exact file
+   to open, and `data.missing_keys` names the lines to fill.
+2. The user fills the two values locally, in their own editor. The credentials are the
+   NordVPN **service** credentials (Nord Account > NordVPN > Manual setup > Service
+   credentials), not the account sign-in. Never ask for either value in chat, never print
+   the settings file, and never write a credential yourself.
+3. `websearch proxy use <city> --json` selects where the traffic comes out and turns the
+   proxy on. `websearch proxy locations --json` lists what can be chosen: NordVPN runs
+   SOCKS5 exits in the Netherlands, Sweden, and nine US cities, and nowhere else.
+4. `websearch proxy status --json` is the verification. It is set up when
+   `data.missing_keys` is empty, `data.enabled` is true, and `data.exit.protected` is
+   true; `data.exit.city` is where the traffic actually comes out. Exit code 1 means not
+   usable, and `data.next_actions` says what is left. Report those without displaying
+   credentials; the payload never carries a credential value.
 
-`WEBSEARCH_PROXY` is the tool's egress choice:
+`--location <city>` on a single search or fetch command uses that exit for that command
+only, without changing the settings file. It implies the NordVPN proxy, so it needs the
+same credentials, and it is refused rather than ignored when it cannot be honored.
 
-- `nordvpn` is the fixed value for this setup. On every command, the tool expands it into
-  an authenticated SOCKS5 proxy URL using the two credentials and `NORDVPN_HOST`.
+`WEBSEARCH_PROXY` is the tool's egress choice, and `websearch proxy use`/`off` is how to
+set it:
+
+- `nordvpn` expands, on every command, into an authenticated SOCKS5 URL from the two
+  credentials and `NORDVPN_HOST`.
 - A complete `http://`, `https://`, `socks5://`, or `socks5h://` URL selects another
   proxy directly.
 - Unset, empty, `off`, `none`, or `direct` means no proxy.
 
-After the user confirms the credentials are saved, run:
+### The lock
 
-```text
-websearch doctor --check proxy --json
+```
+websearch proxy lock | unlock
 ```
 
-The setup works when the `proxy` check has `status: "ok"` and reports an `exit_ip`.
-If it fails, report that check's message and hint without displaying credentials.
+`lock` sets `WEBSEARCH_EGRESS_LOCK=on`, and then no path leaves this machine without the
+proxy. Anything that would go direct is refused with `error.code: "egress_locked"`
+instead: the fetch tiers, the search engines, the local SearXNG's own engine requests,
+the SearXNG and Tor installs, and `doctor --baseline`. Loopback and LAN targets are not
+affected, since they never leave the machine. While the lock is on, `websearch proxy off`
+is refused until `websearch proxy unlock` runs, and the CRITICAL rule at the top of this
+document applies: no other tool of yours touches the network.
+
+What leaves through the proxy, in both processes:
+
+| Path | Through the proxy |
+|---|---|
+| `web-fetch` / `fetch` / `open` (httpx and curl_cffi tiers) | yes |
+| `web-search` / `search` (ddgs engines, Ahmia) | yes |
+| `arxiv`, `github` | yes |
+| local SearXNG's requests to Google, Brave, Mojeek and the rest | yes, via `outgoing.proxies` in its settings, restarted when the exit changes |
+| CLI to a local SearXNG on `127.0.0.1` | no, and it never leaves the machine |
+| `searxng up` / `tor up` downloads (git, pip, the Tor bundle) | yes |
+| `doctor --baseline` | refused while locked; it exists to measure the direct exit |
 
 ## Commands
 

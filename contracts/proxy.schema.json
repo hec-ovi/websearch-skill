@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hec-ovi/websearch-skill/contracts/proxy.schema.json",
+  "title": "NordVPN proxy setup - configuration contract",
+  "description": "Set up the egress proxy and choose where it comes out. Two things are needed to turn the proxy on and neither can be guessed: the NordVPN service credentials, which go in the settings file this reports the path of, and an exit location. 'setup' creates that file with both credential keys scaffolded and empty; 'locations' lists the cities NordVPN runs SOCKS5 exits in; 'use' writes one and turns the proxy on; 'status' says which keys are still missing and where NordVPN reports the traffic actually leaving from. Credential VALUES are never read back, returned, or printed by any action. Emits the same Envelope (meta.layer \"proxy\") as every other port.",
+  "x-contract-version": "1.0.0",
+  "$defs": {
+    "ProxyRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": {
+          "enum": ["setup", "status", "locations", "use", "off"],
+          "description": "setup: create the settings file with NORDVPN_USER and NORDVPN_PASS scaffolded, and report its path. status: the file, the missing keys, the selected city, and the verified exit. locations: the selectable cities. use: select a city (needs 'location') and turn the proxy on. off: back to a direct connection, keeping the selection."
+        },
+        "location": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Which exit to use, as a slug ('dallas'), a city ('San Francisco'), a country ('sweden', 'se'), or an official *.socks.nordhold.net hostname. Required by 'use', ignored by the other actions."
+        },
+        "verify": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask NordVPN's insights endpoint, through the proxy, where the traffic comes out. Off skips one request and gives up the only check that separates a written setting from a working exit."
+        },
+        "timeout_s": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120,
+          "default": 15,
+          "description": "How long that verification request may take."
+        }
+      }
+    },
+
+    "ProxyLocation": {
+      "type": "object",
+      "description": "One selectable NordVPN SOCKS5 exit.",
+      "required": ["slug", "country", "host"],
+      "additionalProperties": false,
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What to type to select it. 'custom' for a configured host that is not in the table."
+        },
+        "city": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The city, or null for a country-wide pool that lands in any of its cities."
+        },
+        "country": { "type": "string", "description": "The country the exit is in." },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The SOCKS5 hostname, which is what NORDVPN_HOST is set to. Port 1080 always."
+        },
+        "selected": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this is the currently configured exit."
+        }
+      }
+    },
+
+    "ProxyExit": {
+      "type": "object",
+      "description": "Where NordVPN says the traffic comes out, observed through the proxy.",
+      "required": ["protected"],
+      "additionalProperties": false,
+      "properties": {
+        "ip": { "type": ["string", "null"], "default": null, "description": "The exit address." },
+        "city": { "type": ["string", "null"], "default": null, "description": "The city it geolocates to. Compare it against the selected location: a mismatch means the selection did not take effect." },
+        "country": { "type": ["string", "null"], "default": null, "description": "The country it geolocates to." },
+        "protected": {
+          "type": "boolean",
+          "description": "Whether the address belongs to NordVPN. False means the request left some other way, whatever the settings file says."
+        }
+      }
+    },
+
+    "ProxyPayload": {
+      "type": "object",
+      "description": "The proxy configuration after the action ran.",
+      "required": ["action", "settings_file", "settings_exists", "enabled"],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": ["setup", "status", "locations", "use", "off"],
+          "description": "The action that produced this state."
+        },
+        "settings_file": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The absolute path settings are written to, and the file to put the two credentials in: WEBSEARCH_ENV_FILE when set, else $XDG_CONFIG_HOME/websearch/.env. Reported whether or not it exists yet, so the answer to 'where do the keys go' is always one path."
+        },
+        "settings_exists": { "type": "boolean", "description": "Whether that file is there yet." },
+        "env_files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Every settings file that exists, in the order they are read (highest precedence first). More than one means a key set in an earlier file wins over the one settings are written to."
+        },
+        "missing_keys": {
+          "type": "array",
+          "items": { "enum": ["NORDVPN_USER", "NORDVPN_PASS"] },
+          "default": [],
+          "description": "Which credential variables still have no value. Empty is the only state in which the proxy can connect. The values themselves are never included."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether WEBSEARCH_PROXY currently resolves to a proxy URL. False means requests go out directly."
+        },
+        "locked": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether WEBSEARCH_EGRESS_LOCK is on. Locked, every path that would leave this machine without the proxy is refused instead of falling back to a direct connection: the fetch tiers, the search engines, the local SearXNG's own engine requests, the installs, and the doctor's direct baseline. Local targets are unaffected, since they never leave the machine."
+        },
+        "proxy": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The resolved proxy URL with its userinfo replaced by ***:***, so the host and port stay readable and the password never is."
+        },
+        "location": {
+          "anyOf": [{ "$ref": "#/$defs/ProxyLocation" }, { "type": "null" }],
+          "default": null,
+          "description": "The configured exit, or null when NORDVPN_HOST is unset and the default Amsterdam pool applies."
+        },
+        "locations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProxyLocation" },
+          "default": [],
+          "description": "Every selectable exit. Filled by the 'locations' action, empty otherwise."
+        },
+        "exit": {
+          "anyOf": [{ "$ref": "#/$defs/ProxyExit" }, { "type": "null" }],
+          "default": null,
+          "description": "The verified exit, or null when verification was off, the proxy is off, or the request failed (see exit_error)."
+        },
+        "exit_error": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Why the verification request failed, with any credentials scrubbed out."
+        },
+        "wired": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "The settings files written by this action. Empty when nothing was written, which for 'use' means a higher-precedence file already sets the variable and must be edited instead."
+        },
+        "searxng": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "The local SearXNG restarted onto the new egress by this action, or null when there was none running or it already matched. That instance fetches from every engine it queries and reads its settings once at startup, so changing the exit without restarting it would leave the searches coming from the old one."
+        },
+        "next_actions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "What is left to do, in order. Empty means the proxy is set up and verified."
+        }
+      }
+    }
+  }
+}

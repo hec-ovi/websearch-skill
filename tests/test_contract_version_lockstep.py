@@ -19,6 +19,7 @@ from websearch.layer1_search import SEARCH_CONTRACT_VERSION
 from websearch.layer2_extract import EXTRACT_CONTRACT_VERSION, FETCH_CONTRACT_VERSION
 from websearch.layer2_format.models import FORMAT_CONTRACT_VERSION, STORE_CONTRACT_VERSION
 from websearch.layer3_agentio import AGENTIO_CONTRACT_VERSION
+from websearch.proxy_setup import PROXY_CONTRACT_VERSION
 from websearch.searxng_local import SEARXNG_CONTRACT_VERSION
 from websearch.tool_arxiv import ARXIV_CONTRACT_VERSION
 from websearch.tool_github import GITHUB_CONTRACT_VERSION
@@ -40,6 +41,7 @@ PAIRS = [
     ("searxng.schema.json", SEARXNG_CONTRACT_VERSION),
     ("init.schema.json", INIT_CONTRACT_VERSION),
     ("tor.schema.json", TOR_CONTRACT_VERSION),
+    ("proxy.schema.json", PROXY_CONTRACT_VERSION),
 ]
 
 

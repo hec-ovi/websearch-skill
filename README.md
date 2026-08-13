@@ -49,7 +49,7 @@ The scorecard below compares result quality, latency, cost, privacy, and retriev
 | Init | `websearch init`: reads the settings files, starts SearXNG and Tor, runs diagnostics, and reports capability state | Built |
 | Tor | `websearch tor`: a local Tor with no Docker, onion search (Ahmia, SearXNG's onions category) and `.onion` fetching, chained behind an existing proxy rather than replacing it | Built |
 
-Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.2.0`, `fetch@1.3.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.2.0`, `arxiv@1.1.0`, `github@1.1.0`, `doctor@2.1.0`, `searxng@1.1.0`, `init@1.1.0`, `tor@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
+Contracts are frozen as JSON Schema 2020-12: `envelope@1.0.0`, `search@1.2.0`, `fetch@1.3.0`, `extract@1.0.0`, `format@1.0.0`, `store@1.0.0`, `agent-io@1.2.0`, `arxiv@1.1.0`, `github@1.1.0`, `doctor@2.1.0`, `searxng@1.2.0`, `init@1.1.0`, `tor@1.0.0`, `proxy@1.0.0`. Every response is wrapped in one `Envelope { contract_version, ok, data, error, meta }`.
 
 ## Layer 1: Search
 
@@ -273,7 +273,7 @@ The base install searches keyless engines over a direct connection. Four optiona
 | Layer | Switch | What it adds |
 |---|---|---|
 | VPN | `WEBSEARCH_VPN=nordvpn` or `any` | declares that egress should be tunneled, so the doctor verifies it instead of assuming it. It routes nothing on its own: the tunnel is your VPN app's job |
-| Egress proxy | `WEBSEARCH_PROXY=<url>` or `nordvpn` | one proxy for every network path the tool opens |
+| Egress proxy | `WEBSEARCH_PROXY=<url>` or `nordvpn` | one proxy for every path that leaves this machine, in both processes: the CLI's own requests, and the local SearXNG's requests to the engines it queries. `websearch proxy setup` walks through the credentials, `websearch proxy use <city>` picks the exit, `websearch proxy lock` refuses anything that would go direct |
 | Tor | `WEBSEARCH_TOR=on` | every path goes through a local Tor, `.onion` becomes reachable, and `--onion` searches the onion indexes. `websearch tor up` starts one and sets this for you |
 | SearXNG | `WEBSEARCH_SEARXNG_URL=<url>` | a self-hosted metasearch instance joins the Layer-1 fanout. `websearch searxng up` starts one and sets this for you, with or without Docker |
 
@@ -328,17 +328,37 @@ export WEBSEARCH_PROXY=nordvpn                         # NordVPN shorthand, see 
 export WEBSEARCH_PROXY=off                             # or unset it: direct connection
 ```
 
-The `nordvpn` shorthand builds the SOCKS5 URL for you from `NORDVPN_USER` and `NORDVPN_PASS`. These are the service credentials shown in the Nord Account dashboard under "Set up NordVPN manually", not your account login. `NORDVPN_HOST` picks a specific server (default `nl.socks.nordhold.net`; any of the official `*.socks.nordhold.net` hosts on port 1080 works).
+The `nordvpn` shorthand builds the SOCKS5 URL for you from `NORDVPN_USER` and `NORDVPN_PASS`. These are the service credentials shown in the Nord Account dashboard under "Set up NordVPN manually", not your account login. `websearch proxy` sets all of it up without you having to find the file:
+
+```bash
+websearch proxy setup          # creates the settings file and prints its path, with both keys empty
+websearch proxy locations      # the exits NordVPN runs: Netherlands, Sweden, nine US cities
+websearch proxy use dallas     # writes NORDVPN_HOST, turns the proxy on, restarts a running SearXNG
+websearch proxy status         # what is set, what is missing, and where the traffic actually comes out
+```
+
+Fill the two credential lines yourself in the file `setup` names; nothing reads them back or prints them. `status` asks NordVPN through the proxy where the connection surfaces, so a selection that did not take effect shows up as a city that does not match. A single command can also take `--location dallas` to use one exit for that call alone.
+
+### The lock
+
+```bash
+websearch proxy lock     # WEBSEARCH_EGRESS_LOCK=on
+websearch proxy unlock
+```
+
+Locked, nothing leaves this machine outside the proxy. A path that has no proxy is refused with `error.code: "egress_locked"` rather than falling back to a direct connection: both fetch tiers, the search engines, the local SearXNG's engine requests, the SearXNG and Tor installs, and `doctor --baseline`. `websearch proxy off` is refused until you unlock. Loopback and LAN targets are unaffected, because they never leave the machine.
+
+The fallback is the reason this exists: it happens on the day the proxy is unavailable, not on the day you are watching.
 
 Every network command also takes `--proxy <url|nordvpn|off>`, which overrides the variable for that run, so `--proxy off` gets you a direct connection without unsetting anything. Prefer `socks5h://` over `socks5://`: it resolves DNS through the proxy, so hostnames never hit your local resolver. A per-request `fetch --proxy` still wins over the process-wide default.
 
-With `WEBSEARCH_PROXY` set, all outbound paths use it: both fetch tiers, the `ddgs` engines, arXiv, GitHub, and the doctor's probes. Tests cover two important behaviors:
+With `WEBSEARCH_PROXY` set, every path that leaves this machine uses it: both fetch tiers, the `ddgs` engines, Ahmia, arXiv, GitHub, the doctor's probes, the SearXNG and Tor installs, and the local SearXNG instance's own engine requests. Tests cover two important behaviors:
 - **DNS resolution.** With a proxy configured, the SSRF guard does not resolve hostnames locally. `socks5h://` resolves them at the exit node. Literal IPs are still refused without a lookup, including `http://127.0.0.1` and the `169.254.169.254` metadata endpoint.
 - **Failure behavior.** If the proxy is unavailable, every component returns an error instead of retrying over a direct connection. This includes `ddgs` (Rust) and `curl_cffi` (libcurl), which open sockets outside Python.
 
 The opt-in `websearch doctor --baseline` check makes one direct request to compare the direct and proxied exit IPs. It is disabled by default because it sends the direct IP to an echo service.
 
-A self-hosted SearXNG request has two hops. The client connects directly to local SearXNG at `127.0.0.1`; proxying that address would target the proxy server's localhost. SearXNG then connects to upstream engines from its container, and `docker/searxng/searxng.sh up` routes that hop through `WEBSEARCH_PROXY` (including the `nordvpn` shorthand). `searxng.sh egress` prints both IPs. Set `SEARXNG_OUTGOING_PROXY=off` for direct container egress. A remote SearXNG address still uses the client proxy.
+A self-hosted SearXNG request has two hops, and they are proxied differently on purpose. The client connects to local SearXNG at `127.0.0.1` directly, because that hop never leaves the machine and a remote exit asked to reach its own localhost fails every time. SearXNG then queries Google, Brave, Mojeek and the rest itself, and that hop is the one that leaves: both stacks write your proxy into its `outgoing.proxies` (with `extra_proxy_timeout`, since a SOCKS exit costs a round trip), so those searches come out where the rest of the tool does. `websearch searxng status` prints that address as `egress`, `websearch proxy use <city>` restarts a running instance onto the new exit, and `searxng.sh egress` prints both IPs for the Docker stack. Set `SEARXNG_OUTGOING_PROXY=off` for direct instance egress. A remote SearXNG address is reached through the client proxy like any other host.
 
 ### Tor
 
@@ -464,7 +484,7 @@ Protected sites usually require paid residential egress (even Firecrawl scores a
 
 Current distribution options include `npx skills add`, a Claude Code plugin and marketplace, and PyPI/uvx. See [`docs/INSTALL.md`](docs/INSTALL.md) for each supported agent.
 
-The opt-in egress proxy (`WEBSEARCH_PROXY`, `--proxy`, NordVPN shorthand) covers every outbound network path.
+The opt-in egress proxy (`WEBSEARCH_PROXY`, `--proxy`, NordVPN shorthand) covers every path that leaves the machine, including the self-hosted SearXNG's own engine requests, and `websearch proxy lock` refuses the ones that cannot use it instead of falling back to a direct connection.
 
 Planned, not built yet:
 

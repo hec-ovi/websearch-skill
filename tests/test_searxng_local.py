@@ -567,13 +567,13 @@ def test_the_generated_settings_carry_no_tor_block_with_the_layer_off(tmp_path):
     body = paths.settings.read_text()
     assert "using_tor_proxy" not in body
     assert sx.MANAGED_MARKER in body
-    assert not sx.settings_stale(paths, 8888, None)
+    assert not sx.settings_stale(paths, 8888, None, None)
 
 
 def test_turning_tor_on_rewrites_the_settings_and_points_the_onion_engines_at_it(tmp_path):
     paths = sx.Paths(tmp_path)
     sx.write_settings(paths, 8888)
-    assert sx.settings_stale(paths, 8888, "socks5h://127.0.0.1:9050") is True
+    assert sx.settings_stale(paths, 8888, "socks5h://127.0.0.1:9050", None) is True
 
     sx.write_settings(paths, 8888, tor_socks="socks5h://127.0.0.1:9050")
 
@@ -603,7 +603,7 @@ def test_an_operator_file_is_never_rewritten(tmp_path):
 
     assert "9999" in paths.settings.read_text()
     assert "ahmia" not in paths.settings.read_text()
-    assert sx.settings_stale(paths, 8888, "socks5h://127.0.0.1:9050") is False
+    assert sx.settings_stale(paths, 8888, "socks5h://127.0.0.1:9050", None) is False
 
 
 def test_a_settings_file_from_before_the_marker_is_adopted_if_unedited(tmp_path):
@@ -612,7 +612,7 @@ def test_a_settings_file_from_before_the_marker_is_adopted_if_unedited(tmp_path)
     paths = sx.Paths(tmp_path)
     paths.settings.write_text(sx.LEGACY_SETTINGS_TEMPLATE.format(port=8888, secret="abc123"))
 
-    assert sx.settings_stale(paths, 8888, "socks5h://127.0.0.1:9050") is True
+    assert sx.settings_stale(paths, 8888, "socks5h://127.0.0.1:9050", None) is True
     sx.write_settings(paths, 8888, tor_socks="socks5h://127.0.0.1:9050")
 
     body = paths.settings.read_text()
@@ -630,3 +630,58 @@ def test_an_edited_file_from_before_the_marker_is_left_alone(tmp_path):
     sx.write_settings(paths, 8888, tor_socks="socks5h://127.0.0.1:9050")
 
     assert paths.settings.read_text() == edited
+
+
+# --- where the instance's own engine requests leave from ------------------------------
+
+PROXY_URL = "socks5h://svc:pw@dallas.us.socks.nordhold.net:1080"
+
+
+def test_the_settings_send_the_instances_own_requests_through_the_proxy(tmp_path, monkeypatch):
+    """The failure this exists to catch: the CLI proxied and the instance not, so every
+    search still left from this machine's address while the fetches that followed did not.
+    That is also what gets a home IP CAPTCHAd by the engines it queries."""
+    import yaml
+
+    monkeypatch.setenv("WEBSEARCH_PROXY", PROXY_URL)
+    paths = sx.Paths(tmp_path)
+    sx.write_settings(paths, 8888, proxy=sx.outgoing_proxy())
+
+    settings = yaml.safe_load(paths.settings.read_text())
+    assert settings["outgoing"]["proxies"] == {"all://": [PROXY_URL]}
+    assert settings["outgoing"]["extra_proxy_timeout"] == sx.EXTRA_PROXY_TIMEOUT_S
+    assert sx.settings_egress(paths) == PROXY_URL
+
+
+def test_an_unproxied_install_stays_direct(tmp_path):
+    paths = sx.Paths(tmp_path)
+    sx.write_settings(paths, 8888, proxy=sx.outgoing_proxy())
+
+    assert "proxies" not in paths.settings.read_text()
+    assert sx.settings_egress(paths) is None
+
+
+def test_changing_the_exit_makes_the_running_instance_stale(tmp_path, monkeypatch):
+    """Settings are read once at startup, so 'stale' is what turns a new city into a
+    restart instead of an instance quietly searching from the old one."""
+    monkeypatch.setenv("WEBSEARCH_PROXY", PROXY_URL)
+    paths = sx.Paths(tmp_path)
+    sx.write_settings(paths, 8888, proxy=PROXY_URL)
+
+    moved = PROXY_URL.replace("dallas", "stockholm")
+    assert sx.settings_stale(paths, 8888, None, moved) is True
+    assert sx.settings_stale(paths, 8888, None, PROXY_URL) is False
+
+
+def test_the_override_forces_direct_egress(monkeypatch):
+    monkeypatch.setenv("WEBSEARCH_PROXY", PROXY_URL)
+    monkeypatch.setenv(sx.OUTGOING_PROXY_VAR, "off")
+    assert sx.outgoing_proxy() is None
+
+
+def test_a_locked_bring_up_will_not_configure_an_instance_that_leaks(monkeypatch):
+    from websearch.proxy import EGRESS_LOCK_VAR, EgressLocked
+
+    monkeypatch.setenv(EGRESS_LOCK_VAR, "on")
+    with pytest.raises(EgressLocked):
+        sx.outgoing_proxy()

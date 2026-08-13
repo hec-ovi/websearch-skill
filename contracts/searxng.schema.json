@@ -3,7 +3,7 @@
   "$id": "https://github.com/hec-ovi/websearch-skill/contracts/searxng.schema.json",
   "title": "SearXNG local stack - lifecycle contract",
   "description": "Bring a self-hosted SearXNG up on this machine without Docker, report on it, or stop it. This is process control, not a search path: it clones upstream SearXNG into a state directory, builds a virtualenv, starts the server detached from the caller, and records the resulting URL where the search layer reads it. The server it starts is the thing WEBSEARCH_SEARXNG_URL points at, which is how a SearXNG joins the Layer-1 engine fanout. Emits the same Envelope (meta.layer \"searxng\") as every other port.",
-  "x-contract-version": "1.1.0",
+  "x-contract-version": "1.2.0",
   "$defs": {
     "SearxngRequest": {
       "type": "object",
@@ -81,6 +81,11 @@
         "healthy": {
           "type": "boolean",
           "description": "Whether /healthz answered."
+        },
+        "egress": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "Where this instance's own engine requests leave from, redacted, as read from the settings file it started with. Null means direct egress from this machine. The instance is a second process and every engine it queries is fetched by it, so this is the address those searches come from, which is not necessarily the one the CLI's own requests use: settings are read once at startup, so an instance started before the egress changed keeps the old one until it is restarted."
         },
         "wired": {
           "type": [

@@ -129,7 +129,16 @@ def load_env_file(path: str | None = None) -> list[str]:
     return loaded
 
 
-def _defines(path: Path, key: str) -> bool:
+def settings_file() -> Path:
+    """The file settings are written to: ``WEBSEARCH_ENV_FILE``, else the user config file.
+
+    The one path to print when telling someone where to put a credential. It is the write
+    target whether or not it exists yet, which is what makes the answer stable.
+    """
+    return Path(os.environ.get(ENV_FILE_VAR) or user_env_file()).expanduser()
+
+
+def defines_setting(path: Path, key: str) -> bool:
     """Whether ``path`` sets ``key``, however it spells the assignment."""
     try:
         text = path.read_text(encoding="utf-8")
@@ -152,11 +161,11 @@ def write_env_setting(key: str, value: str) -> Path | None:
     higher-precedence file already sets the key: writing underneath it would produce a
     file that says one thing and an environment that does another.
     """
-    target = Path(os.environ.get(ENV_FILE_VAR) or user_env_file()).expanduser()
+    target = settings_file()
     for candidate in env_file_candidates():
         if candidate.resolve() == target.resolve():
             break
-        if _defines(candidate, key):
+        if defines_setting(candidate, key):
             return None
     target.parent.mkdir(parents=True, exist_ok=True)
     line = f"{key}={value}"
