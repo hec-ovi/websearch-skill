@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from tests.conftest import (
     ARXIV_PAPER_REF,
     ARXIV_SEARCH_PAYLOAD_REF,
@@ -245,18 +243,18 @@ def test_cli_arxiv_rate_limited_exit_1(monkeypatch, capsys):
     assert out["error"]["code"] == errors.RATE_LIMITED
 
 
-@pytest.mark.parametrize("field", ["title", "author", "abstract"])
-def test_cli_arxiv_field_passthrough(monkeypatch, capsys, field):
+def test_cli_arxiv_field_passthrough(monkeypatch, capsys):
+    # The field -> prefix table itself is proven at the model level; the CLI needs one
+    # passthrough case.
     record: list = []
     monkeypatch.setattr(
         cli_mod,
         "build_arxiv_tool",
         lambda **k: build_arxiv_tool(http_get=_static_get(ATOM, record=record)),
     )
-    rc = main(["arxiv", "graphs", "--field", field, "--json"])
+    rc = main(["arxiv", "graphs", "--field", "author", "--json"])
     assert rc == 0
-    prefix = {"title": "ti", "author": "au", "abstract": "abs"}[field]
-    assert record[0]["params"]["search_query"] == f"{prefix}:graphs"
+    assert record[0]["params"]["search_query"] == "au:graphs"
 
 
 # --- regression coverage for the gate findings ------------------------------------
@@ -301,13 +299,6 @@ def test_multiword_query_is_quoted_but_single_word_and_operators_are_not():
         ArxivSearchRequest(query="salt and pepper noise").search_query()
         == 'all:"salt and pepper noise"'
     )
-
-
-def test_whitespace_only_query_is_rejected():
-    import pydantic
-
-    with pytest.raises(pydantic.ValidationError):
-        ArxivSearchRequest(query="   ")
 
 
 def test_cli_arxiv_whitespace_query_invalid(capsys):

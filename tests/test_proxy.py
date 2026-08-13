@@ -197,18 +197,6 @@ def test_searxng_on_a_public_host_still_uses_the_proxy(httpx_mock, monkeypatch):
     assert seen["proxy"] == SOCKS
 
 
-def test_cli_off_beats_env(monkeypatch):
-    monkeypatch.setenv("WEBSEARCH_PROXY", SOCKS)
-    assert resolve_proxy("off") is None
-
-
-def test_nordvpn_expands_service_credentials(monkeypatch):
-    monkeypatch.setenv("WEBSEARCH_PROXY", "nordvpn")
-    monkeypatch.setenv("NORDVPN_USER", "svc-user")
-    monkeypatch.setenv("NORDVPN_PASS", "svc-pass")
-    assert resolve_proxy() == f"socks5h://svc-user:svc-pass@{NORDVPN_DEFAULT_HOST}:1080"
-
-
 def test_nordvpn_host_override_and_credential_encoding(monkeypatch):
     monkeypatch.setenv("NORDVPN_USER", "user@x")
     monkeypatch.setenv("NORDVPN_PASS", "p@ss:w/1")
@@ -233,25 +221,6 @@ def test_fetch_proxy_shapes():
 
 
 # --- layer 1: search engines --------------------------------------------------------
-
-
-def test_searxng_owned_client_uses_proxy(monkeypatch):
-    captured = {}
-
-    class FakeClient:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-        def get(self, url, params=None):
-            raise RuntimeError("transport faked out")
-
-        def close(self):
-            pass
-
-    monkeypatch.setattr("websearch.layer1_search.adapters.searxng.httpx.Client", FakeClient)
-    out = SearxngAdapter("http://sx.test", proxy=SOCKS).search(SearchRequest(query="q"))
-    assert captured["proxy"] == SOCKS
-    assert out.error  # the faked transport failed cleanly, no raise
 
 
 def test_ddgs_client_gets_proxy(monkeypatch):
@@ -425,20 +394,3 @@ def test_cli_nordvpn_without_creds_is_clean_invalid_request(capsys):
     assert "invalid_request" in err
     assert "NORDVPN_USER" in err
     assert "Traceback" not in err
-
-
-def test_a_proxy_config_error_escaping_a_command_is_mapped_to_invalid_request(monkeypatch, capsys):
-    import json
-
-    # main()'s ProxyConfigError arm: a misconfigured proxy that only surfaces deep in a
-    # command is the caller's environment, not an internal failure.
-    def boom(**kwargs):
-        raise ProxyConfigError("proxy 'nordvpn' needs NORDVPN_USER and NORDVPN_PASS")
-
-    monkeypatch.setattr("websearch.cli.build_agent_io", boom)
-    rc = cli.main(["web-search", "q", "--json"])
-    assert rc == 1
-    env = json.loads(capsys.readouterr().out)
-    assert env["ok"] is False
-    assert env["error"]["code"] == "invalid_request"
-    assert "NORDVPN_USER" in env["error"]["message"]

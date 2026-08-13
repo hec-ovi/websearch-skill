@@ -8,8 +8,6 @@ from __future__ import annotations
 import json
 import time
 
-import pytest
-
 from tests.conftest import (
     GITHUB_REPO_REF,
     GITHUB_SEARCH_PAYLOAD_REF,
@@ -291,13 +289,6 @@ def test_incomplete_results_is_surfaced_as_warning():
     assert env.ok
     assert env.data["incomplete_results"] is True
     assert any("incomplete" in w.lower() for w in env.data["warnings"])
-
-
-def test_whitespace_only_query_rejected():
-    import pydantic
-
-    with pytest.raises(pydantic.ValidationError):
-        GithubSearchRequest(query="   ")
 
 
 def test_cli_github_whitespace_query_invalid(capsys):

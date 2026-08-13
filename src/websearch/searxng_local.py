@@ -474,8 +474,9 @@ def start(paths: Paths, p: int) -> int:
     # The tool's own proxy settings and credentials belong to the client hop, not to
     # this server's environment: its egress is already in settings.yml, and a detached
     # process has no business holding the NordVPN credentials.
-    for leaked in ("WEBSEARCH_PROXY", "WEBSEARCH_VPN", "NORDVPN_USER", "NORDVPN_PASS", "NORDVPN_HOST"):
-        env.pop(leaked, None)
+    leaked = ("WEBSEARCH_PROXY", "WEBSEARCH_VPN", "NORDVPN_USER", "NORDVPN_PASS", "NORDVPN_HOST")
+    for name in leaked:
+        env.pop(name, None)
 
     paths.log.parent.mkdir(parents=True, exist_ok=True)
     log = paths.log.open("ab")

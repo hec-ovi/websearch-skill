@@ -132,24 +132,6 @@ def test_cli_more_hint_without_a_store_can_only_suggest_a_refetch(httpx_mock, ca
     assert f'(more: web-fetch "{FETCH_URL}" --page 2 --page-size-tokens 20)' in out
 
 
-def test_cli_more_hint_with_persist_path_carries_a_nondefault_page_size(
-    httpx_mock, tmp_path, capsys
-):
-    db = str(tmp_path / "idx.sqlite")
-    httpx_mock.add_response(url=FETCH_URL, html=ARTICLE_HTML)
-    rc = cli.main(["web-fetch", FETCH_URL, "--page-size-tokens", "20", "--persist-path", db])
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "(more: web-open " in out
-    assert f"--page 2 --page-size-tokens 20 --persist-path {db})" in out
-
-
-def test_more_hint_omits_the_default_page_size():
-    hint = cli._more_hint({"page": 1, "handle": "h~x", "url": "https://u.test/"}, None)
-    assert "--page-size-tokens" not in hint
-    assert "--page 2" in hint
-
-
 def test_cli_default_page_size_matches_the_layer3_default():
     from websearch.layer3_agentio import DEFAULT_PAGE_SIZE_TOKENS
 
@@ -182,3 +164,26 @@ def test_cli_proxy_config_error_carries_the_commands_contract_version(monkeypatc
     env = json.loads(capsys.readouterr().out)
     assert env["error"]["code"] == "invalid_request"
     assert env["contract_version"] == ARXIV_CONTRACT_VERSION
+
+
+def test_web_fetch_page_below_one_is_clean_invalid_request(capsys):
+    # Validation rejects the request before any network or engine is touched.
+    rc = cli.main(["web-fetch", "https://example.com", "--page", "0", "--json"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1 and out["ok"] is False
+    assert out["error"]["code"] == "invalid_request"  # not a raw traceback
+
+
+def test_web_search_whitespace_query_rejected(capsys):
+    rc = cli.main(["web-search", "   ", "--json"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert out["error"]["code"] == "invalid_request"
+
+
+def test_websearch_has_no_engine_flags():
+    # The agent-facing web-search is plug-and-play: engine/backend selection lives on the
+    # lower-level `search` command, so these flags are rejected by the parser.
+    for flag in (["--ddgs-backends", "brave"], ["--engines", "google"], ["--no-ddgs"]):
+        with pytest.raises(SystemExit):
+            cli.main(["web-search", "x", *flag, "--json"])

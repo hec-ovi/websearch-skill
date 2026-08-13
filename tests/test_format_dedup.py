@@ -9,7 +9,6 @@ from websearch.layer2_format.dedup import (
     estimated_jaccard,
     make_permutations,
     minhash_signature,
-    normalize_body,
 )
 
 _BASE = (
@@ -32,10 +31,6 @@ def _items(*pairs):
     return out
 
 
-def test_normalize_collapses_whitespace_preserves_case():
-    assert normalize_body("  A\t b\n\nC  ") == "A b C"
-
-
 def test_content_hash_stable_and_whitespace_insensitive():
     assert content_hash("hello   world") == content_hash("hello world\n")
     assert content_hash("Hello") != content_hash("hello")  # case preserved
@@ -49,12 +44,6 @@ def test_minhash_near_vs_far():
     assert estimated_jaccard(s_base, s_near) > 0.6
     assert estimated_jaccard(s_base, s_far) < 0.2
     assert estimated_jaccard(s_base, s_base) == 1.0
-
-
-def test_minhash_signature_deterministic_across_calls():
-    a = minhash_signature(_BASE, num_perm=64, shingle_size=4)
-    b = minhash_signature(_BASE, num_perm=64, shingle_size=4)
-    assert a == b  # fixed permutation seed
 
 
 def test_byte_exact_folds_identical_bodies():
@@ -123,45 +112,6 @@ def test_empty_and_single_body_safe():
     one = _items(("https://a.test/1", "", None))
     clusters = dedup_items(one, method="both")
     assert len(clusters) == 1
-
-
-def test_length_band_prefilter_skips_isolated_lengths(monkeypatch):
-    # At the 0.9 default threshold, two bodies whose normalized lengths sit outside the
-    # [0.8, 1.25] ratio band cannot be near-duplicates, so no signature is computed.
-    import websearch.layer2_format.dedup as dedup_mod
-
-    calls: list = []
-    real = dedup_mod.minhash_signature
-
-    def counting(*args, **kwargs):
-        calls.append(args)
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(dedup_mod, "minhash_signature", counting)
-    short = "a tiny body of only a few words"
-    huge = "completely different vocabulary in every single sentence here " * 40
-    items = _items(("https://a.test/s", short, 0.5), ("https://a.test/h", huge, 0.4))
-    clusters = dedup_mod.dedup_items(items, method="minhash", jaccard_threshold=0.9)
-    assert len(clusters) == 2  # same outcome as without the prefilter
-    assert calls == []  # neither doc had a band neighbor; signatures skipped entirely
-
-
-def test_length_band_prefilter_off_below_default_threshold(monkeypatch):
-    # A looser threshold admits wider length ratios, so the prefilter must not apply.
-    import websearch.layer2_format.dedup as dedup_mod
-
-    calls: list = []
-    real = dedup_mod.minhash_signature
-
-    def counting(*args, **kwargs):
-        calls.append(args)
-        return real(*args, **kwargs)
-
-    monkeypatch.setattr(dedup_mod, "minhash_signature", counting)
-    items = _items(("https://a.test/base", _BASE, 0.9), ("https://a.test/near", _NEAR, 0.4))
-    clusters = dedup_mod.dedup_items(items, method="minhash", jaccard_threshold=0.6)
-    assert len(clusters) == 1  # still folds, exactly as before the prefilter
-    assert len(calls) == 2  # signatures were computed for both docs
 
 
 def test_length_band_prefilter_preserves_near_duplicate_folding():

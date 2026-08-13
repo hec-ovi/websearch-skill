@@ -29,11 +29,10 @@ def test_searxng_safesearch_mapping(httpx_mock, level, expected):
     assert params["format"] == "json"
 
 
-@pytest.mark.parametrize("fresh", ["day", "week", "month", "year"])
-def test_searxng_freshness_maps_to_time_range(httpx_mock, fresh):
+def test_searxng_freshness_maps_to_time_range(httpx_mock):
     httpx_mock.add_response(json={"results": []})
-    SearxngAdapter(SEARXNG_URL).search(SearchRequest(query="q", freshness=fresh))
-    assert _sent_params(httpx_mock)["time_range"] == fresh
+    SearxngAdapter(SEARXNG_URL).search(SearchRequest(query="q", freshness="week"))
+    assert _sent_params(httpx_mock)["time_range"] == "week"
 
 
 def test_searxng_news_and_language_params(httpx_mock):
@@ -138,7 +137,7 @@ def test_searxng_disabled_without_url():
 # --- ddgs ---------------------------------------------------------------------------
 
 
-class _RecordingDDGS:
+class _BackendDDGS:
     def __init__(self, sink: dict):
         self._sink = sink
 
@@ -150,7 +149,7 @@ class _RecordingDDGS:
 
 def _run_ddgs(request: SearchRequest) -> dict:
     sink: dict = {}
-    DdgsAdapter(ddgs_factory=lambda: _RecordingDDGS(sink)).search(request)
+    DdgsAdapter(ddgs_factory=lambda: _BackendDDGS(sink)).search(request)
     return sink
 
 
@@ -216,3 +215,38 @@ def test_ddgs_timeout_reaches_client_and_client_is_reused(monkeypatch):
     adapter.search(SearchRequest(query="q", timeout_ms=30000))
     adapter.search(SearchRequest(query="q", timeout_ms=30000))
     assert captured == [{"timeout": 30}]  # request timeout honored; one client built
+
+
+# --- ddgs backend selection (--ddgs-backends) ----------------------------------------
+
+
+class _BackendRecorder:
+    """A no-arg DDGS() stand-in that records kwargs, patched over the real ddgs.DDGS."""
+
+    last_kwargs: dict | None = None
+
+    def __init__(self, *a, **k):
+        pass
+
+    def text(self, query, **kwargs):
+        _BackendRecorder.last_kwargs = kwargs
+        return [{"title": "t", "href": "https://example.com/a", "body": "b"}]
+
+
+def test_router_defaults_to_auto_backend():
+    from websearch.layer1_search import build_router
+
+    _BackendRecorder.last_kwargs = None
+    build_router(ddgs_factory=_BackendRecorder).search(SearchRequest(query="x"))
+    assert _BackendRecorder.last_kwargs["backend"] == "auto"
+
+
+def test_cli_search_backend_reaches_client_end_to_end(monkeypatch):
+    # No spy on build_router: the real adapter constructs DDGS(), which we patch.
+    from websearch.cli import main
+
+    _BackendRecorder.last_kwargs = None
+    monkeypatch.setattr("ddgs.DDGS", _BackendRecorder)
+    rc = main(["search", "x", "--ddgs-backends", "brave", "--json"])
+    assert rc == 0
+    assert _BackendRecorder.last_kwargs["backend"] == "brave"

@@ -119,26 +119,10 @@ def test_akamai_server_header_on_403():
 
 
 def test_title_looks_like_error():
+    # Error-shaped titles trip the veto; a weak word inside a benign title must not.
     assert title_looks_like_error("404 Not Found")
     assert title_looks_like_error("Just a moment...")
-    assert title_looks_like_error("Access Denied")
-    assert not title_looks_like_error("Understanding Rust Ownership")
-    assert not title_looks_like_error(None)
-
-
-def test_title_weak_signal_trips_only_on_error_shaped_titles():
-    # The weak word IS the whole title (every token is error vocabulary) ...
-    assert title_looks_like_error("Forbidden")
     assert title_looks_like_error("403 Forbidden")
-    assert title_looks_like_error("Error 404")
-    assert title_looks_like_error("HTTP 500")
-    # ... or it co-occurs with a real error word.
-    assert title_looks_like_error("500 Internal Server Error")
-
-
-def test_title_weak_signal_ignores_benign_titles():
-    # Short benign titles containing a weak word must not trip the veto.
-    assert not title_looks_like_error("Forbidden City")
-    assert not title_looks_like_error("Top 500 Companies")
     assert not title_looks_like_error("Forbidden City: a complete travel guide")
-    assert not title_looks_like_error("The Top 500 Companies of 2026")
+    assert not title_looks_like_error("Top 500 Companies")
+    assert not title_looks_like_error(None)

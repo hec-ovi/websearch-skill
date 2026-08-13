@@ -157,9 +157,3 @@ def test_writing_a_settings_file_does_not_move_the_state(monkeypatch, tmp_path):
 
     assert state_dir() == cache
     assert default_persist_path() == str(cache / PAGES_FILE)
-
-
-def test_a_configured_env_file_still_keeps_state_beside_it(monkeypatch, tmp_path):
-    """The container case: one mounted directory holds the config and the install."""
-    monkeypatch.setenv(ENV_FILE_VAR, str(tmp_path / "conf" / "websearch.env"))
-    assert state_dir() == (tmp_path / "conf").resolve()

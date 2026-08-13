@@ -73,3 +73,9 @@ def test_token_estimate_default_and_pluggable():
     assert estimate_tokens("a" * 8) == 2  # ceil(8/4)
     assert estimate_tokens("a" * 8, chars_per_token=2) == 4
     assert estimate_tokens("whatever", estimator=lambda t: 99) == 99
+
+
+def test_zero_max_chars_terminates():
+    # max_chars=0 used to hang the heading path in an infinite loop.
+    out = chunk_markdown("# Heading\nsome body text here\n", max_chars=0)
+    assert isinstance(out, list)  # returns, does not hang

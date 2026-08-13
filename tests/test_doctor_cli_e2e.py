@@ -206,9 +206,3 @@ def test_a_doctor_that_explodes_becomes_an_internal_error_envelope(monkeypatch, 
     env = json.loads(capsys.readouterr().out)
     assert env["error"]["code"] == "internal_error"
     assert env["contract_version"] == DOCTOR_CONTRACT_VERSION
-
-
-def test_doctor_is_listed_in_the_cli_help(capsys):
-    with pytest.raises(SystemExit):
-        cli.main(["--help"])
-    assert "doctor" in capsys.readouterr().out

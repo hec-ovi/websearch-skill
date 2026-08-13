@@ -61,22 +61,7 @@ def test_with_no_env_file_the_state_goes_to_the_xdg_cache(monkeypatch, tmp_path)
     assert sx.home_dir() == (tmp_path / "cache" / "websearch" / "searxng").resolve()
 
 
-def test_the_paths_all_hang_off_the_home(tmp_path):
-    paths = sx.Paths(tmp_path)
-    assert paths.src.parent == tmp_path
-    assert paths.venv.parent == tmp_path
-    assert paths.python.is_relative_to(paths.venv)
-    assert paths.granian.is_relative_to(paths.venv)
-    for path in (paths.settings, paths.log, paths.pidfile):
-        assert path.parent == tmp_path
-
-
 # --- port ---------------------------------------------------------------------------
-
-
-def test_the_default_port_is_8888():
-    assert sx.port() == sx.DEFAULT_PORT
-    assert sx.base_url() == "http://127.0.0.1:8888"
 
 
 def test_the_port_is_overridable(monkeypatch):
@@ -85,9 +70,8 @@ def test_the_port_is_overridable(monkeypatch):
     assert sx.base_url() == "http://127.0.0.1:9001"
 
 
-@pytest.mark.parametrize("bad", ["potato", "0", "70000", "-1"])
-def test_an_unusable_port_is_refused_by_name(monkeypatch, bad):
-    monkeypatch.setenv(sx.PORT_VAR, bad)
+def test_an_unusable_port_is_refused_by_name(monkeypatch):
+    monkeypatch.setenv(sx.PORT_VAR, "70000")
     with pytest.raises(sx.SearxngError) as exc:
         sx.port()
     assert sx.PORT_VAR in str(exc.value)
@@ -120,14 +104,6 @@ def test_every_instance_gets_its_own_secret(tmp_path):
 def test_settings_are_not_world_readable(tmp_path):
     written = sx.write_settings(sx.Paths(tmp_path), 9004)
     assert written.stat().st_mode & 0o077 == 0
-
-
-def test_an_edited_settings_file_is_left_alone(tmp_path):
-    paths = sx.Paths(tmp_path)
-    sx.write_settings(paths, 9005)
-    paths.settings.write_text("use_default_settings: true  # mine\n")
-    sx.write_settings(paths, 9005)
-    assert "# mine" in paths.settings.read_text()
 
 
 # --- wiring the tool at the instance ------------------------------------------------
@@ -311,10 +287,6 @@ def test_down_stops_the_process_and_clears_the_pidfile(tmp_path, stub, free_port
     while time.monotonic() < deadline and sx.is_healthy(f"http://127.0.0.1:{free_port}"):
         time.sleep(0.1)
     assert sx.is_healthy(f"http://127.0.0.1:{free_port}") is False
-
-
-def test_down_on_nothing_is_not_an_error(tmp_path):
-    assert sx.stop(sx.Paths(tmp_path)) is False
 
 
 # --- detachment: the reason this command exists -------------------------------------

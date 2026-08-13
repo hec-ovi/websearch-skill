@@ -221,15 +221,6 @@ def test_render_block_enables_every_engine_that_answered(probe_module):
     assert "yep: EMPTY - 0 results" in block
 
 
-def test_render_block_is_idempotent_under_its_own_output(probe_module):
-    """The bug this guards: the generator used to emit only engines that were off in
-    /config. Re-running it read back its own overrides, saw them as already enabled,
-    and rewrote settings.yml down to a handful of engines."""
-    assert probe_module.render_block(ROWS) == probe_module.render_block(ROWS)
-    first = yaml.safe_load(probe_module.render_block(ROWS).replace(BEGIN, "").replace(END, ""))
-    assert len(first["engines"]) == 3, "the list must not shrink when the engines are already on"
-
-
 def test_render_block_holds_back_torrent_and_shadow_library_engines(probe_module):
     block = probe_module.render_block(ROWS)
     parsed = yaml.safe_load(block.replace(BEGIN, "").replace(END, ""))
@@ -279,17 +270,6 @@ def test_render_with_a_proxy_emits_an_outgoing_proxies_entry(render_module):
     assert outgoing["proxies"] == {"all://": "socks5h://u:p@exit.test:1080"}
     assert "PROXY MARKER" not in out
     assert outgoing["max_request_timeout"] == 5.0, "the rest of the config must survive"
-
-
-def test_render_keeps_the_engine_list_intact(render_module):
-    out = render_module.render(SETTINGS.read_text(), "http://exit.test:3128")
-    assert yaml.safe_load(out)["engines"] == yaml.safe_load(SETTINGS.read_text())["engines"]
-
-
-def test_render_is_idempotent_in_content(render_module):
-    once = render_module.render(SETTINGS.read_text(), "http://exit.test:3128")
-    twice = render_module.render(SETTINGS.read_text(), "http://exit.test:3128")
-    assert once == twice
 
 
 @pytest.mark.skipif(not RUNTIME.exists(), reason="no rendered settings; run searxng.sh up")

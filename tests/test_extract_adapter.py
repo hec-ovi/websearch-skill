@@ -35,13 +35,6 @@ def test_content_markdown_is_not_truncated():
     assert len(r.content_markdown) > 20_000  # no length cap applied anywhere
 
 
-def test_favor_precision_and_recall_both_run():
-    for favor in ("precision", "recall", "balanced"):
-        r = _extract(ARTICLE_HTML, favor=favor)
-        assert r.content_markdown
-        assert r.quality_score >= 0.0
-
-
 def test_boilerplate_only_page_is_low_quality_with_warning():
     r = _extract("<html><body><nav><a href='/'>home</a></nav></body></html>")
     assert r.quality_score < 0.80

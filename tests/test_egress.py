@@ -131,3 +131,11 @@ def test_all_unparseable_resolved_entries_fail_closed():
 
 def test_garbage_entries_alongside_a_public_address_are_tolerated():
     guard_url("https://ok.test/", resolve=lambda h: {"garbage", "93.184.216.34"})  # no raise
+
+
+def test_cgnat_addresses_are_refused():
+    """RFC 6598 (100.64.0.0/10) is the range a private/loopback denylist silently misses."""
+    with pytest.raises(BlockedEgress):
+        guard_url("http://100.64.0.1/")
+    with pytest.raises(BlockedEgress):
+        guard_url("http://nat.test/", resolve=lambda host: {"100.100.0.5"})

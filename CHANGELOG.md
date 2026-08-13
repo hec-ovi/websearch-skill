@@ -6,6 +6,28 @@ semantic versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-13
+
+### Changed
+
+- **The two NordVPN credentials are the whole proxy setup.** With `NORDVPN_USER` and
+  `NORDVPN_PASS` in the environment (or the settings file), the proxy is on for every
+  network path with nothing else to set; `WEBSEARCH_PROXY` only needs a value to pick a
+  different proxy or to say `off`. Credentials someone placed there mean "use them", and
+  an explicit off word remains the way to go direct.
+
+- **A configured proxy locks egress on its own.** Any path that cannot use the proxy is
+  refused with `egress_locked` instead of leaving from the machine's own address: fetch
+  tiers, engines, the local SearXNG's engine requests, the installs, and
+  `doctor --baseline`. A proxy that is configured but unusable (a credential missing)
+  locks too, because the alternative is direct egress on the day the configuration broke.
+  `WEBSEARCH_EGRESS_LOCK` is the explicit override in either direction, and an explicit
+  `--proxy off` / `websearch proxy off` overrides the implied lock but never the explicit
+  one. A search that finds the local SearXNG running off the proxy restarts it onto the
+  current egress before querying it. CLI egress flags pin the process environment so every
+  layer sees the same choice, and the SearXNG server process does not inherit the
+  credentials.
+
 ## [0.5.0] - 2026-08-13
 
 ### Added

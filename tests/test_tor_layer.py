@@ -66,14 +66,14 @@ def test_the_layer_is_off_with_a_bare_environment():
     assert egress_proxy() is None
 
 
-@pytest.mark.parametrize("word", ["", "off", "none", "no", "false", "0", "direct", "OFF", " off "])
-def test_off_words_keep_it_off(monkeypatch, word):
-    monkeypatch.setenv(TOR_ENV, word)
+def test_an_off_word_keeps_it_off(monkeypatch):
+    # The full OFF_WORDS vocabulary is proven once, in test_optional_layers.
+    monkeypatch.setenv(TOR_ENV, "off")
     assert tor_enabled() is False
     assert tor_state().enabled is False
 
 
-@pytest.mark.parametrize("word", ["on", "yes", "true", "1", "tor", "ON"])
+@pytest.mark.parametrize("word", ["on", "tor"])
 def test_on_words_turn_it_on(monkeypatch, word):
     monkeypatch.setenv(TOR_ENV, word)
     assert tor_enabled() is True

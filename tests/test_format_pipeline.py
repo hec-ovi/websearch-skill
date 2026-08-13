@@ -323,3 +323,10 @@ def test_derived_id_is_stable_and_site_extracted():
     r = data["sidecar"]["results"][0]
     assert r["id"].startswith("doc_")
     assert r["site"] == "example.com"  # www stripped
+
+
+def test_nan_score_sanitized_to_none_at_model_boundary():
+    r = ResultInput(url="https://x.test/", score=float("nan"))
+    assert r.score is None
+    r2 = ResultInput(url="https://x.test/", score=float("inf"), quality_score=float("-inf"))
+    assert r2.score is None and r2.quality_score is None

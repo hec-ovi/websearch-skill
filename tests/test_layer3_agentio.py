@@ -367,3 +367,47 @@ def test_fetch_many_all_fail_preserves_the_cause(agent, httpx_mock):
     assert not env.ok and env.error.code == "fetch_failed"
     # The specific per-URL reason survives, not a generic "all 1 url(s) failed".
     assert "dead.test" in env.error.message
+
+
+# --- facade robustness ----------------------------------------------------------------
+
+
+def test_web_search_unknown_engine_falls_back_to_default_with_warning():
+    # `engines` names Layer-1 adapters; a non-adapter name must run the default search
+    # and warn, never return no_engines_enabled (which would yield zero results).
+    aio = build_agent_io(ddgs_factory=ddgs_factory(DDGS_ROWS))
+    env = aio.web_search(AgentSearchRequest(query="rust", engines=["google", "brave"]))
+    assert env.ok
+    assert env.data["results"], "fell back to default engines instead of failing"
+    assert any("not available" in w for w in env.data["warnings"])
+
+
+def test_web_search_envelope_has_real_elapsed_ms():
+    aio = build_agent_io(ddgs_factory=ddgs_factory(DDGS_ROWS))
+    env = aio.web_search(AgentSearchRequest(query="rust"))
+    assert env.ok
+    assert env.meta.elapsed_ms > 0.0
+
+
+def test_search_error_keeps_trace_id_and_a_valid_code():
+    from websearch import errors
+
+    aio = build_agent_io(enable_ddgs=False)  # no engines configured
+    env = aio.web_search(AgentSearchRequest(query="rust"))
+    assert env.ok is False
+    assert env.error.code in {errors.NO_ENGINES_ENABLED, errors.ALL_ENGINES_FAILED}
+    assert env.meta.trace_id is not None  # upstream correlation id preserved
+
+
+def test_web_search_site_injects_site_operator_into_query():
+    captured: dict = {}
+
+    class _Recording:
+        def text(self, query, **kwargs):
+            captured["query"] = query
+            return []
+
+    aio = build_agent_io(ddgs_factory=lambda: _Recording())
+    aio.web_search(AgentSearchRequest(query="RAG", site="reddit.com", max_results=3))
+    # the engine itself restricts via site:, instead of only post-filtering
+    assert "site:reddit.com" in captured["query"]

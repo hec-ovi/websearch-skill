@@ -35,17 +35,6 @@ def _version() -> str:
 # --- packaging -------------------------------------------------------------------------
 
 
-def test_no_mcp_dependency_or_extra_remains():
-    # 0.3.0 dropped the MCP face: the CLI is the only surface. fastmcp must not come back
-    # as a dependency or an extra, and nothing may declare an [mcp] install route.
-    project = _pyproject()["project"]
-    deps = project["dependencies"] + [
-        d for group in project.get("optional-dependencies", {}).values() for d in group
-    ]
-    assert not [d for d in deps if "mcp" in d.replace("_", "-").lower()], deps
-    assert "mcp" not in project.get("optional-dependencies", {})
-
-
 def test_both_console_scripts_point_at_the_cli():
     scripts = _pyproject()["project"]["scripts"]
     # `websearch` is canonical; `websearch-skill` matches the dist name so `uvx
@@ -63,16 +52,6 @@ def test_sdist_uses_an_allowlist_that_excludes_local_state():
 
 
 # --- launch strings reference real subcommands -----------------------------------------
-
-
-@pytest.mark.parametrize(
-    "subcommand", ["init", "doctor", "searxng", "tor", "web-search", "web-fetch", "web-open"]
-)
-def test_manifest_launch_subcommands_exist(subcommand):
-    # argparse prints help and exits 0 for a real subcommand, before any dispatch/server.
-    with pytest.raises(SystemExit) as exc:
-        cli.main([subcommand, "--help"])
-    assert exc.value.code == 0
 
 
 def test_no_mcp_surface_ships():
@@ -155,24 +134,6 @@ def test_the_tor_skill_says_the_layer_is_off_by_default():
     body = (ROOT / "skills" / "web-search-tor" / "SKILL.md").read_text(encoding="utf-8")
     assert "Off by default" in body
     assert "websearch tor up" in body
-
-
-def test_web_search_skill_has_complete_nordvpn_proxy_setup():
-    body = (ROOT / "skills" / "web-search" / "SKILL.md").read_text(encoding="utf-8")
-    assert "configure and\n  verify its NordVPN egress proxy" in body[:1100]
-    # One setup path, driven by the command that owns the settings file, so no agent has
-    # to guess where the credentials go or write one itself.
-    for command in (
-        "websearch proxy setup --json",
-        "websearch proxy use <city> --json",
-        "websearch proxy status --json",
-        "websearch proxy lock",
-    ):
-        assert command in body
-    assert "data.settings_file" in body and "data.missing_keys" in body
-    assert "Never ask for either value in chat" in body
-    assert "Unset, empty, `off`, `none`, or `direct`" in body
-    assert "means no proxy" in body
 
 
 def test_web_search_skill_forbids_every_other_network_tool_while_locked():

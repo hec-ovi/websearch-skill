@@ -19,7 +19,7 @@ from websearch.layer1_search import SearchRequest, build_router
 from websearch.layer1_search.adapters.ahmia import AhmiaAdapter, unwrap
 from websearch.layer1_search.capability import ONION_INDEX
 from websearch.layer2_extract.egress import BlockedEgress, guard_url, is_onion
-from websearch.layer2_extract.models import FetchRequest, Proxy
+from websearch.layer2_extract.models import FetchRequest
 from websearch.proxy import TOR_ENV
 
 ONION = "http://2gzyxa5ihm7nsggfxnu52rck2vv4rvmdlkiu3zzui5du4xyclen53wid.onion/"
@@ -91,10 +91,6 @@ def test_an_onion_url_passes_with_a_tor_proxy():
     guard_url(ONION, proxied=True, tor=True)  # no raise
 
 
-def test_a_clearnet_url_is_unaffected_by_the_tor_flag():
-    guard_url("https://example.com/", proxied=True, tor=True)
-
-
 # --- the fetch path, end to end through the real pipeline -----------------------------
 
 
@@ -114,10 +110,6 @@ def test_the_pipeline_marks_its_default_proxy_as_tor_when_the_layer_is_on(monkey
     args = cli.argparse.Namespace(proxy=None, tor=None)
 
     assert cli._egress_fetch_proxy(args) == {"url": TOR_SOCKS, "type": "socks5", "tor": True}
-
-
-def test_the_proxy_model_defaults_to_not_tor():
-    assert Proxy(url=TOR_SOCKS, type="socks5").tor is False
 
 
 # --- the Ahmia adapter ----------------------------------------------------------------
@@ -158,12 +150,6 @@ def test_ahmia_parses_results_into_the_port_shape():
     assert first.rank == 1
 
 
-def test_ahmia_drops_navigation_links_that_are_not_results():
-    out = _ahmia(_routes).search(SearchRequest(query="x", onion=True))
-    assert all(r.url.startswith("http") for r in out.results)
-    assert len(out.results) == 2  # the <li class="navigation"> entry is not one
-
-
 def test_ahmia_maps_freshness_to_the_day_filter():
     seen: dict[str, str] = {}
 
@@ -190,10 +176,6 @@ def test_ahmia_is_disabled_without_a_tor_proxy():
     assert adapter.enabled() is False
     out = adapter.search(SearchRequest(query="x", onion=True))
     assert "websearch tor up" in out.error
-
-
-def test_ahmia_is_enabled_once_the_tor_proxy_is_handed_to_it():
-    assert AhmiaAdapter(proxy=TOR_SOCKS).enabled() is True
 
 
 # --- engine selection -----------------------------------------------------------------

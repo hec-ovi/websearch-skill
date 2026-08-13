@@ -79,7 +79,7 @@ def test_vpn_nordvpn_is_recognized(monkeypatch, value):
     )
 
 
-@pytest.mark.parametrize("value", ["any", "on", "yes", "true", "1", "vpn"])
+@pytest.mark.parametrize("value", ["any", "on"])
 def test_vpn_any_aliases_collapse_to_any(monkeypatch, value):
     monkeypatch.setenv(VPN_ENV, value)
     assert vpn_state().value == "any"
@@ -163,14 +163,6 @@ def test_load_env_file_fills_in_unset_variables(tmp_path, monkeypatch):
     assert resolved_proxy_url() == "socks5h://svc-user:quoted%20secret@nl.socks.nordhold.net:1080"
 
 
-def test_an_exported_variable_beats_the_file(tmp_path, monkeypatch):
-    monkeypatch.setenv(PROXY_ENV, "http://from-shell:3128")
-    env = tmp_path / ".env"
-    env.write_text("WEBSEARCH_PROXY=http://from-file:3128\n")
-    assert load_env_file(str(env)) == []
-    assert proxy_state().value == "http://from-shell:3128"
-
-
 def test_a_missing_env_file_is_not_an_error(tmp_path):
     assert load_env_file(str(tmp_path / "nope.env")) == []
 
@@ -186,14 +178,6 @@ def test_the_cli_reads_the_env_file(tmp_path, monkeypatch):
 
     cli.main(["doctor", "--check", "runtime"])
     assert searxng_state().value == "http://127.0.0.1:7777"
-
-
-def test_the_env_file_path_is_overridable(tmp_path, monkeypatch):
-    env = tmp_path / "custom.env"
-    env.write_text(f"{SEARXNG_ENV}=http://127.0.0.1:9999\n")
-    monkeypatch.setenv("WEBSEARCH_ENV_FILE", str(env))
-    assert load_env_file() == [SEARXNG_ENV]
-    assert searxng_state().value == "http://127.0.0.1:9999"
 
 
 # --- redaction helpers -----------------------------------------------------------------

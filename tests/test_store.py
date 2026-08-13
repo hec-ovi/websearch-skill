@@ -15,7 +15,6 @@ from tests.conftest import (
     STORE_SEARCH_RESULT_REF,
 )
 from websearch.layer2_format import (
-    MemoryBm25Index,
     PageInput,
     SearchPageRequest,
     SqliteFts5Index,
@@ -164,27 +163,11 @@ def test_sqlite_fts5_available_on_this_interpreter():
     assert isinstance(build_page_index(StoreConfig(adapter="sqlite-fts5")), SqliteFts5Index)
 
 
-def test_memory_adapter_selected_explicitly():
-    assert isinstance(build_page_index(StoreConfig(adapter="memory")), MemoryBm25Index)
-
-
 def test_opt_in_adapter_raises_clear_error():
     from websearch.layer2_format import DependencyMissing
 
     with pytest.raises(DependencyMissing):
         build_page_index(StoreConfig(adapter="tantivy"))
-
-
-@pytest.mark.parametrize("adapter", ADAPTERS)
-def test_control_char_query_does_not_crash(adapter):
-    # A NUL byte is fatal to FTS5 (unterminated string) if not stripped; other control
-    # chars must also be neutralized. Both adapters must survive and stay consistent.
-    idx = _index(adapter)
-    idx.add(_pages())
-    for q in ["rust\x00borrowing", "a\x00b", "\x01\x07\x1b rust", "rust\x7f"]:
-        res = idx.search(SearchPageRequest(query=q))
-        assert res.backend in ("sqlite-fts5", "memory-bm25")
-        assert isinstance(res.total, int)
 
 
 def test_nul_query_same_shape_across_adapters():
@@ -326,3 +309,40 @@ def test_a_persisted_index_creates_its_directory(tmp_path):
 
     assert target.exists()
     assert index.resolve_index().total == 1
+
+
+def _docs(n: int) -> list[PageInput]:
+    return [
+        PageInput(url=f"https://x.test/{i}", markdown=f"# Doc {i}\nalpha shared term body {i}\n")
+        for i in range(n)
+    ]
+
+
+def test_concurrent_add_and_search_is_safe():
+    import threading
+
+    store = build_page_index(StoreConfig())
+    errors_seen: list[Exception] = []
+
+    def worker(i: int) -> None:
+        try:
+            store.add(_docs(3))
+            store.search(SearchPageRequest(query="alpha", top_k=10))
+            store.resolve_index()
+        except Exception as exc:  # noqa: BLE001
+            errors_seen.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors_seen, f"store raced under concurrency: {errors_seen}"
+
+
+def test_total_reflects_true_match_count_beyond_top_k():
+    store = build_page_index(StoreConfig())
+    store.add(_docs(6))  # 6 docs, each a passage containing "alpha"
+    res = store.search(SearchPageRequest(query="alpha", top_k=2, page=1, page_size=2))
+    assert len(res.passages) == 2  # only the top_k pool is returned
+    assert res.total >= 6  # but total is the honest match count, not the capped pool

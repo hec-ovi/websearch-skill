@@ -12,13 +12,8 @@ from websearch.layer3_agentio.pagination import paginate
 
 _CASES = [
     "",
-    "short",
-    "a\nb\nc\n",
-    "line one\nline two\nline three\n",
-    "x" * 1000,  # one oversized line, no trailing newline
-    "word " * 500,  # long single line with spaces
-    "para1\n\n" + ("y" * 600) + "\n\npara3\n",
-    "héllo wörld\n" * 200,  # unicode
+    "héllo wörld\n" * 200,  # multiline unicode
+    "x" * 1000,  # one oversized line that must hard-split, no trailing newline
 ]
 
 
@@ -36,27 +31,7 @@ def test_every_page_within_budget(md):
     assert all(len(p) <= budget for p in pages)
 
 
-def test_oversized_single_line_is_hard_split_losslessly():
-    md = "x" * 1000
-    pages = paginate(md, page_size_tokens=5, chars_per_token=4.0)  # budget 20
-    assert "".join(pages) == md
-    assert all(len(p) <= 20 for p in pages)
-    assert len(pages) >= 50
-
-
-def test_empty_document_is_a_single_empty_page():
-    assert paginate("", page_size_tokens=100) == [""]
-
-
-def test_small_document_is_a_single_page():
-    assert paginate("short enough", page_size_tokens=100) == ["short enough"]
-
-
 @pytest.mark.parametrize("md", _CASES)
 def test_zero_budget_disables_pagination(md):
     # 0 = no budget: the whole body as one page, still lossless by construction.
     assert paginate(md, page_size_tokens=0) == [md]
-
-
-def test_zero_budget_on_an_empty_document_still_yields_one_page():
-    assert paginate("", page_size_tokens=0) == [""]

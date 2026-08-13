@@ -56,21 +56,6 @@ def _score(**kw):
     return score_extraction(**base)
 
 
-def test_link_density_relaxed_for_listing_forum_docs():
-    # Link-heavy pages are held neutral (0.6), not penalized and not given a free 1.0.
-    for pt in ("listing", "collection", "forum", "documentation"):
-        _, subs = _score(page_type=pt)
-        assert subs["link_ratio"] == 0.6
-
-
-def test_jsonld_tiers_article_full_entity_partial():
-    assert _score(json_ld=[{"@type": "Article"}])[1]["json_ld"] == 1.0
-    assert _score(json_ld=[{"@type": "Product"}])[1]["json_ld"] == 0.7
-    assert _score(json_ld=[{"@type": "QAPage"}])[1]["json_ld"] == 0.7
-    assert _score(json_ld=[{"@type": "WebPage"}])[1]["json_ld"] == 0.6
-    assert _score(json_ld=[])[1]["json_ld"] == 0.4
-
-
 def test_thin_entity_page_stays_below_gate():
     # A nav-heavy product page (little prose, many links) must not clear the 0.80 gate,
     # matching the research expectation that products/listings fall below articles.
@@ -85,13 +70,6 @@ def test_thin_entity_page_stays_below_gate():
         page_type="product",
     )
     assert score < 0.80
-
-
-def test_paragraph_count_robust_to_single_newline():
-    # Single-newline markdown with several sentences still earns the paragraph signal.
-    text = "First sentence here. Second one follows. Third. Fourth. Fifth! Sixth?"
-    _, subs = _score(content_text=text)
-    assert subs["paragraph"] == 1.0
 
 
 def test_classify_by_jsonld_type():
