@@ -26,6 +26,20 @@ Additional keyless commands:
 - **`github`** searches GitHub repositories and returns typed fields you can sort on (stars, language, topics).
 - **`tor`** starts a local Tor and routes everything through it, which is what makes `.onion` reachable and `--onion` search the Tor indexes. Off by default; see Tor below.
 
+### One runtime, one call
+
+The whole toolkit is one Python package with one CLI, `websearch`. There is no Node service, no npm runtime, no daemon of its own, and nothing to compose; the only requirement is [uv](https://docs.astral.sh/uv/), which fetches a compatible Python on its own. The `npx skills add` line under Install is a one-time copier for agent skill folders, not a runtime.
+
+An agent brings everything online with one call:
+
+```bash
+websearch init
+```
+
+`init` reads the settings files, starts the local SearXNG when it is not already running, starts Tor when that layer is on, runs the self-test, and reports capabilities and next actions. There is nothing to probe first and no order to follow: the same call is correct on a fresh machine and on one where everything is already up.
+
+SearXNG is an optional extra engine catalog, not a separate product to operate: `init` (or `websearch searxng up`) clones it, installs it into its own virtualenv, and runs it as a detached local Python process. Docker is never required; [`docker/searxng/`](docker/searxng/) exists only as an alternative for hosts that prefer a container.
+
 ### Engines, out of the box, no keys
 
 The default engine is the keyless [`ddgs`](https://github.com/deedy5/ddgs) metasearch library, which spans **Google, Brave, DuckDuckGo, Yandex, Yahoo, Startpage, Mojeek, Wikipedia, and Grokipedia**. Each query uses the providers that respond. The agent-facing `web-search` command requires no account, service, or engine flags. The lower-level `search` command can restrict providers with `--ddgs-backends google,brave,mojeek`. Provider availability varies by network; `websearch doctor` reports it per provider.
@@ -362,9 +376,15 @@ The opt-in `websearch doctor --baseline` check makes one direct request to compa
 
 A self-hosted SearXNG request has two hops, and they are proxied differently on purpose. The client connects to local SearXNG at `127.0.0.1` directly, because that hop never leaves the machine and a remote exit asked to reach its own localhost fails every time. SearXNG then queries Google, Brave, Mojeek and the rest itself, and that hop is the one that leaves: both stacks write your proxy into its `outgoing.proxies` (with `extra_proxy_timeout`, since a SOCKS exit costs a round trip), so those searches come out where the rest of the tool does. `websearch searxng status` prints that address as `egress`, `websearch proxy use <city>` restarts a running instance onto the new exit, and `searxng.sh egress` prints both IPs for the Docker stack. Set `SEARXNG_OUTGOING_PROXY=off` for direct instance egress. A remote SearXNG address is reached through the client proxy like any other host.
 
+### What a network observer sees
+
+Queries and page content are inside TLS end to end: the HTTPS session runs from this machine to the website through the proxy, so neither the proxy nor anyone watching the line can read a search query or the pages that come back. What SOCKS5 does not hide from someone on your line is metadata: that you talk to a NordVPN server, the destination hostnames (in the SOCKS handshake and the TLS SNI), and the SOCKS username and password, which that protocol sends in cleartext. Websites see only the exit IP.
+
+Hiding that metadata too takes an encrypted tunnel to the provider, which is the VPN app's job (WireGuard/NordLynx). Run it alongside and declare it with `WEBSEARCH_VPN=nordvpn`, and the doctor verifies the tunnel instead of assuming it; the proxy still pins which exit the traffic uses. A network-namespace WireGuard mode (gluetun / wg-netns) that needs no app is on the roadmap.
+
 ### Tor
 
-Off until you start it. `websearch tor up` is the whole setup:
+Off until you start it. Normal mode and Tor mode are the same commands with one switch: `websearch tor up` turns the layer on and every later command routes through Tor, `--tor on` does it for a single command, `--onion` on a search selects the onion indexes, and a `.onion` URL on `web-fetch` works while the layer is on. The `web-search-tor` skill packages exactly this for agents. `websearch tor up` is the whole setup:
 
 ```bash
 websearch tor up                              # start Tor, verify the exit, turn the layer on
