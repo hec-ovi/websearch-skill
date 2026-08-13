@@ -316,7 +316,7 @@ One container, nothing installed on the host, and it can route SearXNG's own eng
 
 The container mounts its configuration read-only, stores runtime state in a Docker volume, drops all capabilities, and binds to loopback by default. No secret is committed. Torrent trackers and shadow libraries are excluded from the default engine set but remain queryable by name. See [`docker/searxng/`](docker/searxng/) before exposing it beyond localhost.
 
-Both bind to loopback and turn the JSON API on. The difference is the engine list: the no-Docker path runs upstream defaults (83 engines enabled of 278 here), while the Docker stack's probe enables everything that answers from your own connection (213 of 279 on the same machine, same day). The Docker stack also routes SearXNG's own engine requests through your egress proxy. Use it when you have Docker; use `websearch searxng up` when you do not.
+Both bind to loopback, turn the JSON API on, and route the instance's own engine requests through your egress proxy. The difference is the engine list: the no-Docker path runs upstream defaults (83 engines enabled of 278 here), while the Docker stack's probe enables everything that answers from your own connection (213 of 279 on the same machine, same day). Use it when you have Docker; use `websearch searxng up` when you do not.
 
 ### Egress proxy
 

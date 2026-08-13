@@ -194,11 +194,21 @@ start Tor when that layer is on, start the local SearXNG, run the doctor sweep, 
 flag plus a capability map, so an agent asks once instead of probing the installation by hand.
 
 **Optional layers.** Four switches, all off on a fresh install: `vpn` (declarative, so the doctor
-verifies a tunnel instead of assuming it), `proxy` (one egress URL for every path), `tor` (a local Tor
-this tool can install and start, which is what makes `.onion` reachable and the onion indexes
-selectable), and `searxng` (a self-hosted instance in the Layer-1 fanout). `tor` and `proxy` compose
-rather than compete: the proxy is written into Tor's torrc as its upstream, so turning on the layer
-that adds a hop never removes one. Onion and clearnet engines never run in the same fanout, because
+verifies a tunnel instead of assuming it), `proxy` (one egress URL for every path that leaves this
+machine), `tor` (a local Tor this tool can install and start, which is what makes `.onion` reachable
+and the onion indexes selectable), and `searxng` (a self-hosted instance in the Layer-1 fanout).
+`tor` and `proxy` compose rather than compete: the proxy is written into Tor's torrc as its upstream,
+so turning on the layer that adds a hop never removes one.
+
+`proxy` spans two processes, which is the part worth stating outright: this one, where every client
+takes the proxy as an argument, and the local SearXNG, where it is a line in the settings file that
+instance reads at startup. Both get it, because the instance fetches every result it returns, and a
+proxied CLI beside an unproxied instance means the searches still leave from the machine's own
+address. `websearch proxy lock` makes that enforceable rather than aspirational: with the lock on,
+any path that would leave without the proxy is refused instead of falling back to a direct
+connection, since the fallback is the request that gives the address away and it happens when the
+proxy is unavailable rather than when someone is watching. Loopback and LAN targets are exempt
+throughout, because they never leave the machine. Onion and clearnet engines never run in the same fanout, because
 they index disjoint corpora and fusing them would rank two half-empty lists against each other.
 
 ## Extra tools: arxiv and github
