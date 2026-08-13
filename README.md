@@ -378,9 +378,11 @@ A self-hosted SearXNG request has two hops, and they are proxied differently on 
 
 ### What a network observer sees
 
-Queries and page content are inside TLS end to end: the HTTPS session runs from this machine to the website through the proxy, so neither the proxy nor anyone watching the line can read a search query or the pages that come back. What SOCKS5 does not hide from someone on your line is metadata: that you talk to a NordVPN server, the destination hostnames (in the SOCKS handshake and the TLS SNI), and the SOCKS username and password, which that protocol sends in cleartext. Websites see only the exit IP.
+Skip this section unless you work in security: it covers an edge case that only matters when someone is recording traffic on your own network path, which is not the situation of a normal machine on a normal connection.
 
-Hiding that metadata too takes an encrypted tunnel to the provider, which is the VPN app's job (WireGuard/NordLynx). Run it alongside and declare it with `WEBSEARCH_VPN=nordvpn`, and the doctor verifies the tunnel instead of assuming it; the proxy still pins which exit the traffic uses. A network-namespace WireGuard mode (gluetun / wg-netns) that needs no app is on the roadmap.
+Queries and page content are inside TLS end to end: the HTTPS session runs from this machine to the website through the proxy, so neither the proxy nor anyone watching the line can read a search query or the pages that come back. What SOCKS5 does not hide from an observer on your line is metadata: that you talk to a NordVPN server, the destination hostnames (in the SOCKS handshake and the TLS SNI), and the SOCKS username and password, which that protocol sends in cleartext. Those are the service credentials, scoped to the proxy service: they cannot log into the Nord account, and the dashboard can regenerate them. Websites see only the exit IP. NordVPN's TLS proxies (port 89) do not accept the service credentials, so a proxy dialed over TLS is not available at protocol level, and this residue is the price of the zero-install setup.
+
+Closing it entirely is an OS-level job: run the provider's VPN app (WireGuard) with its kill switch on, set `WEBSEARCH_PROXY=off`, and declare `WEBSEARCH_VPN=nordvpn` so the doctor verifies the tunnel instead of assuming it. Every byte the machine sends then leaves encrypted, this tool's included, and there is no proxy handshake on the wire at all. The kill switch is what turns "encrypted while the tunnel is up" into "never direct": without it, a dropped tunnel fails open. Running the app and keeping the proxy on also works (the handshake then happens inside the tunnel, and the proxy pins the exit city), but off is the simple answer.
 
 ### Tor
 
@@ -510,7 +512,7 @@ The egress proxy (the NordVPN credentials, `WEBSEARCH_PROXY`, or `--proxy`) cove
 
 Planned, not built yet:
 
-- **Paid egress adapter:** a residential-proxy adapter for the protected long tail, plus optional gluetun / wg-netns network-namespace isolation.
+- **Paid egress adapter:** a residential-proxy adapter for the protected long tail.
 - **Local rerank:** a cross-encoder pass to turn multi-engine recall into precision.
 - **More engines:** keyed adapters (Brave, Exa, Tavily) behind the existing `EngineAdapter` port; an optional neural index.
 
