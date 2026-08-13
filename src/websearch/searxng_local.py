@@ -53,8 +53,9 @@ OUTGOING_PROXY_VAR = "SEARXNG_OUTGOING_PROXY"
 DEFAULT_PORT = 8888
 HEALTH_TIMEOUT_S = 90
 # Seconds added to every engine timeout while the instance goes through a proxy. A SOCKS
-# exit costs a round trip that the engines' own timeouts were not sized for.
-EXTRA_PROXY_TIMEOUT_S = 10.0
+# exit costs a round trip that the engines' own timeouts were not sized for. An integer
+# because SearXNG's settings schema types it as one and refuses to start on a float.
+EXTRA_PROXY_TIMEOUT_S = 10
 
 # The line that says this file is still the tool's to regenerate. Delete it (or edit the
 # file however you like and remove it) and `up` will never touch the file again.
