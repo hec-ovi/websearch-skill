@@ -195,8 +195,10 @@ flag plus a capability map, so an agent asks once instead of probing the install
 
 **Optional layers.** Four switches, all off on a fresh install: `vpn` (declarative, so the doctor
 verifies a tunnel instead of assuming it), `proxy` (one egress URL for every path that leaves this
-machine), `tor` (a local Tor this tool can install and start, which is what makes `.onion` reachable
-and the onion indexes selectable), and `searxng` (a self-hosted instance in the Layer-1 fanout).
+machine; the two NordVPN service credentials alone turn it on, with `WEBSEARCH_PROXY` as the
+explicit choice of another proxy or of `off`), `tor` (a local Tor this tool can install and start,
+which is what makes `.onion` reachable and the onion indexes selectable), and `searxng` (a
+self-hosted instance in the Layer-1 fanout).
 `tor` and `proxy` compose rather than compete: the proxy is written into Tor's torrc as its upstream,
 so turning on the layer that adds a hop never removes one.
 
@@ -204,8 +206,9 @@ so turning on the layer that adds a hop never removes one.
 takes the proxy as an argument, and the local SearXNG, where it is a line in the settings file that
 instance reads at startup. Both get it, because the instance fetches every result it returns, and a
 proxied CLI beside an unproxied instance means the searches still leave from the machine's own
-address. `websearch proxy lock` makes that enforceable rather than aspirational: with the lock on,
-any path that would leave without the proxy is refused instead of falling back to a direct
+address. The egress lock makes that enforceable rather than aspirational: a configured proxy locks
+on its own (`WEBSEARCH_EGRESS_LOCK` is the explicit override in either direction), and with the
+lock on, any path that would leave without the proxy is refused instead of falling back to a direct
 connection, since the fallback is the request that gives the address away and it happens when the
 proxy is unavailable rather than when someone is watching. Loopback and LAN targets are exempt
 throughout, because they never leave the machine. Onion and clearnet engines never run in the same fanout, because

@@ -80,9 +80,11 @@ websearch proxy setup | status | locations | use <city> | off  [--no-verify] [--
    NordVPN **service** credentials (Nord Account > NordVPN > Manual setup > Service
    credentials), not the account sign-in. Never ask for either value in chat, never print
    the settings file, and never write a credential yourself.
-3. `websearch proxy use <city> --json` selects where the traffic comes out and turns the
-   proxy on. `websearch proxy locations --json` lists what can be chosen: NordVPN runs
-   SOCKS5 exits in the Netherlands, Sweden, and nine US cities, and nowhere else.
+3. The two credentials are the whole setup: with both present the proxy is on for every
+   network path and egress is locked to it. `websearch proxy use <city> --json` picks
+   where the traffic comes out (default: the Amsterdam pool); `websearch proxy locations
+   --json` lists the choices: NordVPN runs SOCKS5 exits in the Netherlands, Sweden, and
+   nine US cities, and nowhere else.
 4. `websearch proxy status --json` is the verification. It is set up when
    `data.missing_keys` is empty, `data.enabled` is true, and `data.exit.protected` is
    true; `data.exit.city` is where the traffic actually comes out. Exit code 1 means not
@@ -96,25 +98,34 @@ same credentials, and it is refused rather than ignored when it cannot be honore
 `WEBSEARCH_PROXY` is the tool's egress choice, and `websearch proxy use`/`off` is how to
 set it:
 
+- Unset, the NordVPN credentials decide: with `NORDVPN_USER` and `NORDVPN_PASS` both
+  present the proxy is on, as if `nordvpn` had been written.
 - `nordvpn` expands, on every command, into an authenticated SOCKS5 URL from the two
   credentials and `NORDVPN_HOST`.
 - A complete `http://`, `https://`, `socks5://`, or `socks5h://` URL selects another
   proxy directly.
-- Unset, empty, `off`, `none`, or `direct` means no proxy.
+- Empty, `off`, `none`, or `direct` means no proxy, and is the only way to go direct
+  while the credentials are present.
 
 ### The lock
+
+A configured proxy locks egress on its own: no path leaves this machine without the
+proxy. Anything that would go direct is refused with `error.code: "egress_locked"`
+instead: the fetch tiers, the search engines, the local SearXNG's own engine requests,
+the SearXNG and Tor installs, and `doctor --baseline`. Loopback and LAN targets are not
+affected, since they never leave the machine. A search that finds the local SearXNG
+running off the proxy restarts it onto the current exit before querying it. While the
+proxy is on, the CRITICAL rule at the top of this document applies: no other tool of
+yours touches the network.
 
 ```
 websearch proxy lock | unlock
 ```
 
-`lock` sets `WEBSEARCH_EGRESS_LOCK=on`, and then no path leaves this machine without the
-proxy. Anything that would go direct is refused with `error.code: "egress_locked"`
-instead: the fetch tiers, the search engines, the local SearXNG's own engine requests,
-the SearXNG and Tor installs, and `doctor --baseline`. Loopback and LAN targets are not
-affected, since they never leave the machine. While the lock is on, `websearch proxy off`
-is refused until `websearch proxy unlock` runs, and the CRITICAL rule at the top of this
-document applies: no other tool of yours touches the network.
+`WEBSEARCH_EGRESS_LOCK` is the explicit override in either direction: `lock` writes
+`on` (locked even with the proxy off, so nothing runs direct at all), `unlock` writes
+`off` (a missing proxy falls back to a direct connection). While the explicit lock is
+on, `websearch proxy off` is refused until `websearch proxy unlock` runs.
 
 What leaves through the proxy, in both processes:
 
