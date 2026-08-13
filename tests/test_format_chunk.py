@@ -68,11 +68,10 @@ def test_fixed_overlap_at_or_past_max_chars_is_clamped():
         assert text[s:e] == t  # offsets still slice back verbatim
 
 
-def test_token_estimate_default_and_pluggable():
+def test_token_estimate_default_and_ratio():
     assert estimate_tokens("") == 0
     assert estimate_tokens("a" * 8) == 2  # ceil(8/4)
     assert estimate_tokens("a" * 8, chars_per_token=2) == 4
-    assert estimate_tokens("whatever", estimator=lambda t: 99) == 99
 
 
 def test_zero_max_chars_terminates():

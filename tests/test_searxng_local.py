@@ -28,7 +28,7 @@ from websearch import searxng_local as sx
 from websearch.cli import main
 from websearch.optional_layers import ENV_FILE_VAR, SEARXNG_ENV
 
-ENV_VARS = (sx.HOME_VAR, sx.PORT_VAR, sx.REF_VAR, ENV_FILE_VAR, SEARXNG_ENV)
+ENV_VARS = (sx.HOME_VAR, sx.PORT_VAR, ENV_FILE_VAR, SEARXNG_ENV)
 
 ENVELOPE_REF = "https://github.com/hec-ovi/websearch-skill/contracts/envelope.schema.json"
 SEARXNG_PAYLOAD_REF = (

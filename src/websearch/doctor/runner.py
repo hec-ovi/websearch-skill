@@ -56,7 +56,7 @@ class Doctor:
         *,
         layers: dict[str, LayerState],
         proxy_url: str | None,
-        configured_proxy: str | None = None,
+        configured_proxy: str | None,
         net: probes.Net | None = None,
         ddgs_factory: Callable[[str], object] | None = None,
         pipeline_factory: Callable[..., object] | None = None,
@@ -67,9 +67,9 @@ class Doctor:
         # Two addresses, on purpose: proxy_url is what a request connects through (Tor's
         # SOCKS port when that layer is on), configured_proxy is the WEBSEARCH_PROXY hop
         # itself, which the proxy check has to measure directly even when Tor is in front
-        # of it. Defaulting the second to the first keeps every existing caller correct.
+        # of it.
         self._proxy_url = proxy_url
-        self._configured_proxy = proxy_url if configured_proxy is None else configured_proxy
+        self._configured_proxy = configured_proxy
         self._net = net or probes.HttpxNet()
         # The same seam the ddgs adapter exposes, plus the backend name: ddgs talks to the
         # network through a Rust client, so a fake DDGS is the only way to exercise the

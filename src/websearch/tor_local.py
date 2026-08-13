@@ -598,7 +598,7 @@ def _layer_is_on() -> bool:
         return False
 
 
-def _payload(action: str, paths: Paths, state: dict[str, Any], **extra: Any) -> TorPayload:
+def _payload(action: str, state: dict[str, Any], **extra: Any) -> TorPayload:
     return TorPayload(
         action=action,  # type: ignore[arg-type]
         enabled=_layer_is_on(),
@@ -656,7 +656,7 @@ def control(request: TorRequest) -> Envelope:
     if request.action == "status":
         state = status(paths, socks_url=socks_url, check=request.verify)
         return _ok(
-            _payload("status", paths, state, upstream=redact_url(upstream)),
+            _payload("status", state, upstream=redact_url(upstream)),
             started,
         )
 
@@ -673,7 +673,6 @@ def control(request: TorRequest) -> Envelope:
         return _ok(
             _payload(
                 "down",
-                paths,
                 state,
                 upstream=redact_url(upstream),
                 wired=str(wired) if wired else None,
@@ -728,7 +727,6 @@ def control(request: TorRequest) -> Envelope:
     return _ok(
         _payload(
             "up",
-            paths,
             state,
             upstream=redact_url(upstream),
             wired=str(wired) if wired else None,

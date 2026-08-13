@@ -46,8 +46,6 @@ PROXY_ENV = "WEBSEARCH_PROXY"
 SEARXNG_ENV = "WEBSEARCH_SEARXNG_URL"
 TOR_ENV = "WEBSEARCH_TOR"
 
-LAYER_NAMES = ("vpn", "proxy", "tor", "searxng")
-
 
 # WEBSEARCH_VPN values. `nordvpn` is verifiable (NordVPN publishes a keyless endpoint that
 # reports whether the caller is behind their network); `any` only asserts that egress is

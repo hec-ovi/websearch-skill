@@ -32,9 +32,6 @@ from ..port import EngineAdapter, EngineOutput, RawResult
 
 AHMIA_URL_VAR = "WEBSEARCH_AHMIA_URL"
 DEFAULT_BASE_URL = "https://ahmia.fi"
-# Ahmia's own onion service, for a run that should not touch the clearnet name at all.
-# Slower and less reliable than the clearnet host reached over Tor, so not the default.
-ONION_BASE_URL = "http://juhanurmihxlp77nkq76byazcldy2hlmovfu2epvl5ankdibsot4csyd.onion"
 
 # Ahmia's date filter, in days. It offers a week and a month; a day and a year are mapped
 # to the nearest thing it can actually do rather than silently ignored.

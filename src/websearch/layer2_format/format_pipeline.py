@@ -56,12 +56,7 @@ class FormatPipeline:
     def __init__(self, renderer: FormatRenderer | None = None):
         self._renderer = renderer or MarkdownRenderer()
 
-    def run(
-        self,
-        request: FormatRequest,
-        *,
-        trace_id: str | None = None,
-    ) -> Envelope:
+    def run(self, request: FormatRequest) -> Envelope:
         """Format ``request`` into an Envelope (meta.layer "format").
 
         ``envelope.data`` is a JSON-serialized ``FormatPayload``: ``data["markdown"]`` is
@@ -236,6 +231,5 @@ class FormatPipeline:
             layer="format",
             backend=self._renderer.name,
             elapsed_ms=(time.perf_counter() - t0) * 1000,
-            trace_id=trace_id,
             request_id=request_id,
         )

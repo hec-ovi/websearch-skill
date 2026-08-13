@@ -174,6 +174,11 @@ class FetchExtractPipeline:
             warnings.append(
                 "wait_for is reserved (accepted but not implemented yet); it was ignored."
             )
+        if extract_overrides and extract_overrides.get("neural_fallback") is False:
+            warnings.append(
+                "neural_fallback is reserved (no neural engine ships in the base install); "
+                "it was ignored."
+            )
         politeness = fetch_request.politeness
         if politeness.per_host_delay_ms or politeness.respect_robots:
             warnings.append(

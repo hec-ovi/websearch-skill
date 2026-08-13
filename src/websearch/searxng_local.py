@@ -45,7 +45,6 @@ UPSTREAM = "https://github.com/searxng/searxng"
 
 HOME_VAR = "WEBSEARCH_SEARXNG_HOME"
 PORT_VAR = "WEBSEARCH_SEARXNG_PORT"
-REF_VAR = "WEBSEARCH_SEARXNG_REF"
 # Overrides what this instance's own engine requests leave through: a proxy URL, or an
 # off word for direct egress. Unset means the tool's egress, which is the point of it.
 OUTGOING_PROXY_VAR = "SEARXNG_OUTGOING_PROXY"

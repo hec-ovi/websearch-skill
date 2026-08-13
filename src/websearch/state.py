@@ -18,15 +18,15 @@ STATE_DIR_VAR = "WEBSEARCH_STATE_DIR"
 PERSIST_PATH_VAR = "WEBSEARCH_PERSIST_PATH"
 
 PAGES_FILE = "pages.json"
-# Onion page bodies are kept in their own index, never mixed into the clearnet one. Two
-# reasons, both about the caller rather than the storage: the likeliest place to meet a
-# payload aimed at an agent is a service accountable to nobody, and a separate file is
-# one you can delete on its own without losing everything else you have read.
-ONION_PAGES_FILE = "pages-onion.json"
 
 
 def onion_variant(path: str | None) -> str | None:
     """The onion index beside a given page index, or None when there is no file at all.
+
+    Onion page bodies are kept in their own index, never mixed into the clearnet one:
+    the likeliest place to meet a payload aimed at an agent is a service accountable to
+    nobody, and a separate file is one you can delete on its own without losing
+    everything else you have read.
 
     ``--persist-path off`` means off for both: an in-memory run leaves nothing behind
     either way, and inventing a file here would be the opposite of what was asked.

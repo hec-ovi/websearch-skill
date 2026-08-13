@@ -60,12 +60,11 @@ def build_fetch_router(
     *,
     enable_curl_cffi: bool = True,
     curl_cffi_getter: Callable[..., Any] | None = None,
-    impersonate: str = "chrome",
     extra_fetchers: list[FetchAdapter] | None = None,
 ) -> FetchRouter:
     fetchers: list[FetchAdapter] = [HttpxFetcher()]
     if enable_curl_cffi:
-        fetchers.append(CurlCffiFetcher(getter=curl_cffi_getter, impersonate=impersonate))
+        fetchers.append(CurlCffiFetcher(getter=curl_cffi_getter))
     if extra_fetchers:
         fetchers.extend(extra_fetchers)
     return FetchRouter(fetchers)
@@ -75,7 +74,6 @@ def build_pipeline(
     *,
     enable_curl_cffi: bool = True,
     curl_cffi_getter: Callable[..., Any] | None = None,
-    impersonate: str = "chrome",
     extractor: ExtractAdapter | None = None,
     extra_fetchers: list[FetchAdapter] | None = None,
     proxy: str | None = None,
@@ -85,7 +83,6 @@ def build_pipeline(
     router = build_fetch_router(
         enable_curl_cffi=enable_curl_cffi,
         curl_cffi_getter=curl_cffi_getter,
-        impersonate=impersonate,
         extra_fetchers=extra_fetchers,
     )
     default_proxy = Proxy(**as_fetch_proxy(proxy)) if proxy else None

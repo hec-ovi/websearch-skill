@@ -244,9 +244,9 @@ class AgentIO:
     # --- web_fetch -----------------------------------------------------------------
 
     def web_fetch(self, req: AgentFetchRequest) -> Envelope:
-        t0 = time.perf_counter()
-        page, req_warnings, err = self._fetch_one(
-            req.url,
+        """The single-URL face of ``web_fetch_many``, for library callers."""
+        return self.web_fetch_many(
+            [req.url],
             page=req.page,
             page_size_tokens=req.page_size_tokens,
             tier=req.tier,
@@ -254,26 +254,6 @@ class AgentIO:
             allow_private_hosts=req.allow_private_hosts,
             datamark=req.datamark,
             chars_per_token=req.chars_per_token,
-        )
-        if page is None:
-            # Propagate the underlying layer's code and retriability: an SSRF refusal or a
-            # bad scheme is permanent and must not be advertised as a retriable fetch_failed.
-            return error_envelope(
-                AGENTIO_CONTRACT_VERSION,
-                code=err.code if err else errors.FETCH_FAILED,
-                message=req_warnings[0] if req_warnings else f"{req.url}: fetch failed.",
-                retriable=err.retriable if err else True,
-                layer="agentio",
-                backend="fetch",
-                elapsed_ms=(time.perf_counter() - t0) * 1000,
-            )
-        payload = AgentFetchPayload(pages=[page], warnings=req_warnings)
-        return ok_envelope(
-            AGENTIO_CONTRACT_VERSION,
-            payload.model_dump(mode="json"),
-            layer="agentio",
-            backend="fetch",
-            elapsed_ms=(time.perf_counter() - t0) * 1000,
         )
 
     def web_fetch_many(

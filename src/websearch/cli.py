@@ -302,12 +302,6 @@ def _add_fetch_command(sub: Any) -> None:
     fp.add_argument("--comments", action="store_true", help="Keep comment sections.")
     fp.add_argument("--query", help="Relevance hint (best-effort; engine-dependent).")
     fp.add_argument(
-        "--no-neural-fallback",
-        dest="neural_fallback",
-        action="store_false",
-        help="Do not route low-quality pages to a neural/structured fallback.",
-    )
-    fp.add_argument(
         "--quiet",
         action="store_true",
         help="Print only the extracted body (no header/warnings), for piping.",
@@ -363,7 +357,6 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
         "include_images": args.images,
         "include_comments": args.comments,
         "query": args.query,
-        "neural_fallback": args.neural_fallback,
     }
     envelope = build_pipeline().run(request, extract_overrides=overrides)
     payload = envelope.model_dump(mode="json")

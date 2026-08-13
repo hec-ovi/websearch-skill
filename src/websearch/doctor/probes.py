@@ -681,14 +681,12 @@ def probe_github(tool, query: str) -> Outcome:
     return Outcome(OK if repos else WARN, f"{len(repos)} repos", {"repos": len(repos)})
 
 
-def probe_fetch(
-    pipeline, url: str, *, timeout_ms: int, tier: str = "http", what: str = "http"
-) -> Outcome:
+def probe_fetch(pipeline, url: str, *, timeout_ms: int, what: str = "http") -> Outcome:
     """One fetch+extract round trip through the real Layer-2A pipeline."""
     from ..layer2_extract import FetchRequest
 
     try:
-        env = pipeline.run(FetchRequest(url=url, tier_hint=tier, timeout_ms=timeout_ms))
+        env = pipeline.run(FetchRequest(url=url, tier_hint="http", timeout_ms=timeout_ms))
     except Exception as exc:
         return Outcome(FAIL, _err(exc), {"url": url})
     if not env.ok:
@@ -726,7 +724,7 @@ def probe_fetch(
     )
 
 
-def probe_impersonation(getter=None, *, impersonate: str = "chrome") -> Outcome:
+def probe_impersonation() -> Outcome:
     """Is the browser-impersonation tier (curl_cffi) present and usable?
 
     Availability only. Whether it defeats a given site's anti-bot is a property of that
@@ -734,16 +732,11 @@ def probe_impersonation(getter=None, *, impersonate: str = "chrome") -> Outcome:
     """
     from ..layer2_extract.fetchers.curl_cffi_fetcher import CurlCffiFetcher
 
-    fetcher = CurlCffiFetcher(getter=getter, impersonate=impersonate)
+    fetcher = CurlCffiFetcher()
     if not fetcher.available():
         return Outcome(
             WARN,
             "curl_cffi is not importable, so a blocked page cannot escalate a tier",
-            {"impersonate": impersonate},
             hint="curl_cffi ships in the base install; reinstall with uv sync.",
         )
-    return Outcome(
-        OK,
-        f"curl_cffi available ({impersonate} impersonation)",
-        {"impersonate": impersonate},
-    )
+    return Outcome(OK, "curl_cffi available (browser impersonation)")

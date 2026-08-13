@@ -28,7 +28,6 @@ from .router import SearchRouter
 def build_router(
     *,
     searxng_url: str | None = None,
-    searxng_engines: list[str] | None = None,
     enable_ddgs: bool = True,
     ddgs_factory: Callable[[], Any] | None = None,
     ddgs_backend: str = "auto",
@@ -66,7 +65,7 @@ def build_router(
             adapters.extend(extra_adapters)
         return SearchRouter(adapters)
     if searxng_url:
-        adapters.append(SearxngAdapter(searxng_url, engines=searxng_engines, proxy=proxy))
+        adapters.append(SearxngAdapter(searxng_url, proxy=proxy))
     if enable_ddgs:
         adapters.append(DdgsAdapter(ddgs_factory=ddgs_factory, backend=ddgs_backend, proxy=proxy))
     if extra_adapters:
