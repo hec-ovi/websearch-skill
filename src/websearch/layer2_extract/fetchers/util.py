@@ -4,6 +4,18 @@ from __future__ import annotations
 
 from ..models import Cookie
 
+MAX_REDIRECTS = 10
+REDIRECT_STATUS = (301, 302, 303, 307, 308)
+
+
+def header(headers: dict[str, str], name: str) -> str | None:
+    """Case-insensitive header read over a plain dict of response headers."""
+    name = name.lower()
+    for k, v in headers.items():
+        if k.lower() == name:
+            return v
+    return None
+
 # A current, realistic desktop Chrome UA used when the caller does not supply one.
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "

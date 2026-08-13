@@ -18,18 +18,15 @@ from ..blocks import detect_block
 from ..egress import BlockedEgress, guard_url
 from ..models import FetchRequest, FetchResult
 from ..ports import FetchAdapter
-from .util import DEFAULT_USER_AGENT, hop_cookies, hop_headers, read_body
-
-_MAX_REDIRECTS = 10
-_REDIRECT_STATUS = (301, 302, 303, 307, 308)
-
-
-def _header(headers: dict[str, str], name: str) -> str | None:
-    name = name.lower()
-    for k, v in headers.items():
-        if k.lower() == name:
-            return v
-    return None
+from .util import (
+    DEFAULT_USER_AGENT,
+    MAX_REDIRECTS,
+    REDIRECT_STATUS,
+    header,
+    hop_cookies,
+    hop_headers,
+    read_body,
+)
 
 
 class HttpxFetcher(FetchAdapter):
@@ -76,7 +73,7 @@ class HttpxFetcher(FetchAdapter):
                 timeout=timeout,
                 proxy=proxy,
             ) as client:
-                for _hop in range(_MAX_REDIRECTS + 1):
+                for _hop in range(MAX_REDIRECTS + 1):
                     try:
                         guard_url(
                             current,
@@ -105,14 +102,14 @@ class HttpxFetcher(FetchAdapter):
                         client, current, request.max_bytes, send_headers
                     )
 
-                    location = _header(resp_headers, "location")
-                    if status in _REDIRECT_STATUS and location:
+                    location = header(resp_headers, "location")
+                    if status in REDIRECT_STATUS and location:
                         redirects.append(current)
                         current = urljoin(current, location)
                         continue
 
                     body = read_body(
-                        content, _header(resp_headers, "content-type"), request.max_bytes
+                        content, header(resp_headers, "content-type"), request.max_bytes
                     )
                     blocked, reason = detect_block(status, body, resp_headers)
                     return FetchResult(
@@ -122,7 +119,7 @@ class HttpxFetcher(FetchAdapter):
                         ok=status < 400,
                         fetched_via=self.fetched_via,
                         raw_html=body,
-                        content_type=_header(resp_headers, "content-type"),
+                        content_type=header(resp_headers, "content-type"),
                         redirects=redirects,
                         headers=resp_headers,
                         blocked=blocked,

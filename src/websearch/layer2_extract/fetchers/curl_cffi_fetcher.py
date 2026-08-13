@@ -24,18 +24,15 @@ from ..blocks import detect_block
 from ..egress import BlockedEgress, guard_url
 from ..models import FetchRequest, FetchResult
 from ..ports import FetchAdapter
-from .util import DEFAULT_USER_AGENT, hop_cookies, hop_headers, read_body
-
-_MAX_REDIRECTS = 10
-_REDIRECT_STATUS = (301, 302, 303, 307, 308)
-
-
-def _header(headers: dict[str, str], name: str) -> str | None:
-    name = name.lower()
-    for k, v in headers.items():
-        if k.lower() == name:
-            return v
-    return None
+from .util import (
+    DEFAULT_USER_AGENT,
+    MAX_REDIRECTS,
+    REDIRECT_STATUS,
+    header,
+    hop_cookies,
+    hop_headers,
+    read_body,
+)
 
 
 def _close(resp: Any) -> None:
@@ -155,7 +152,7 @@ class CurlCffiFetcher(FetchAdapter):
 
         redirects: list[str] = []
         current = request.url
-        for _hop in range(_MAX_REDIRECTS + 1):
+        for _hop in range(MAX_REDIRECTS + 1):
             try:
                 guard_url(
                     current,
@@ -192,15 +189,15 @@ class CurlCffiFetcher(FetchAdapter):
             try:
                 resp_headers = {str(k): str(v) for k, v in dict(resp.headers).items()}
                 status = int(resp.status_code)
-                location = _header(resp_headers, "location")
-                if status in _REDIRECT_STATUS and location:
+                location = header(resp_headers, "location")
+                if status in REDIRECT_STATUS and location:
                     _close(resp)
                     redirects.append(current)
                     current = urljoin(current, location)
                     continue
 
                 content = _read_capped(resp, request.max_bytes)
-                body = read_body(content, _header(resp_headers, "content-type"), request.max_bytes)
+                body = read_body(content, header(resp_headers, "content-type"), request.max_bytes)
                 blocked, reason = detect_block(status, body, resp_headers)
                 return FetchResult(
                     url=request.url,
@@ -209,7 +206,7 @@ class CurlCffiFetcher(FetchAdapter):
                     ok=status < 400,
                     fetched_via=self.fetched_via,
                     raw_html=body,
-                    content_type=_header(resp_headers, "content-type"),
+                    content_type=header(resp_headers, "content-type"),
                     redirects=redirects,
                     headers=resp_headers,
                     blocked=blocked,

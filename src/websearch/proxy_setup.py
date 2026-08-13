@@ -28,7 +28,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import errors
-from .envelope import Envelope, error_envelope, ok_envelope
+from .envelope import Envelope, layer_envelopes
 from .optional_layers import (
     PROXY_ENV,
     defines_setting,
@@ -48,7 +48,7 @@ from .proxy import (
     lock_enabled,
     lock_explicit,
     resolve_proxy,
-    tor_enabled,
+    tor_on_or_off,
 )
 
 PROXY_CONTRACT_VERSION = "1.0.0"
@@ -228,18 +228,6 @@ def _selected() -> ProxyLocation | None:
     return ProxyLocation(slug="custom", city=None, country="unknown", host=host, selected=True)
 
 
-def _tor_is_on() -> bool:
-    """Whether the tor layer is on, treating a malformed switch as off.
-
-    A typo in ``WEBSEARCH_TOR`` is the layer state's error to raise; it is not a reason
-    for `proxy status` to fail instead of answering the question it was asked.
-    """
-    try:
-        return tor_enabled()
-    except ProxyConfigError:
-        return False
-
-
 def _searxng_gap() -> str | None:
     """Whether a running local SearXNG is still on a different egress than the one set.
 
@@ -287,7 +275,7 @@ def _next_actions(payload: ProxyPayload) -> list[str]:
             "the exit is not NordVPN: check the credentials and the host, then run "
             "websearch proxy status again"
         )
-    if payload.enabled and _tor_is_on():
+    if payload.enabled and tor_on_or_off():
         actions.append(
             "the tor layer is on, so this proxy is Tor's upstream: restart it with "
             "websearch tor up for a location change to take effect"
@@ -323,25 +311,7 @@ def _state(action: str, request: ProxyRequest, **extra: Any) -> ProxyPayload:
     return payload
 
 
-def _error(code: str, message: str) -> Envelope:
-    return error_envelope(
-        PROXY_CONTRACT_VERSION,
-        code=code,
-        message=message,
-        retriable=False,
-        layer="proxy",
-        backend="nordvpn",
-    )
-
-
-def _ok(payload: ProxyPayload, started: float) -> Envelope:
-    return ok_envelope(
-        PROXY_CONTRACT_VERSION,
-        payload.model_dump(mode="json"),
-        layer="proxy",
-        backend="nordvpn",
-        elapsed_ms=round((time.monotonic() - started) * 1000, 3),
-    )
+_ok, _error = layer_envelopes(PROXY_CONTRACT_VERSION, layer="proxy", backend="nordvpn")
 
 
 def _wire(key: str, value: str) -> list[str]:

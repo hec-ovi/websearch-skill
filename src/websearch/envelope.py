@@ -95,3 +95,34 @@ def error_envelope(
             **meta_extra,
         ),
     )
+
+
+def layer_envelopes(contract_version: str, *, layer: str, backend: str):
+    """An ``(ok, error)`` pair bound to one layer's contract.
+
+    The lifecycle modules (searxng, tor, proxy) each wrap every response the same way;
+    this is that wrapping, written once. ``ok`` takes the payload model and the
+    ``time.monotonic()`` the action started at; ``error`` defaults to non-retriable.
+    """
+    import time
+
+    def ok(payload, started: float) -> Envelope:
+        return ok_envelope(
+            contract_version,
+            payload.model_dump(mode="json"),
+            layer=layer,
+            backend=backend,
+            elapsed_ms=round((time.monotonic() - started) * 1000, 3),
+        )
+
+    def error(code: str, message: str, *, retriable: bool = False) -> Envelope:
+        return error_envelope(
+            contract_version,
+            code=code,
+            message=message,
+            retriable=retriable,
+            layer=layer,
+            backend=backend,
+        )
+
+    return ok, error

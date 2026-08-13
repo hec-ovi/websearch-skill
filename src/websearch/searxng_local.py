@@ -22,7 +22,6 @@ import os
 import re
 import secrets
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -34,8 +33,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import errors
-from .envelope import Envelope, error_envelope, ok_envelope
+from . import _session, errors
+from .envelope import Envelope, layer_envelopes
 from .optional_layers import SEARXNG_ENV, redact_url, write_env_setting
 from .proxy import ProxyConfigError
 
@@ -447,17 +446,12 @@ def write_settings(
 
 def running_pid(paths: Paths) -> int | None:
     """The pid from the pidfile when that process is still alive, else None."""
-    try:
-        pid = int(paths.pidfile.read_text().strip())
-    except (OSError, ValueError):
-        return None
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return None
-    except PermissionError:
-        return pid
-    return pid
+    return _session.running_pid(paths.pidfile)
+
+
+def stop(paths: Paths, timeout_s: float = 10.0) -> bool:
+    """Signal the whole session and wait for it to go. False when nothing was running."""
+    return _session.stop(paths.pidfile, timeout_s)
 
 
 def start(paths: Paths, p: int) -> int:
@@ -503,26 +497,6 @@ def wait_healthy(url: str, timeout_s: int = HEALTH_TIMEOUT_S) -> bool:
         time.sleep(0.5)
     return False
 
-
-def stop(paths: Paths, timeout_s: float = 10.0) -> bool:
-    """Signal the whole session and wait for it to go. False when nothing was running."""
-    pid = running_pid(paths)
-    if pid is None:
-        paths.pidfile.unlink(missing_ok=True)
-        return False
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(os.getpgid(pid), sig)
-        except (ProcessLookupError, PermissionError):
-            break
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
-            if running_pid(paths) is None:
-                paths.pidfile.unlink(missing_ok=True)
-                return True
-            time.sleep(0.2)
-    paths.pidfile.unlink(missing_ok=True)
-    return True
 
 
 def wire_env_file(url: str) -> Path | None:
@@ -647,15 +621,7 @@ def refresh_if_running() -> str | None:
     return url if wait_healthy(url) else None
 
 
-def _error(code: str, message: str, *, retriable: bool) -> Envelope:
-    return error_envelope(
-        SEARXNG_CONTRACT_VERSION,
-        code=code,
-        message=message,
-        retriable=retriable,
-        layer="searxng",
-        backend="searxng-local",
-    )
+_ok, _error = layer_envelopes(SEARXNG_CONTRACT_VERSION, layer="searxng", backend="searxng-local")
 
 
 def control(request: SearxngRequest) -> Envelope:
@@ -716,12 +682,3 @@ def control(request: SearxngRequest) -> Envelope:
         )
     return _ok(_payload("up", paths, p, wired=wire_env_file(url)), started)
 
-
-def _ok(payload: SearxngPayload, started: float) -> Envelope:
-    return ok_envelope(
-        SEARXNG_CONTRACT_VERSION,
-        payload.model_dump(mode="json"),
-        layer="searxng",
-        backend="searxng-local",
-        elapsed_ms=round((time.monotonic() - started) * 1000, 3),
-    )

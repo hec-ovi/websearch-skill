@@ -216,19 +216,31 @@ def _cmd_search(args: argparse.Namespace) -> int:
         onion=request.onion,
     )
     envelope = router.search(request)
-    payload = envelope.model_dump(mode="json")
+    return _emit(envelope, args.json, _print_human)
 
-    if args.json:
+
+def _emit(envelope: Any, as_json: bool, printer: Any) -> int:
+    """Print an Envelope (raw JSON with --json, else the command's human view) and
+    return its exit code."""
+    payload = envelope.model_dump(mode="json")
+    if as_json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        _print_human(payload)
+        printer(payload)
     return 0 if envelope.ok else 1
 
 
+def _print_err(env: dict) -> bool:
+    """Print the error line of a failed envelope; True when there is nothing more to show."""
+    if env.get("ok"):
+        return False
+    err = env.get("error") or {}
+    print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+    return True
+
+
 def _print_human(env: dict) -> None:
-    if not env.get("ok"):
-        err = env.get("error") or {}
-        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+    if _print_err(env):
         return
     data = env.get("data") or {}
     results = data.get("results", [])
@@ -359,12 +371,11 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
         "query": args.query,
     }
     envelope = build_pipeline().run(request, extract_overrides=overrides)
-    payload = envelope.model_dump(mode="json")
-    if args.json:
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-    else:
-        _print_fetch_human(payload, output_format=args.output_format, quiet=args.quiet)
-    return 0 if envelope.ok else 1
+    return _emit(
+        envelope,
+        args.json,
+        lambda p: _print_fetch_human(p, output_format=args.output_format, quiet=args.quiet),
+    )
 
 
 def _select_body(res: dict, output_format: str) -> str:
@@ -377,9 +388,7 @@ def _select_body(res: dict, output_format: str) -> str:
 
 
 def _print_fetch_human(env: dict, output_format: str = "markdown", quiet: bool = False) -> None:
-    if not env.get("ok"):
-        err = env.get("error") or {}
-        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+    if _print_err(env):
         return
     data = env.get("data") or {}
     src = data.get("source") or {}
@@ -700,19 +709,11 @@ def _cmd_websearch(args: argparse.Namespace) -> int:
     aio = _builder("build_agent_io")(
         searxng_url=_searxng_url(args), proxy=_egress(args), onion=getattr(args, "onion", False)
     )
-    env = aio.web_search(req)
-    payload = env.model_dump(mode="json")
-    if args.json:
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-    else:
-        _print_agent_search_human(payload)
-    return 0 if env.ok else 1
+    return _emit(aio.web_search(req), args.json, _print_agent_search_human)
 
 
 def _print_agent_search_human(env: dict) -> None:
-    if not env.get("ok"):
-        err = env.get("error") or {}
-        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+    if _print_err(env):
         return
     data = env.get("data") or {}
     results = data.get("results", [])
@@ -816,17 +817,13 @@ def _cmd_webfetch(args: argparse.Namespace) -> int:
         allow_private_hosts=args.allow_private_hosts,
         datamark=args.datamark,
     )
-    payload = env.model_dump(mode="json")
-    if args.json:
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-    else:
-        _print_agent_pages_human(
-            payload,
-            quiet=args.quiet,
-            persist_path=store,
-            page_size_tokens=args.page_size_tokens,
-        )
-    return 0 if env.ok else 1
+    return _emit(
+        env,
+        args.json,
+        lambda p: _print_agent_pages_human(
+            p, quiet=args.quiet, persist_path=store, page_size_tokens=args.page_size_tokens
+        ),
+    )
 
 
 def _add_webopen_command(sub: Any) -> None:
@@ -878,17 +875,13 @@ def _cmd_webopen(args: argparse.Namespace) -> int:
         enable_ddgs=False, store_config=StoreConfig(persist_path=store)
     )
     env = aio.web_open(req)
-    payload = env.model_dump(mode="json")
-    if args.json:
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-    else:
-        _print_agent_pages_human(
-            payload,
-            quiet=args.quiet,
-            persist_path=store,
-            page_size_tokens=args.page_size_tokens,
-        )
-    return 0 if env.ok else 1
+    return _emit(
+        env,
+        args.json,
+        lambda p: _print_agent_pages_human(
+            p, quiet=args.quiet, persist_path=store, page_size_tokens=args.page_size_tokens
+        ),
+    )
 
 
 def _more_hint(
@@ -917,9 +910,7 @@ def _print_agent_pages_human(
     persist_path: str | None = None,
     page_size_tokens: int = _DEFAULT_PAGE_SIZE_TOKENS,
 ) -> None:
-    if not env.get("ok"):
-        err = env.get("error") or {}
-        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+    if _print_err(env):
         return
     data = env.get("data") or {}
     pages = data.get("pages", [])
@@ -996,18 +987,11 @@ def _cmd_arxiv(args: argparse.Namespace) -> int:
             as_json=args.json,
         )
     env = _builder("build_arxiv_tool")(proxy=_egress(args)).search(req)
-    payload = env.model_dump(mode="json")
-    if args.json:
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-    else:
-        _print_arxiv_human(payload)
-    return 0 if env.ok else 1
+    return _emit(env, args.json, _print_arxiv_human)
 
 
 def _print_arxiv_human(env: dict) -> None:
-    if not env.get("ok"):
-        err = env.get("error") or {}
-        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+    if _print_err(env):
         return
     data = env.get("data") or {}
     papers = data.get("papers", [])
@@ -1074,18 +1058,11 @@ def _cmd_github(args: argparse.Namespace) -> int:
             as_json=args.json,
         )
     env = _builder("build_github_tool")(proxy=_egress(args)).search(req)
-    payload = env.model_dump(mode="json")
-    if args.json:
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-    else:
-        _print_github_human(payload)
-    return 0 if env.ok else 1
+    return _emit(env, args.json, _print_github_human)
 
 
 def _print_github_human(env: dict) -> None:
-    if not env.get("ok"):
-        err = env.get("error") or {}
-        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+    if _print_err(env):
         return
     data = env.get("data") or {}
     repos = data.get("repos", [])
@@ -1216,13 +1193,11 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if summary.get("fail") else 0
 
 
-_DOCTOR_GLYPH = {"ok": "ok  ", "warn": "warn", "fail": "FAIL", "skipped": "skip"}
+_STATUS_GLYPH = {"ok": "ok  ", "warn": "warn", "fail": "FAIL", "skipped": "skip"}
 
 
 def _print_doctor_human(env: dict) -> None:
-    if not env.get("ok"):
-        err = env.get("error") or {}
-        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+    if _print_err(env):
         return
     data = env.get("data") or {}
 
@@ -1241,7 +1216,7 @@ def _print_doctor_human(env: dict) -> None:
         if check.get("group") != group:
             group = check.get("group")
             print(f"\n{group}")
-        glyph = _DOCTOR_GLYPH.get(check.get("status"), "?   ")
+        glyph = _STATUS_GLYPH.get(check.get("status"), "?   ")
         print(f"  {glyph}  {check.get('name'):<22} {check.get('summary')}")
         if check.get("hint") and check.get("status") in ("warn", "fail"):
             print(f"        {'':<22} -> {check['hint']}")
@@ -1329,18 +1304,13 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 1 if data.get("state") == "broken" else 0
 
 
-_INIT_GLYPH = {"ok": "ok  ", "warn": "warn", "fail": "FAIL", "skipped": "skip"}
-
-
 def _print_init_human(env: dict) -> None:
-    if not env.get("ok"):
-        err = env.get("error") or {}
-        print(f"error: {err.get('code')}: {err.get('message')}", file=sys.stderr)
+    if _print_err(env):
         return
     data = env.get("data") or {}
 
     for step in data.get("steps") or []:
-        glyph = _INIT_GLYPH.get(step.get("status"), "?   ")
+        glyph = _STATUS_GLYPH.get(step.get("status"), "?   ")
         print(f"  {glyph}  {step.get('name'):<9} {step.get('summary')}")
 
     print("\ncapabilities")
@@ -1777,52 +1747,28 @@ def _contract_version_for(command: str) -> str:
     """The contract version stamped on a cross-layer 'cli' error envelope: the active
     command's own contract, so a `websearch github` failure carries github@x.y.z rather
     than agent-io's version. Imported lazily to keep the startup cost per-command."""
-    if command == "search":
-        from .layer1_search import SEARCH_CONTRACT_VERSION
+    table = {
+        "search": (".layer1_search", "SEARCH_CONTRACT_VERSION"),
+        "fetch": (".layer2_extract", "EXTRACT_CONTRACT_VERSION"),
+        "open": (".layer2_format", "FORMAT_CONTRACT_VERSION"),
+        "web-search": (".layer3_agentio", "AGENTIO_CONTRACT_VERSION"),
+        "web-fetch": (".layer3_agentio", "AGENTIO_CONTRACT_VERSION"),
+        "web-open": (".layer3_agentio", "AGENTIO_CONTRACT_VERSION"),
+        "arxiv": (".tool_arxiv", "ARXIV_CONTRACT_VERSION"),
+        "github": (".tool_github", "GITHUB_CONTRACT_VERSION"),
+        "doctor": (".doctor", "DOCTOR_CONTRACT_VERSION"),
+        "init": (".initialize", "INIT_CONTRACT_VERSION"),
+        "searxng": (".searxng_local", "SEARXNG_CONTRACT_VERSION"),
+        "tor": (".tor_local", "TOR_CONTRACT_VERSION"),
+        "proxy": (".proxy_setup", "PROXY_CONTRACT_VERSION"),
+    }
+    entry = table.get(command)
+    if entry is None:  # an unknown command: the cross-cutting envelope
+        return ENVELOPE_CONTRACT_VERSION
+    from importlib import import_module
 
-        return SEARCH_CONTRACT_VERSION
-    if command == "fetch":
-        from .layer2_extract import EXTRACT_CONTRACT_VERSION
-
-        return EXTRACT_CONTRACT_VERSION
-    if command == "open":
-        from .layer2_format import FORMAT_CONTRACT_VERSION
-
-        return FORMAT_CONTRACT_VERSION
-    if command in ("web-search", "web-fetch", "web-open"):
-        from .layer3_agentio import AGENTIO_CONTRACT_VERSION
-
-        return AGENTIO_CONTRACT_VERSION
-    if command == "arxiv":
-        from .tool_arxiv import ARXIV_CONTRACT_VERSION
-
-        return ARXIV_CONTRACT_VERSION
-    if command == "github":
-        from .tool_github import GITHUB_CONTRACT_VERSION
-
-        return GITHUB_CONTRACT_VERSION
-    if command == "doctor":
-        from .doctor import DOCTOR_CONTRACT_VERSION
-
-        return DOCTOR_CONTRACT_VERSION
-    if command == "init":
-        from .initialize import INIT_CONTRACT_VERSION
-
-        return INIT_CONTRACT_VERSION
-    if command == "searxng":
-        from .searxng_local import SEARXNG_CONTRACT_VERSION
-
-        return SEARXNG_CONTRACT_VERSION
-    if command == "tor":
-        from .tor_local import TOR_CONTRACT_VERSION
-
-        return TOR_CONTRACT_VERSION
-    if command == "proxy":
-        from .proxy_setup import PROXY_CONTRACT_VERSION
-
-        return PROXY_CONTRACT_VERSION
-    # An unknown command: the cross-cutting envelope.
-    return ENVELOPE_CONTRACT_VERSION
+    module, attr = entry
+    return getattr(import_module(module, __package__), attr)
 
 
 def main(argv: list[str] | None = None) -> int:

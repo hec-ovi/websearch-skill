@@ -35,7 +35,6 @@ import os
 import platform
 import re
 import shutil
-import signal
 import socket
 import subprocess
 import tarfile
@@ -47,15 +46,15 @@ from urllib.parse import unquote, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import errors
-from .envelope import Envelope, error_envelope, ok_envelope
+from . import _session, errors
+from .envelope import Envelope, layer_envelopes
 from .optional_layers import TOR_ENV, redact_url, scrub_proxy, write_env_setting
 from .proxy import (
     EGRESS_LOCK_VAR,
     ProxyConfigError,
     lock_enabled,
     resolve_proxy,
-    tor_enabled,
+    tor_on_or_off,
     tor_socks_url,
 )
 
@@ -440,17 +439,12 @@ def write_torrc(paths: Paths, *, socks_url: str | None = None, proxy_url: str | 
 
 def running_pid(paths: Paths) -> int | None:
     """The pid from the pidfile when that process is still alive, else None."""
-    try:
-        pid = int(paths.pidfile.read_text().strip())
-    except (OSError, ValueError):
-        return None
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return None
-    except PermissionError:
-        return pid
-    return pid
+    return _session.running_pid(paths.pidfile)
+
+
+def stop(paths: Paths, timeout_s: float = 10.0) -> bool:
+    """Signal the whole session and wait for it to go. False when nothing was running."""
+    return _session.stop(paths.pidfile, timeout_s)
 
 
 def start(paths: Paths, binary: Path, *, source: str) -> int:
@@ -506,26 +500,6 @@ def wait_bootstrapped(paths: Paths, timeout_s: int = BOOTSTRAP_TIMEOUT_S) -> tup
         time.sleep(0.5)
     return False, last or f"no bootstrap within {timeout_s}s"
 
-
-def stop(paths: Paths, timeout_s: float = 10.0) -> bool:
-    """Signal the whole session and wait for it to go. False when nothing was running."""
-    pid = running_pid(paths)
-    if pid is None:
-        paths.pidfile.unlink(missing_ok=True)
-        return False
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(os.getpgid(pid), sig)
-        except (ProcessLookupError, PermissionError):
-            break
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
-            if running_pid(paths) is None:
-                paths.pidfile.unlink(missing_ok=True)
-                return True
-            time.sleep(0.2)
-    paths.pidfile.unlink(missing_ok=True)
-    return True
 
 
 def status(paths: Paths, *, socks_url: str, check: bool) -> dict[str, Any]:
@@ -586,22 +560,10 @@ class TorPayload(BaseModel):
     log: str | None = None
 
 
-def _layer_is_on() -> bool:
-    """Whether the switch is on right now, treating a malformed value as off.
-
-    The lifecycle payload reports state; a typo in the variable is the layer-state code's
-    error to raise, not a reason for `tor status` to fail instead of answering.
-    """
-    try:
-        return tor_enabled()
-    except ProxyConfigError:
-        return False
-
-
 def _payload(action: str, state: dict[str, Any], **extra: Any) -> TorPayload:
     return TorPayload(
         action=action,  # type: ignore[arg-type]
-        enabled=_layer_is_on(),
+        enabled=tor_on_or_off(),
         home=state["home"],
         socks_url=state["socks_url"],
         installed=state["installed"],
@@ -617,25 +579,7 @@ def _payload(action: str, state: dict[str, Any], **extra: Any) -> TorPayload:
     )
 
 
-def _error(code: str, message: str, *, retriable: bool) -> Envelope:
-    return error_envelope(
-        TOR_CONTRACT_VERSION,
-        code=code,
-        message=message,
-        retriable=retriable,
-        layer="tor",
-        backend="tor-local",
-    )
-
-
-def _ok(payload: TorPayload, started: float) -> Envelope:
-    return ok_envelope(
-        TOR_CONTRACT_VERSION,
-        payload.model_dump(mode="json"),
-        layer="tor",
-        backend="tor-local",
-        elapsed_ms=round((time.monotonic() - started) * 1000, 3),
-    )
+_ok, _error = layer_envelopes(TOR_CONTRACT_VERSION, layer="tor", backend="tor-local")
 
 
 def control(request: TorRequest) -> Envelope:

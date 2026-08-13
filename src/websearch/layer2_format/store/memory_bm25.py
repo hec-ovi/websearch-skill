@@ -31,7 +31,7 @@ from ..models import (
     StoreConfig,
     StoredDoc,
 )
-from ._common import prepare_doc
+from ._common import prepare_doc, require_bm25, stored_doc
 
 _NAME = "memory-bm25"
 _K1 = 1.2
@@ -118,16 +118,7 @@ class MemoryBm25Index:
             existing = self._docs.get(prepared.id)
             if existing is not None and existing.content_hash == prepared.content_hash:
                 added.append(
-                    StoredDoc(
-                        id=prepared.id,
-                        url=prepared.url,
-                        title=prepared.title,
-                        n_passages=existing.n_passages,
-                        content_hash=prepared.content_hash,
-                        fetched_at=prepared.fetched_at,
-                        token_estimate=prepared.token_estimate,
-                        deduped=True,
-                    )
+                    stored_doc(prepared, n_passages=existing.n_passages, deduped=True)
                 )
                 continue
             if existing is not None:  # changed content: drop old passages, move to end
@@ -165,16 +156,7 @@ class MemoryBm25Index:
                 )
             changed = True
             added.append(
-                StoredDoc(
-                    id=prepared.id,
-                    url=prepared.url,
-                    title=prepared.title,
-                    n_passages=len(prepared.passages),
-                    content_hash=prepared.content_hash,
-                    fetched_at=prepared.fetched_at,
-                    token_estimate=prepared.token_estimate,
-                    deduped=False,
-                )
+                stored_doc(prepared, n_passages=len(prepared.passages), deduped=False)
             )
         if changed:
             self._reindex()
@@ -202,6 +184,7 @@ class MemoryBm25Index:
         return score
 
     def search(self, request: SearchPageRequest) -> SearchPageResult:
+        require_bm25(request.mode)
         with self._lock:
             self._check_open()
             query_terms = _tokenize(request.query)

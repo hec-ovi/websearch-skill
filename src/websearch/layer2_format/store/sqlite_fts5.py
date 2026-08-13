@@ -32,7 +32,7 @@ from ..models import (
     StoreConfig,
     StoredDoc,
 )
-from ._common import escape_fts5_query, prepare_doc
+from ._common import escape_fts5_query, prepare_doc, require_bm25, stored_doc
 
 _NAME = "sqlite-fts5"
 
@@ -116,16 +116,7 @@ class SqliteFts5Index:
                 ).fetchone()
                 if row is not None and row["content_hash"] == prepared.content_hash:
                     added.append(
-                        StoredDoc(
-                            id=prepared.id,
-                            url=prepared.url,
-                            title=prepared.title,
-                            n_passages=row["n_passages"],
-                            content_hash=prepared.content_hash,
-                            fetched_at=prepared.fetched_at,
-                            token_estimate=prepared.token_estimate,
-                            deduped=True,
-                        )
+                        stored_doc(prepared, n_passages=row["n_passages"], deduped=True)
                     )
                     continue
                 # One doc = one atomic transaction. `with self._con` commits on success
@@ -159,20 +150,12 @@ class SqliteFts5Index:
                         ],
                     )
                 added.append(
-                    StoredDoc(
-                        id=prepared.id,
-                        url=prepared.url,
-                        title=prepared.title,
-                        n_passages=len(prepared.passages),
-                        content_hash=prepared.content_hash,
-                        fetched_at=prepared.fetched_at,
-                        token_estimate=prepared.token_estimate,
-                        deduped=False,
-                    )
+                    stored_doc(prepared, n_passages=len(prepared.passages), deduped=False)
                 )
         return AddResult(added=added)
 
     def search(self, request: SearchPageRequest) -> SearchPageResult:
+        require_bm25(request.mode)
         match = escape_fts5_query(request.query)
         if match is None:
             return SearchPageResult(

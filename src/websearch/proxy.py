@@ -280,6 +280,18 @@ def tor_enabled(cli_value: str | None = None) -> bool:
     )
 
 
+def tor_on_or_off() -> bool:
+    """``tor_enabled`` with a malformed switch read as off.
+
+    For status payloads: a typo in the variable is the layer-state code's error to
+    raise, not a reason for a status command to fail instead of answering.
+    """
+    try:
+        return tor_enabled()
+    except ProxyConfigError:
+        return False
+
+
 def tor_port() -> int:
     raw = os.environ.get(TOR_PORT_VAR, "").strip()
     if not raw:

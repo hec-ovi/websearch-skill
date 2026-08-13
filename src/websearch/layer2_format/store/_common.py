@@ -11,8 +11,9 @@ from dataclasses import dataclass
 
 from ..chunk import chunk_markdown
 from ..dedup import content_hash
+from ..exceptions import DependencyMissing
 from ..ids import doc_id
-from ..models import DEFAULT_CHARS_PER_TOKEN, PageInput, StoreConfig
+from ..models import DEFAULT_CHARS_PER_TOKEN, PageInput, StoreConfig, StoredDoc
 from ..tokens import estimate_tokens
 
 # Map C0 control characters and DEL to spaces before tokenizing. A NUL in particular is
@@ -97,3 +98,30 @@ def escape_fts5_query(query: str) -> str | None:
         return None
     quoted = ['"' + tok.replace('"', '""') + '"' for tok in tokens]
     return " OR ".join(quoted)
+
+
+def require_bm25(mode: str) -> None:
+    """Refuse a search mode neither built-in adapter implements.
+
+    Answering a vector request with BM25 ranked results would be a silent lie about the
+    backend; vector and hybrid are opt-in adapters, the same rule as StoreConfig.adapter.
+    """
+    if mode != "bm25":
+        raise DependencyMissing(
+            f"search mode '{mode}' needs an opt-in vector adapter; none is installed "
+            "(the built-in indexes implement bm25)."
+        )
+
+
+def stored_doc(prepared: PreparedDoc, *, n_passages: int, deduped: bool) -> StoredDoc:
+    """The AddResult row for one prepared document."""
+    return StoredDoc(
+        id=prepared.id,
+        url=prepared.url,
+        title=prepared.title,
+        n_passages=n_passages,
+        content_hash=prepared.content_hash,
+        fetched_at=prepared.fetched_at,
+        token_estimate=prepared.token_estimate,
+        deduped=deduped,
+    )

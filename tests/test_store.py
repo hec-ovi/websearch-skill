@@ -346,3 +346,15 @@ def test_total_reflects_true_match_count_beyond_top_k():
     res = store.search(SearchPageRequest(query="alpha", top_k=2, page=1, page_size=2))
     assert len(res.passages) == 2  # only the top_k pool is returned
     assert res.total >= 6  # but total is the honest match count, not the capped pool
+
+
+@pytest.mark.parametrize("adapter", ADAPTERS)
+def test_vector_mode_without_a_vector_adapter_is_refused(adapter):
+    """The contract declares vector/hybrid as opt-in adapters; answering one with BM25
+    results labeled as such would silently lie about the backend."""
+    from websearch.layer2_format.exceptions import DependencyMissing
+
+    store = build_page_index(StoreConfig(adapter=adapter))
+    store.add(_docs(1))
+    with pytest.raises(DependencyMissing):
+        store.search(SearchPageRequest(query="alpha", mode="vector"))
