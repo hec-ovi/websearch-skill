@@ -9,14 +9,21 @@ silently dropped.
 
 ``WEBSEARCH_PROXY`` controls the proxy hop:
 
-- unset, empty, ``off``, ``none``, or ``direct``: direct connection (the default).
 - ``nordvpn``: NordVPN SOCKS5, expanded to ``socks5h://USER:PASS@HOST:1080`` from
   ``NORDVPN_USER`` / ``NORDVPN_PASS`` (the service credentials shown in the Nord
   Account dashboard under "Set up NordVPN manually", not the account login) and
   optional ``NORDVPN_HOST`` (default ``nl.socks.nordhold.net``; any official
   ``*.socks.nordhold.net`` server works).
+- empty, ``off``, ``none``, or ``direct``: direct connection.
 - any other value: used verbatim as the proxy URL
   (``http://``, ``https://``, ``socks5://``, ``socks5h://``).
+- unset: the NordVPN credentials decide. With ``NORDVPN_USER`` and ``NORDVPN_PASS``
+  both present the proxy is on as if ``nordvpn`` had been written; without them the
+  connection is direct. Credentials in the environment mean "use them": the setup is
+  the two variables and nothing else, and only an explicit off word goes direct.
+
+A configured proxy also locks egress: any path that cannot go through it fails rather
+than leaving from the machine's own address (see ``lock_enabled``).
 
 Which city the traffic comes out of is ``NORDVPN_HOST``, and ``NORDVPN_LOCATIONS`` is
 the table of names you can put there: ``websearch proxy use dallas`` writes one, and a
@@ -123,25 +130,47 @@ class EgressLocked(ProxyConfigError):
 
 
 def lock_enabled(cli_value: str | None = None) -> bool:
-    """Whether egress is locked to the proxy. Off unless something says otherwise.
+    """Whether egress is locked to the proxy.
 
     Locked means one thing, and it is absolute: nothing this tool sends leaves the machine
     outside the proxy. A path that cannot use it fails instead of falling back to a direct
     connection, because a fallback is exactly the request that gives the address away, and
     it happens on the day the proxy is down rather than on the day you are watching.
 
+    With ``WEBSEARCH_EGRESS_LOCK`` unset, a configured proxy is its own lock: turning the
+    proxy on says "leave from there", so every path either uses it or fails. A proxy that
+    is configured but unusable (nordvpn with a credential missing) locks too, because the
+    alternative is opening direct egress on exactly the day the configuration broke. The
+    explicit variable remains the override in both directions.
+
     Local targets (loopback, LAN) are not affected: they never leave the machine, and a
     remote exit could not reach them anyway. See ``bypasses_proxy``.
     """
     raw = cli_value if cli_value is not None else os.environ.get(EGRESS_LOCK_VAR)
-    if raw is None:
-        return False
-    value = raw.strip().lower()
-    if value in OFF_WORDS:
-        return False
-    if value in _LOCK_ON:
+    if raw is not None:
+        value = raw.strip().lower()
+        if value in OFF_WORDS:
+            return False
+        if value in _LOCK_ON:
+            return True
+        raise ProxyConfigError(
+            f"{EGRESS_LOCK_VAR}={raw!r} is not a switch value; use 'on' or 'off'."
+        )
+    try:
+        return resolve_proxy() is not None
+    except ProxyConfigError:
         return True
-    raise ProxyConfigError(f"{EGRESS_LOCK_VAR}={raw!r} is not a switch value; use 'on' or 'off'.")
+
+
+def lock_explicit() -> bool:
+    """Whether ``WEBSEARCH_EGRESS_LOCK`` itself says on, ignoring the implied lock.
+
+    The two locks differ in one place: an explicit "go direct" (``--proxy off``, or
+    ``websearch proxy off``) overrides the lock a configured proxy implies, and never
+    this one.
+    """
+    raw = os.environ.get(EGRESS_LOCK_VAR)
+    return raw is not None and raw.strip().lower() in _LOCK_ON
 
 
 def find_location(name: str) -> NordvpnLocation | None:
@@ -184,6 +213,11 @@ def nordvpn_host(location: str | None = None) -> str:
     return os.environ.get("NORDVPN_HOST", NORDVPN_DEFAULT_HOST)
 
 
+def _nordvpn_ready() -> bool:
+    """Whether both NordVPN service credentials are in the environment."""
+    return bool(os.environ.get("NORDVPN_USER") and os.environ.get("NORDVPN_PASS"))
+
+
 def _nordvpn_url(location: str | None = None) -> str:
     user = os.environ.get("NORDVPN_USER", "")
     password = os.environ.get("NORDVPN_PASS", "")
@@ -217,7 +251,12 @@ def resolve_proxy(cli_value: str | None = None, location: str | None = None) -> 
                 f"--proxy {cli_value!r}; drop one of the two."
             )
         return _nordvpn_url(location)
-    if value is None or value.strip().lower() in _OFF:
+    if value is None:
+        # Unset, not off: with both NordVPN service credentials in the environment the
+        # proxy is on, because credentials someone placed there mean "use them" and the
+        # off words remain the way to say otherwise.
+        return _nordvpn_url() if _nordvpn_ready() else None
+    if value.strip().lower() in _OFF:
         return None
     value = value.strip()
     if value.lower() == "nordvpn":
@@ -290,10 +329,15 @@ def egress_proxy(
         return tor_socks_url()
     address = resolve_proxy(cli_value, location)
     if address is None and lock_enabled():
+        # An explicit --proxy off overrides the lock a configured proxy implies; it never
+        # overrides an explicit WEBSEARCH_EGRESS_LOCK=on.
+        if cli_value is not None and cli_value.strip().lower() in _OFF and not lock_explicit():
+            return None
         raise EgressLocked(
-            f"{EGRESS_LOCK_VAR} is on and no proxy is configured, so this would leave from "
-            "your own address. Set one up (`websearch proxy setup`, then `websearch proxy "
-            "use <city>`), or unlock with `websearch proxy unlock`."
+            f"egress is locked ({EGRESS_LOCK_VAR}) and this command has no proxy to leave "
+            "through, so it would run from your own address. Set one up (`websearch proxy "
+            "setup`, then `websearch proxy use <city>`), or unlock with `websearch proxy "
+            "unlock`."
         )
     return address
 

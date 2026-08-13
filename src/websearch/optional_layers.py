@@ -310,6 +310,19 @@ def proxy_state(cli_value: str | None = None) -> LayerState:
     source = "--proxy" if cli_value is not None else PROXY_ENV
     raw = cli_value if cli_value is not None else os.environ.get(PROXY_ENV)
     if _is_off(raw):
+        if raw is None:
+            # Unset is not off: the NordVPN credentials alone turn the proxy on
+            # (see resolve_proxy), and the state must say so.
+            auto = resolve_proxy()
+            if auto:
+                return LayerState(
+                    name="proxy",
+                    enabled=True,
+                    source="NORDVPN_USER/NORDVPN_PASS",
+                    value=redact_url(auto),
+                    detail="on because the NordVPN credentials are set; every network "
+                    f"path leaves through this proxy (set {PROXY_ENV}=off to go direct)",
+                )
         return LayerState(
             name="proxy",
             enabled=False,

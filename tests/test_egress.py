@@ -59,6 +59,14 @@ def test_non_http_schemes_stay_refused_behind_a_proxy():
             guard_url(url, proxied=True)
 
 
+def test_a_configured_proxy_locks_the_guard_without_an_explicit_lock(monkeypatch):
+    """Defense in depth for the implied lock: with a proxy in the environment, a fetch
+    that somehow arrives at a tier with no proxy is refused rather than sent direct."""
+    monkeypatch.setenv("WEBSEARCH_PROXY", "socks5h://u:p@proxy.test:1080")
+    with pytest.raises(BlockedEgress, match="no proxy"):
+        guard_url("https://example.com/", resolve=_Resolver(), proxied=False)
+
+
 PUBLIC = lambda host: {"93.184.216.34"}  # noqa: E731
 
 

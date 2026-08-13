@@ -471,10 +471,10 @@ def start(paths: Paths, p: int) -> int:
     env["GRANIAN_PORT"] = str(p)
     env["GRANIAN_WEBSOCKETS"] = "false"
     env["GRANIAN_PROCESS_NAME"] = "searxng"
-    # The tool's own proxy setting belongs to the client hop, not to this server's
-    # process. Leaving it set would send SearXNG's engine requests somewhere the
-    # operator never asked for.
-    for leaked in ("WEBSEARCH_PROXY", "WEBSEARCH_VPN"):
+    # The tool's own proxy settings and credentials belong to the client hop, not to
+    # this server's environment: its egress is already in settings.yml, and a detached
+    # process has no business holding the NordVPN credentials.
+    for leaked in ("WEBSEARCH_PROXY", "WEBSEARCH_VPN", "NORDVPN_USER", "NORDVPN_PASS", "NORDVPN_HOST"):
         env.pop(leaked, None)
 
     paths.log.parent.mkdir(parents=True, exist_ok=True)

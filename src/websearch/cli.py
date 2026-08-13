@@ -110,11 +110,20 @@ def _searxng_url(args: argparse.Namespace) -> str | None:
         return url
     from . import searxng_local
 
-    if searxng_local.settings_egress(searxng_local.Paths(searxng_local.home_dir())) is None:
-        raise EgressLocked(
-            f"{EGRESS_LOCK_VAR} is on and the local SearXNG at {url} would search from this "
-            "machine's own address. Move it onto the proxy: `websearch searxng up`."
-        )
+    paths = searxng_local.Paths(searxng_local.home_dir())
+    if searxng_local.settings_egress(paths) is None:
+        if not searxng_local.is_healthy(url):
+            return url  # nothing is listening, so no engine request can leave through it
+        # A running instance off the proxy: restart it with regenerated settings, which
+        # is what moves its own engine requests onto the current egress. Only an
+        # instance this tool cannot rewrite (an operator's settings file) is refused.
+        searxng_local.refresh_if_running()
+        if searxng_local.settings_egress(paths) is None:
+            raise EgressLocked(
+                f"egress is locked ({EGRESS_LOCK_VAR}) and the local SearXNG at {url} "
+                "would search from this machine's own address, from settings this tool "
+                "does not manage. Put its egress on the proxy yourself, or unlock."
+            )
     return url
 
 
@@ -1876,6 +1885,19 @@ def main(argv: list[str] | None = None) -> int:
     if handler is None:
         parser.error(f"unknown command: {args.command}")
         return 2  # unreachable; argparse.error exits
+
+    # A CLI egress flag is authoritative for the whole process: everything that reads the
+    # environment later (the implied egress lock, SearXNG's own egress, the Tor upstream)
+    # must see the same choice the command was given, or `--proxy off` would go direct on
+    # one path and stay locked on another. Restored on the way out for in-process callers.
+    from .proxy import TOR_ENV
+
+    pinned: dict[str, str | None] = {}
+    for flag, var in (("proxy", "WEBSEARCH_PROXY"), ("tor", TOR_ENV)):
+        value = getattr(args, flag, None)
+        if value is not None:
+            pinned[var] = os.environ.get(var)
+            os.environ[var] = value
     try:
         return handler(args)
     except ProxyConfigError as exc:
@@ -1902,3 +1924,9 @@ def main(argv: list[str] | None = None) -> int:
             layer="cli",
             as_json=getattr(args, "json", False),
         )
+    finally:
+        for var, previous in pinned.items():
+            if previous is None:
+                os.environ.pop(var, None)
+            else:
+                os.environ[var] = previous

@@ -46,6 +46,7 @@ from .proxy import (
     find_location,
     location_of_host,
     lock_enabled,
+    lock_explicit,
     resolve_proxy,
     tor_enabled,
 )
@@ -414,9 +415,10 @@ def control(request: ProxyRequest) -> Envelope:
         return _ok(_state("unlock", request, wired=wired), started)
 
     if request.action == "off":
-        if _lock_is_on():
-            # Turning the proxy off under a lock is the one move that would put traffic
-            # back on the real address, which is the whole thing the lock exists to stop.
+        if lock_explicit():
+            # Turning the proxy off under an explicit lock is the one move that would put
+            # traffic back on the real address, which is what the lock exists to stop. The
+            # implied lock does not apply here: `proxy off` IS the explicit choice.
             return _error(
                 errors.INVALID_REQUEST,
                 f"{EGRESS_LOCK_VAR} is on: turning the proxy off would send traffic from "

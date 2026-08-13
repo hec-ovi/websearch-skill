@@ -251,7 +251,7 @@ def test_locking_refuses_every_path_that_has_no_proxy(monkeypatch):
     """The whole point: with nothing configured, a locked run does not fall back to a
     direct connection, because the fallback is the request that gives the address away."""
     monkeypatch.setenv(EGRESS_LOCK_VAR, "on")
-    with pytest.raises(EgressLocked, match="no proxy is configured"):
+    with pytest.raises(EgressLocked, match="no proxy to leave through"):
         egress_proxy()
 
 

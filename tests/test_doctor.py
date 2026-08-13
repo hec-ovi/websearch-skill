@@ -16,6 +16,7 @@ from tests.conftest import DOCTOR_PAYLOAD_REF, DOCTOR_RESPONSE_REF
 from websearch.doctor import DoctorRequest, build_doctor, probes
 from websearch.envelope import ok_envelope
 from websearch.optional_layers import PROXY_ENV, SEARXNG_ENV, TOR_ENV, VPN_ENV
+from websearch.proxy import EGRESS_LOCK_VAR
 
 DIRECT_IP = "203.0.113.7"
 PROXY_IP = "198.51.100.4"
@@ -183,7 +184,9 @@ def test_proxy_is_ok_when_the_exit_ip_moves(monkeypatch):
 def test_proxy_warns_when_the_exit_ip_is_unchanged(monkeypatch):
     monkeypatch.setenv(PROXY_ENV, PROXY_URL)
     # Detecting "unchanged" needs a direct exit to compare against, which is exactly the
-    # request that leaves the tunnel, so it only happens when explicitly asked for.
+    # request that leaves the tunnel: it needs both --baseline and an explicit unlock,
+    # because a configured proxy locks egress on its own.
+    monkeypatch.setenv(EGRESS_LOCK_VAR, "off")
     check = checks_by_name(
         doctor_with(net=net_with(proxied=DIRECT_IP)).run(DoctorRequest(quick=True, baseline=True))
     )["proxy"]
@@ -204,8 +207,20 @@ def test_no_direct_request_is_made_when_a_proxy_is_configured(monkeypatch):
     assert "not compared to a direct exit" in checks["proxy"]["summary"]
 
 
+def test_baseline_is_refused_while_the_proxy_implies_the_lock(monkeypatch):
+    """--baseline alone does not outrank the lock a configured proxy implies: not one
+    request leaves the tunnel until the operator explicitly unlocks."""
+    monkeypatch.setenv(PROXY_ENV, PROXY_URL)
+    net = net_with()
+    checks = checks_by_name(doctor_with(net=net).run(DoctorRequest(quick=True, baseline=True)))
+    assert checks["baseline"]["status"] == "skipped"
+    assert "refused" in checks["baseline"]["summary"]
+    assert [url for url, proxy in net.calls if proxy is None] == []
+
+
 def test_baseline_opts_into_the_one_direct_request(monkeypatch):
     monkeypatch.setenv(PROXY_ENV, PROXY_URL)
+    monkeypatch.setenv(EGRESS_LOCK_VAR, "off")
     net = net_with()
     checks = checks_by_name(doctor_with(net=net).run(DoctorRequest(quick=True, baseline=True)))
     assert checks["baseline"]["detail"]["exit_ip"] == DIRECT_IP

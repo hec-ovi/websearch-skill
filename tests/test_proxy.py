@@ -19,10 +19,14 @@ from websearch.layer2_extract import FetchRequest, build_pipeline
 from websearch.layer2_extract.models import FetchResult
 from websearch.layer2_extract.ports import FetchAdapter
 from websearch.proxy import (
+    EGRESS_LOCK_VAR,
     NORDVPN_DEFAULT_HOST,
+    EgressLocked,
     ProxyConfigError,
     as_fetch_proxy,
     bypasses_proxy,
+    egress_proxy,
+    lock_enabled,
     proxy_for,
     proxy_type,
     resolve_proxy,
@@ -59,6 +63,58 @@ def test_env_url_passthrough(monkeypatch):
 def test_cli_value_beats_env(monkeypatch):
     monkeypatch.setenv("WEBSEARCH_PROXY", HTTP)
     assert resolve_proxy(SOCKS) == SOCKS
+
+
+# --- the credentials alone are the whole setup ---------------------------------------
+
+
+def test_credentials_alone_turn_the_proxy_on(monkeypatch):
+    """The install promise: put the two NordVPN variables in place and everything is
+    proxied, with no third switch to remember."""
+    monkeypatch.setenv("NORDVPN_USER", "svc_user")
+    monkeypatch.setenv("NORDVPN_PASS", "svc_pass")
+    assert resolve_proxy() == f"socks5h://svc_user:svc_pass@{NORDVPN_DEFAULT_HOST}:1080"
+    assert lock_enabled() is True
+
+
+def test_an_explicit_off_beats_the_credentials(monkeypatch):
+    monkeypatch.setenv("NORDVPN_USER", "svc_user")
+    monkeypatch.setenv("NORDVPN_PASS", "svc_pass")
+    monkeypatch.setenv("WEBSEARCH_PROXY", "off")
+    assert resolve_proxy() is None
+    assert lock_enabled() is False
+
+
+def test_one_credential_is_not_enough(monkeypatch):
+    monkeypatch.setenv("NORDVPN_USER", "svc_user")
+    assert resolve_proxy() is None
+
+
+# --- a configured proxy is its own lock ----------------------------------------------
+
+
+def test_a_configured_proxy_implies_the_lock(monkeypatch):
+    monkeypatch.setenv("WEBSEARCH_PROXY", SOCKS)
+    assert lock_enabled() is True
+
+
+def test_no_proxy_means_no_lock():
+    assert lock_enabled() is False
+
+
+def test_a_broken_proxy_config_locks_rather_than_opening_direct(monkeypatch):
+    """nordvpn with a credential missing must fail closed: the day the configuration
+    breaks is exactly the day a silent direct fallback would leak the address."""
+    monkeypatch.setenv("WEBSEARCH_PROXY", "nordvpn")
+    assert lock_enabled() is True
+
+
+def test_cli_off_overrides_the_implied_lock_but_not_an_explicit_one(monkeypatch):
+    monkeypatch.setenv("WEBSEARCH_PROXY", SOCKS)
+    assert egress_proxy("off") is None  # --proxy off: the human's explicit choice wins
+    monkeypatch.setenv(EGRESS_LOCK_VAR, "on")
+    with pytest.raises(EgressLocked):
+        egress_proxy("off")  # an explicit lock outranks the flag
 
 
 # --- local targets skip the proxy ---------------------------------------------------
