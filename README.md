@@ -4,10 +4,10 @@ Open-source multi-engine web search and content extraction for AI agents. Intern
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![tests](https://img.shields.io/badge/tests-748%20passing-brightgreen.svg)](tests/)
+[![tests](https://img.shields.io/badge/tests-792%20passing-brightgreen.svg)](tests/)
 [![built with uv](https://img.shields.io/badge/built%20with-uv-de5fe9.svg)](https://docs.astral.sh/uv/)
 
-> **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). Available now: keyless search, Markdown extraction, five agent commands, self-hosted SearXNG, and an opt-in egress proxy. These are covered by the test suite. **There is no MCP server**; use the CLI directly or install the skill (see No MCP below). Hard anti-bot tiers and local reranking remain on the roadmap. Pin a version and test it in a sandbox before using it with sensitive data.
+> **Status: early.** First public release 2026-06-22; current version in [`CHANGELOG.md`](CHANGELOG.md). Available now: keyless search, Markdown extraction, five agent commands, self-hosted SearXNG, and a NordVPN egress proxy that two env vars enable and lock. These are covered by the test suite. **There is no MCP server**; use the CLI directly or install the skill (see No MCP below). Hard anti-bot tiers and local reranking remain on the roadmap. Pin a version and test it in a sandbox before using it with sensitive data.
 
 ## What it is
 
@@ -486,7 +486,7 @@ Protected sites usually require paid residential egress (even Firecrawl scores a
 
 Current distribution options include `npx skills add`, a Claude Code plugin and marketplace, and PyPI/uvx. See [`docs/INSTALL.md`](docs/INSTALL.md) for each supported agent.
 
-The opt-in egress proxy (`WEBSEARCH_PROXY`, `--proxy`, NordVPN shorthand) covers every path that leaves the machine, including the self-hosted SearXNG's own engine requests, and `websearch proxy lock` refuses the ones that cannot use it instead of falling back to a direct connection.
+The egress proxy (the NordVPN credentials, `WEBSEARCH_PROXY`, or `--proxy`) covers every path that leaves the machine, including the self-hosted SearXNG's own engine requests, and locks egress while it is configured: a path that cannot use it is refused instead of falling back to a direct connection.
 
 Planned, not built yet:
 
